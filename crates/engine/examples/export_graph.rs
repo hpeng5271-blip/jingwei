@@ -75,5 +75,12 @@ fn main() {
         "图谱：{} 个节点 / {} 条边（导出上限 {}，截断={}）",
         dump["total_nodes"], dump["total_edges"], limit, dump["truncated"]
     );
+    // **解析期的三个数字分开报**——它们的说法完全不同：
+    // 连上了多少 / 有多少拿不准（不猜）/ 有多少是外部的（不归我们管）。
+    // 只报一个"关系总数"的话，看的人分不清"图很全"和"图漏了一半"。
+    println!(
+        "解析：连上 {} 条 · 拿不准 {} 条 · 外部符号 {} 个",
+        rep.resolved, rep.ambiguous, rep.external
+    );
     println!("已写到 {out}（{} KB）", text.len() / 1024);
 }

@@ -73,6 +73,7 @@ pub mod graph {
     pub mod envelope;
     pub mod index;
     pub mod parse;
+    pub mod resolve;
     pub mod store;
 }
 

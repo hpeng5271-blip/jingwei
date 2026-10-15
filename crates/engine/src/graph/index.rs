@@ -41,6 +41,12 @@ pub struct IndexReport {
     pub edges_written: usize,
     /// 这次更新里被标成失效的旧关系条数。
     pub edges_expired: usize,
+    /// **解析期连上的跨文件关系**（含就近遮蔽命中的）。
+    pub resolved: usize,
+    /// 命中多个候选、**不猜**的引用数。
+    pub ambiguous: usize,
+    /// **外部符号**（标准库 / 别的 crate / 宏生成）——不是错误，是不归我们管。
+    pub external: usize,
 }
 
 const MAX_FILES: usize = 2000;
@@ -284,6 +290,20 @@ pub fn index_rust(
         }
     }
 
+    // ── 解析期的两份料 ──────────────────────────────────────────────
+    //
+    // 索引期每个文件独立处理（那是增量的前提），所以那时说不出"这个名字指谁"。
+    // 这一遍把料攒起来，等所有文件都进了库再做全局解析。
+    //
+    // **两份表，用途不同**：
+    // - `file_tables`：这个文件里有哪些名字 → 就近解析（遮蔽规则）
+    // - `all_names`：全图谱有哪些名字 → 跨文件解析（只在唯一命中时连）
+    let mut file_tables: std::collections::BTreeMap<String, crate::graph::resolve::SymbolTable> =
+        std::collections::BTreeMap::new();
+    let mut all_names: crate::graph::resolve::SymbolTable =
+        std::collections::BTreeMap::new();
+    let mut pending_refs: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
+
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
             rep.unreadable += 1;
@@ -344,6 +364,20 @@ pub fn index_rust(
         rep.symbols += symbols;
         let keep: Vec<String> = parsed.symbols.iter().map(|s| s.id.clone()).collect();
         rep.unresolved_refs += parsed.references.len();
+        // 攒料：这个文件的名字表 + 全图谱的名字表 + 它的引用事实
+        {
+            let ft = file_tables.entry(rel.clone()).or_default();
+            for s in &parsed.symbols {
+                ft.entry(s.name.clone()).or_default().push(s.id.clone());
+                all_names
+                    .entry(s.name.clone())
+                    .or_default()
+                    .push(s.id.clone());
+            }
+        }
+        if !parsed.references.is_empty() {
+            pending_refs.push((rel.clone(), parsed.references.clone()));
+        }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
         let calls = parsed.calls.clone();
 
@@ -407,6 +441,30 @@ pub fn index_rust(
         rep.nodes_written += w.nodes;
         rep.edges_written += w.edges;
         rep.edges_expired += w.expired;
+    }
+
+    // ── 阶段 2：全局解析 ────────────────────────────────────────────
+    //
+    // 到这里所有节点都进库了，才有资格回答"这个名字指谁"。
+    // **自下而上**：从每条引用出发去找定义（rust-analyzer 讲的 IDE 做法），
+    // 而不是从头把每个文件再遍历一遍（那是编译器的做法）。
+    if !pending_refs.is_empty() {
+        let empty = crate::graph::resolve::SymbolTable::new();
+        let mut extra: Vec<Edge> = Vec::new();
+        for (rel, refs) in &pending_refs {
+            let ft = file_tables.get(rel).unwrap_or(&empty);
+            let res = crate::graph::resolve::resolve_file(rel, refs, ft, &all_names);
+            rep.resolved += res.resolved.len();
+            rep.ambiguous += res.ambiguous;
+            rep.external += res.external;
+            extra.extend(crate::graph::resolve::to_edges(&res, now));
+        }
+        // 只写边不写节点——节点在上面的循环里已经落库了。
+        // 外键会在这一句把关：指向不存在节点的边进不去。
+        if !extra.is_empty() {
+            let w = store.upsert(&[], &extra)?;
+            rep.edges_written += w.edges;
+        }
     }
 
     Ok(rep)

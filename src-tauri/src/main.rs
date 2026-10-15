@@ -756,25 +756,35 @@ fn create_project(
     }))
 }
 
-/// 启动、跑测试、装依赖——同一套 6 阶段流程，只是措辞不同。
-/// 事件一条条推给前端，前端一条条画。
+/// 启动项目（`Purpose::Run`）。它是 `run_with_stream_purpose` 最常用的那个入口。
 fn run_with_stream(
     app: &AppHandle,
     root: &str,
     run_override: Option<String>,
     extra: Vec<String>,
-    task: bool,
+) -> Result<Value, String> {
+    run_with_stream_purpose(app, root, run_override, extra, launch::Purpose::Run)
+}
+
+/// 启动、跑测试、装依赖、构建——同一套 6 阶段流程，只是**用途**不同。
+/// 事件一条条推给前端，前端一条条画。
+///
+/// **用途必须显式传**：在一门语言里，"装依赖"和"跑测试"是两条不同的命令。
+/// 拿一个布尔量 `task: true/false` 来分，就等于把这两件事混成一类——
+/// Node 项目上会让"补装依赖"那个按钮去跑 test 脚本。
+fn run_with_stream_purpose(
+    app: &AppHandle,
+    root: &str,
+    run_override: Option<String>,
+    extra: Vec<String>,
+    purpose: launch::Purpose,
 ) -> Result<Value, String> {
     let opts = launch::LaunchOptions {
         root: PathBuf::from(root),
         run_override,
         extra_args: extra,
         timeout: Duration::from_secs(30),
-        purpose: if task {
-            launch::Purpose::Task
-        } else {
-            launch::Purpose::Run
-        },
+        purpose,
     };
     let handle = app.clone();
     // 顺手把过程录下来：闭包借用它，跑完再取出来写进 runs.jsonl
@@ -792,7 +802,7 @@ fn run_with_stream(
 
 #[tauri::command]
 async fn launch_project(app: AppHandle, root: String, extra: Vec<String>) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || run_with_stream(&app, &root, None, extra, false))
+    tauri::async_runtime::spawn_blocking(move || run_with_stream(&app, &root, None, extra))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -811,13 +821,29 @@ async fn run_task(app: AppHandle, root: String, task: String) -> Result<Value, S
             "run" => cmds.run,
             _ => cmds.install,
         };
-        let cmd = cmd.ok_or_else(|| {
-            format!(
-                "契约里没声明 {} 命令。在 env.contract.json 的 commands 里补一条吧",
-                task
-            )
-        })?;
-        run_with_stream(&app, &root, Some(cmd), Vec::new(), true)
+        // **契约没写、但这是个 Node 项目**：交给 `launch` 按 package.json 的
+        // scripts 去挑（dev / build / test / lint…）。在这里就报"契约里没声明"
+        // 等于告诉一个 Vue 项目"你缺个契约"，而它压根不需要契约。
+        let node_project = jingwei_engine::web::is_node_project(Path::new(&root));
+        let cmd = match cmd {
+            Some(c) => Some(c),
+            None if node_project => None,
+            None => {
+                return Err(format!(
+                    "契约里没声明 {} 命令。在 env.contract.json 的 commands 里补一条吧",
+                    task
+                ))
+            }
+        };
+        // 用途跟着传下去：Node 项目的 install / build / test 各自落到
+        // 包管理器的 install 子命令、`run build`、或 `run test`。
+        let purpose = match task.as_str() {
+            "run" => launch::Purpose::Run,
+            "install" => launch::Purpose::Install,
+            "build" => launch::Purpose::Build,
+            _ => launch::Purpose::Task,
+        };
+        run_with_stream_purpose(&app, &root, cmd, Vec::new(), purpose)
     })
     .await
     .map_err(|e| e.to_string())?

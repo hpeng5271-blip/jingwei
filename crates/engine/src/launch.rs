@@ -1,11 +1,24 @@
 //! 启动：6 阶段 + 流式输出 + 就绪判定。
 //! 事件走回调（CLI 打印 / Tauri 推前端），逻辑层不打印任何东西。
+//!
+//! ## 六个阶段里，只有前四个跟语言有关
+//!
+//! | 阶段 | 谁来决定 |
+//! |---|---|
+//! | 1–4 环境 / 契约 / 依赖 / 运行时 | **按项目语言分家**（`python.rs` / `node.rs`） |
+//! | 5 拉起进程、6 等待就绪 | 完全一样——进程怎么起、怎么判「起来了」，跟语言没关系 |
+//!
+//! 这条边界是拿一个真事故换来的：拿 Python 那条路去开一个 Vue 项目，
+//! 用户看到的第一句话是「没有可用的 Python，无法启动」——**答非所问比不回答更糟**，
+//! 它会把人引到错的方向上。
+
+mod node;
+mod python;
 
 use crate::understand::contract::{Contract, ReadyWhen};
 use crate::state::runs;
 use crate::facts::now_iso;
-use crate::detect::probe;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -58,8 +71,15 @@ pub enum Event {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Purpose {
     Run,
-    /// 装依赖、跑测试这类「跑完就结束」的动作，进度措辞不一样
+    /// 跑一个「跑完就结束」的任务（测试这类），命令由调用方给（契约或 scripts）。
     Task,
+    /// 装依赖。**单独一类是因为它不该被当成"跑个脚本"**：
+    /// `pnpm install` 是包管理器自己的子命令，不是 `package.json` 里的 scripts。
+    /// 混进 `Task` 的话，「补装依赖」这个按钮会去跑 test 脚本——
+    /// 用户点的是安装，跑的是测试，这种错最难被发现。
+    Install,
+    /// 构建：`{包管理器} run build`。
+    Build,
 }
 
 pub struct LaunchOptions {
@@ -68,6 +88,31 @@ pub struct LaunchOptions {
     pub extra_args: Vec<String>,
     pub timeout: Duration,
     pub purpose: Purpose,
+}
+
+/// **前四个阶段的结论**——两种语言各算一份，后面那两阶段只认这个。
+///
+/// 把这些东西收成一个结构，是为了让「怎么起进程」只有一处实现：
+/// 有了它，`Command::new(…)` 那一串、Job 收进程树、输出读取线程、就绪判定、
+/// 内存采样、运行记录，全都不用为第二种语言再写一遍。
+pub(crate) struct Prepared {
+    /// 真正要执行的程序（Python 那条路是解释器绝对路径，Node 那条路是包管理器）。
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    /// 只属于这门语言的环境变量。
+    pub env: Vec<(String, String)>,
+    /// 人看得懂的那条命令（记进运行记录，也用来和上一次比）。
+    pub run_cmd: String,
+    /// **到点了还没判出就绪、但进程还活着**——这算失败还是「还说不准」。
+    ///
+    /// 脚本项目跑不完通常是卡住了（`Fail`）；常驻的前端服务本来就不退（`Note`）。
+    /// 这里弄反的后果很具体：开发服务器会一直显示「启动失败」，
+    /// 而它其实好好地跑着——用户会去查一个不存在的故障。
+    pub alive_unready: StageStatus,
+    /// 要不要在输出里盯监听地址。只有「跑起来之后一直在那儿」的服务才需要。
+    pub url_watch: bool,
+    /// 这次「什么算起来了」是怎么定的，一句话，给人看。
+    pub ready_rule: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,141 +153,34 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
             "root={} cmd={} task={}",
             root.display(),
             opts.run_override.clone().unwrap_or_else(|| "（按契约）".into()),
-            opts.purpose == Purpose::Task
+            opts.purpose == Purpose::Run
         ),
     );
 
-    // ---- 1 检查运行环境 ----
-    let t = Instant::now();
-    let picked = probe::first_working(&root, contract.as_ref(), 5);
-    let py_path = picked.as_ref().map(|(p, _)| p.clone());
-    let pyf = picked.map(|(_, f)| f).unwrap_or_default();
-    // 契约明确绑了一个解释器，而它不在了——工具必须说出来。
-    // 悄悄换一个更省事，但那等于把用户写下的决定吞掉：
-    // 他以为自己在用 A，实际跑的是 B，这种误会最难查。
-    let bound_gone = contract
-        .as_ref()
-        .and_then(|c| c.runtime.python_exe.as_ref())
-        .filter(|b| !Path::new(b).is_file())
-        .cloned();
-    let isolated = pyf.isolated || !pyf.pth_files.is_empty();
-    let (s1, d1) = if !pyf.found {
-        (StageStatus::Fail, "没找到可用的 Python 解释器".to_string())
-    } else if let Some(gone) = &bound_gone {
-        (
-            StageStatus::Note,
-            format!(
-                "契约绑定的解释器不在了（{}），临时改用 {}",
-                gone, pyf.exe
-            ),
-        )
-    } else if isolated {
-        (
-            StageStatus::Note,
-            format!("Python {} · {} · 嵌入式（隔离模式）", pyf.version, pyf.exe),
-        )
+    // ---- 前四阶段：按项目语言准备 ----
+    //
+    // **以「这个项目是什么」为准，不以「契约里写了什么」为准。**
+    // 契约只决定「跑哪条命令」（那是用户写下的东西，优先级最高）；
+    // 但一个 Node 项目要检查的是 node 与包管理器，不是解释器——
+    // 拿错那一边去检查，用户看到的第一句话会与他的项目毫无关系。
+    let prep = if crate::detect::web::is_node_project(&root) {
+        node::prepare(&root, opts, &contract, &contract_err, cb)?
     } else {
-        (
-            StageStatus::Ok,
-            format!("Python {} · {}", pyf.version, pyf.exe),
-        )
+        python::prepare(&root, opts, &contract, &contract_err, cb)?
     };
-    cb(Event::Stage {
-        index: 1,
-        total: TOTAL_STAGES,
-        title: "检查运行环境".into(),
-        status: s1,
-        detail: d1,
-        ms: t.elapsed().as_millis(),
-    });
+    let run_cmd = prep.run_cmd.clone();
 
-    // ---- 2 校验项目契约 ----
     let t = Instant::now();
-    let (s2, d2) = match (&contract, &contract_err) {
-        (Some(c), _) => (
-            StageStatus::Ok,
-            format!(
-                "{} · run: {}",
-                c.name.clone().unwrap_or_else(|| "（未命名）".into()),
-                c.run_command().unwrap_or("（未声明）")
-            ),
-        ),
-        (None, Some(e)) => (StageStatus::Fail, format!("解析失败：{}", e)),
-        (None, None) => (
-            StageStatus::Note,
-            "没有 env.contract.json（用 jingwei init 生成）".into(),
-        ),
-    };
-    cb(Event::Stage {
-        index: 2,
-        total: TOTAL_STAGES,
-        title: "校验项目契约".into(),
-        status: s2,
-        detail: d2,
-        ms: t.elapsed().as_millis(),
-    });
-
-    // ---- 3 解析依赖声明 ----
-    let t = Instant::now();
-    let wanted = Contract::wanted_deps(&root, contract.as_ref());
-    let installed_norm: Vec<String> = pyf
-        .installed
-        .iter()
-        .map(|s| crate::understand::contract::norm_name(s.split("==").next().unwrap_or("")))
-        .collect();
-    let missing: Vec<String> = wanted
-        .iter()
-        .filter(|d| !installed_norm.contains(&crate::understand::contract::norm_name(d)))
-        .cloned()
-        .collect();
-    cb(Event::Stage {
-        index: 3,
-        total: TOTAL_STAGES,
-        title: format!("解析依赖声明（{} 项）", wanted.len()),
-        status: if missing.is_empty() {
-            StageStatus::Ok
-        } else {
-            StageStatus::Note
-        },
-        detail: if missing.is_empty() {
-            "都已安装".into()
-        } else {
-            format!("缺 {} 项：{}", missing.len(), missing.join(", "))
-        },
-        ms: t.elapsed().as_millis(),
-    });
-
-    // ---- 4 准备解释器 ----
-    let t = Instant::now();
-    let exe = py_path.clone().ok_or_else(|| anyhow!("没有可用的 Python，无法启动"))?;
-    cb(Event::Stage {
-        index: 4,
-        total: TOTAL_STAGES,
-        title: "准备解释器".into(),
-        status: StageStatus::Ok,
-        detail: format!("{}（绝对路径，不需要 activate）", exe.display()),
-        ms: t.elapsed().as_millis(),
-    });
-
-    // ---- 5 启动进程 ----
-    let run_cmd = opts
-        .run_override
-        .clone()
-        .or_else(|| contract.as_ref().and_then(|c| c.run_command().map(String::from)))
-        .ok_or_else(|| anyhow!("契约里没有声明 run 命令（用 jingwei init 生成一份）"))?;
-    let (program, args) = split_command(&run_cmd, &exe);
-    let t = Instant::now();
-    let mut cmd = Command::new(&program);
-    cmd.args(&args)
+    let mut cmd = Command::new(&prep.program);
+    cmd.args(&prep.args)
         .args(&opts.extra_args)
         .current_dir(&root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONPATH", root.to_string_lossy().to_string());
+        .stderr(Stdio::piped());
+    for (k, v) in &prep.env {
+        cmd.env(k, v);
+    }
     // 桌面外壳拉起 python 时也会弹一个黑框；工具自己负责跑它，不需要窗口
     crate::util::winutil::hide_console(&mut cmd);
     let mut child = cmd.spawn().with_context(|| format!("拉起失败：{}", run_cmd))?;
@@ -283,13 +221,13 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     cb(Event::Stage {
         index: 5,
         total: TOTAL_STAGES,
-        title: if opts.purpose == Purpose::Task {
-            "执行命令".into()
-        } else {
+        title: if opts.purpose == Purpose::Run {
             "启动进程".into()
+        } else {
+            "执行命令".into()
         },
         status: StageStatus::Ok,
-        detail: format!("{} {}", program.display(), args.join(" ")),
+        detail: format!("{} {}", prep.program.display(), prep.args.join(" ")),
         ms: t.elapsed().as_millis(),
     });
 
@@ -316,6 +254,9 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     let t = Instant::now();
     let mut lines = 0usize;
     let mut ready_how: Option<String> = None;
+    // 常驻服务（`pnpm dev` 这类）在输出里报出来的地址。**看到地址不等于起来了**：
+    // 要真的连上那个端口才算——见下面那处 `TcpStream::connect`。
+    let mut seen_addr: Option<(String, u16)> = None;
     let mut exit_code: Option<i32> = None;
 
     // 留一截最近的输出（只要尾部）：进程挂了之后，症结就写在这一截里。
@@ -364,6 +305,9 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
                         }
                     }
                 }
+                if prep.url_watch && seen_addr.is_none() {
+                    seen_addr = serving_url(&text);
+                }
                 emit(cb, Event::Line { source: src, text });
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -377,6 +321,9 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
                         ready_how = Some(format!("输出里出现「{}」", m));
                     }
                 }
+            }
+            if prep.url_watch && seen_addr.is_none() {
+                seen_addr = serving_url(&text);
             }
             emit(cb, Event::Line { source: src, text });
         }
@@ -419,6 +366,18 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
                 }
             }
         }
+        // 常驻服务那条路：输出里报了地址**还不够**，端口真的通了才算。
+        //
+        // 为什么加这一道：`127.0.0.1:3000` 这种字样也会出现在**连不上**的报错里
+        // （`connect ECONNREFUSED 127.0.0.1:3000`）。只按「出现过地址」判，
+        // 那种失败会被当成启动成功——而把失败报成成功，比报成失败糟得多。
+        if ready_how.is_none() && prep.url_watch {
+            if let Some((label, p)) = seen_addr.clone() {
+                if std::net::TcpStream::connect(("127.0.0.1", p)).is_ok() {
+                    ready_how = Some(format!("端口 {p} 已监听（输出里出现过 {label}）"));
+                }
+            }
+        }
 
         if let Some(st) = child.try_wait()? {
             exit_code = Some(st.code().unwrap_or(-1));
@@ -453,17 +412,34 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         (Some(how), _) => (
             StageStatus::Ok,
             if default_ready {
-                format!("已就绪 · {}（契约没写 ready_when，按默认判定）", how)
+                format!("已就绪 · {}（判定依据：{}）", how, prep.ready_rule)
             } else {
                 format!("已就绪 · {}", how)
             },
         ),
+        // **进程还活着、只是没判出就绪**——这一格的措辞按语言不同：
+        // 脚本跑不完通常是卡住了（Fail）；前端 dev server 本来就不退，
+        // 这时候说「失败」会让人去查一个不存在的故障（Note）。
         (None, None) => (
-            StageStatus::Fail,
-            format!(
-                "{} 秒内没等到就绪条件（进程还在跑，输出继续跟着；契约里的 ready_when 要写清楚「什么算成功」）",
-                timeout_s
-            ),
+            prep.alive_unready,
+            if prep.alive_unready == StageStatus::Note {
+                // 两种处境说法完全不同：**看到了地址、但那个端口连不上**
+                // （多半还在编译，或者它把服务绑到了别的地址上）、
+                // 以及**压根没报地址**。混成一句会把人往错的方向引。
+                match &seen_addr {
+                    Some((label, p)) => format!(
+                        "输出里出现过 {label}，但 {p} 这个端口连不上——可能还在编译，也可能它绑到了别的地址。进程还在跑，输出继续跟着"
+                    ),
+                    None => format!(
+                        "进程还在跑，但 {timeout_s} 秒内没在输出里看到监听地址——它可能已经起来了，也可能还在编译。输出继续跟着，你可以直接开浏览器试"
+                    ),
+                }
+            } else {
+                format!(
+                    "{} 秒内没等到就绪条件（进程还在跑，输出继续跟着；契约里的 ready_when 要写清楚「什么算成功」）",
+                    timeout_s
+                )
+            },
         ),
         // 非零退出码是硬失败，不该用「注意」轻轻带过
         (None, Some(c)) if c != 0 => (
@@ -478,10 +454,10 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     cb(Event::Stage {
         index: 6,
         total: TOTAL_STAGES,
-        title: if opts.purpose == Purpose::Task {
-            "等待完成".into()
-        } else {
+        title: if opts.purpose == Purpose::Run {
             "等待就绪".into()
+        } else {
+            "等待完成".into()
         },
         status: s6,
         detail: d6,
@@ -585,10 +561,10 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         &root,
         &crate::state::runs::RunRecord {
             at: now_iso(),
-            kind: if opts.purpose == Purpose::Task {
-                "task".into()
-            } else {
+            kind: if opts.purpose == Purpose::Run {
                 "run".into()
+            } else {
+                "task".into()
             },
             command: run_cmd.clone(),
             exit_code: code,
@@ -618,6 +594,72 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
 fn quoted_after<'a>(tail: &'a VecDeque<String>, needle: &str) -> Option<&'a str> {
     let line = tail.iter().find(|l| l.contains(needle))?;
     line.split('\'').nth(1).filter(|s| !s.is_empty())
+}
+
+/// 从一行输出里认出「它说自己在哪个地址上服务」。
+///
+/// ## 为什么不按框架名单去猜
+///
+/// 猜的话就得维护一张表：Vite 打 `Local: http://localhost:5173/`、
+/// Next 打 `ready - started server on 0.0.0.0:3000`、`python -m http.server`
+/// 打 `Serving HTTP on 0.0.0.0 port 8000`。**表里没有的那个**——用户自己写的服务、
+/// 刚出的新框架、改了名的老框架——就会被判成「没起来」。
+///
+/// 换成「这一行里有没有 `host:port`」：**这是进程自己说出来的话**，
+/// 跟它叫什么名字无关。而「看到地址」与「真的通了」是两件事，
+/// 所以调用方还会去连一次那个端口（见等待就绪那一段）。
+fn serving_url(line: &str) -> Option<(String, u16)> {
+    // 先认"一看就是本机"的那几种写法。
+    const HOSTS: [&str; 4] = ["localhost:", "127.0.0.1:", "0.0.0.0:", "[::1]:"];
+    for h in HOSTS {
+        let Some(i) = line.find(h) else { continue };
+        let tail = &line[i + h.len()..];
+        let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            continue;
+        }
+        // 端口 0 不是能连的东西；超出 65535 的也不是端口。
+        let Ok(p) = digits.parse::<u16>() else { continue };
+        if p == 0 {
+            continue;
+        }
+        return Some((format!("{h}{p}"), p));
+    }
+    // 再认"带协议头的 IPv4 地址"。
+    //
+    // 为什么不能只认上面那几种：Vite 把地址分两行打，`Local` 是 localhost，
+    // `Network` 是局域网地址；而有些框架**只打网络那一行**。
+    // 要求它必须带 `http://` 或 `https://` 是为了别把普通字符串（版本号、
+    // 时间戳、`a.b.c.d:e` 这种）当成服务地址——那个代价是又一条假就绪。
+    ipv4_url(line)
+}
+
+/// 从 `http://192.168.1.5:5173/` 这种写法里取出 `(192.168.1.5:5173, 5173)`。
+fn ipv4_url(line: &str) -> Option<(String, u16)> {
+    for scheme in ["http://", "https://"] {
+        let Some(i) = line.find(scheme) else { continue };
+        let rest = &line[i + scheme.len()..];
+        let host: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        let parts: Vec<&str> = host.split('.').collect();
+        // 四段、每段都在 0..=255 之内，才是一个真的 IPv4
+        if parts.len() != 4 || parts.iter().any(|s| s.parse::<u16>().map(|n| n > 255) != Ok(false)) {
+            continue;
+        }
+        let after = &rest[host.len()..];
+        let Some(port_part) = after.strip_prefix(':') else {
+            continue;
+        };
+        let digits: String = port_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(p) = digits.parse::<u16>() else { continue };
+        if p == 0 {
+            continue;
+        }
+        return Some((format!("{host}:{p}"), p));
+    }
+    None
 }
 
 fn shadowed_by_local_file(name: &str, root: &Path) -> Diagnosis {
@@ -805,6 +847,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// 三种框架三种说法，抓着同一件事：**它说自己在哪儿服务**。
+    ///
+    /// 这张表就是"不按框架名单猜"的证据：Vite、Next、`http.server` 的措辞
+    /// 完全不同，但都落在同一个形状上（`host:port`）。
+    #[test]
+    fn 各家框架报出来的监听地址都认() {
+        for (line, port) in [
+            ("  ➜  Local:   http://localhost:5173/", 5173u16),
+            (
+                "ready - started server on 0.0.0.0:3000, url: http://localhost:3000",
+                3000,
+            ),
+            (
+                "Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...",
+                8000,
+            ),
+            ("  - Network: http://192.168.1.5:5173/", 5173),
+        ] {
+            assert_eq!(serving_url(line).map(|(_, p)| p), Some(port), "{line}");
+        }
+    }
+
+    /// **连不上的报错里也有地址**——它必须被认出来交给下一步去连，
+    /// 而不是被当成「已经起来了」。认地址、连端口是两道，缺一不可。
+    #[test]
+    fn 连不上的报错里那个地址也认得出来() {
+        let line = "Error: connect ECONNREFUSED 127.0.0.1:3000";
+        assert_eq!(
+            serving_url(line),
+            Some(("127.0.0.1:3000".to_string(), 3000)),
+            "认出来之后由调用方去连——连不上就不算就绪"
+        );
+    }
+
+    #[test]
+    fn 没有地址的行不会瞎认() {
+        assert!(serving_url("vite v5.2.0 building for production...").is_none());
+        assert!(serving_url("localhost 是不可用的").is_none(), "没有端口号");
+        assert!(
+            serving_url("connecting to localhost:0").is_none(),
+            "端口 0 不是端口"
+        );
+        assert!(
+            serving_url("see http://localhost:99999/").is_none(),
+            "超出 65535"
+        );
     }
 
     #[test]

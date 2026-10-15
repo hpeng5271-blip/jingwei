@@ -254,13 +254,24 @@ pub(crate) fn guess_run(root: &Path) -> Option<String> {
 // ------------------------------------------------------------------ 任务 / new / env / notes
 
 /// 装依赖、跑测试这类「跑完就结束」的动作：同一套 6 阶段进度，措辞换掉。
-pub(crate) fn run_task(root: &Path, command: String, extra: Vec<String>) -> i32 {
+/// 跑一个"任务"（test / install 这类）。
+///
+/// `command` 是 `Option`：契约里没写这条命令时，**别在这里就判死**——
+/// Node 项目的命令来自 `package.json` 的 scripts，那是下一层（`launch`）的活儿。
+/// 在这一层拦住的话，一个正常的 Vue 项目会收到"契约里没声明 test 命令"，
+/// 而它压根不该有契约。
+pub(crate) fn run_task(
+    root: &Path,
+    command: Option<String>,
+    extra: Vec<String>,
+    purpose: launch::Purpose,
+) -> i32 {
     let opts = launch::LaunchOptions {
         root: root.to_path_buf(),
-        run_override: Some(command),
+        run_override: command,
         extra_args: extra,
         timeout: Duration::from_secs(30),
-        purpose: launch::Purpose::Task,
+        purpose,
     };
     println!();
     let mut cb = |ev: launch::Event| match ev {
@@ -346,7 +357,11 @@ pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -
         "install" => cmds.install.clone(),
         _ => None,
     });
-    let Some(command) = command else {
+    // **Node 项目不走这一段**：它的 test / dev / build 都写在 package.json 的
+    // scripts 里，由 `launch` 那层去挑。在这里报"契约里没声明"是答非所问——
+    // 一个 Vue 项目本来就不该有 env.contract.json。
+    let node_project = jingwei_engine::web::is_node_project(root);
+    if command.is_none() && !node_project {
         println!();
         println!("  {} 契约里没有声明 {} 命令。", c(YELLOW, "!"), which);
         println!(
@@ -358,6 +373,13 @@ pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -
         );
         println!();
         return 1;
+    }
+    // 用途要传下去：装依赖和跑测试是**两件不同的事**，
+    // 在 Node 项目上它们分别落到 `{包管理器} install` 和 `{包管理器} run test`。
+    let purpose = match which {
+        "install" => launch::Purpose::Install,
+        "build" => launch::Purpose::Build,
+        _ => launch::Purpose::Task,
     };
-    run_task(root, command, Vec::new())
+    run_task(root, command, Vec::new(), purpose)
 }

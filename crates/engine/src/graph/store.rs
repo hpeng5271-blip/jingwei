@@ -202,6 +202,66 @@ impl Store {
         Ok(out)
     }
 
+    /// 把整张图导出来（给可视化用，也是子图查询的基础）。
+    ///
+    /// **为什么天生带 `limit`**：几千个节点全导出去，序列化 + 传输本身就是瓶颈
+    /// （这正是汇报过的"IPC 传大 JSON"那条）。所以这个接口自带闸门，
+    /// 超了就截断——并且**如实说截断了**（`truncated: true`）：
+    /// 界面上画不全时，必须能区分"只有这么多"和"被截了"。
+    pub fn dump(&self, limit: usize) -> Result<serde_json::Value> {
+        let mut nodes = Vec::new();
+        {
+            let mut st = self
+                .conn
+                .prepare_cached("SELECT id, kind, name, file_path, line FROM nodes LIMIT ?1")
+                .context("准备节点导出失败")?;
+            let mut rows = st.query(params![limit as i64]).context("导出节点失败")?;
+            while let Some(r) = rows.next().context("读节点行失败")? {
+                nodes.push(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "kind": r.get::<_, String>(1)?,
+                    "name": r.get::<_, String>(2)?,
+                    "file": r.get::<_, Option<String>>(3)?,
+                    "line": r.get::<_, Option<i64>>(4)?,
+                }));
+            }
+        }
+        let total_nodes: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM nodes", [], |r| r.get(0))
+            .context("数节点失败")?;
+
+        let mut edges = Vec::new();
+        {
+            let mut st = self
+                .conn
+                .prepare_cached("SELECT src, dst, kind FROM live_edges LIMIT ?1")
+                .context("准备关系导出失败")?;
+            let mut rows = st
+                .query(params![(limit.saturating_mul(4)) as i64])
+                .context("导出关系失败")?;
+            while let Some(r) = rows.next().context("读关系行失败")? {
+                edges.push(serde_json::json!({
+                    "src": r.get::<_, String>(0)?,
+                    "dst": r.get::<_, String>(1)?,
+                    "kind": r.get::<_, String>(2)?,
+                }));
+            }
+        }
+        let total_edges: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM live_edges", [], |r| r.get(0))
+            .context("数关系失败")?;
+
+        Ok(serde_json::json!({
+            "nodes": nodes,
+            "edges": edges,
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "truncated": (nodes.len() as i64) < total_nodes || (edges.len() as i64) < total_edges,
+        }))
+    }
+
     /// 库里有多少节点、多少条**有效**边。界面上"这个项目索引了多少东西"就靠它。
     pub fn counts(&self) -> Result<(i64, i64)> {
         let n: i64 = self

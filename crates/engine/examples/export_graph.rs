@@ -80,7 +80,18 @@ fn main() {
     // 只报一个"关系总数"的话，看的人分不清"图很全"和"图漏了一半"。
     println!(
         "解析：连上 {} 条 · 拿不准 {} 条 · 外部符号 {} 个",
-        rep.resolved, rep.ambiguous, rep.external
+        rep.resolved,
+        rep.ambiguous.len(),
+        rep.external
     );
+    // **拿不准的那几个名字要打出来**——不然"46 条"这句话没法查。
+    // （这条是这一轮的教训：计数解释不了任何事，事实才解释得了。）
+    if !rep.ambiguous.is_empty() {
+        let mut names = rep.ambiguous.clone();
+        names.sort();
+        names.dedup();
+        let head: Vec<String> = names.iter().take(12).cloned().collect();
+        println!("  拿不准的名字（去重后 {} 个）：{}", names.len(), head.join("、"));
+    }
     println!("已写到 {out}（{} KB）", text.len() / 1024);
 }

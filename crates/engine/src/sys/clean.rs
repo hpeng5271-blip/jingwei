@@ -104,7 +104,7 @@ fn measure_candidates() -> BTreeMap<String, (u64, usize)> {
         .collect();
     // 关键：量的是 dirs，配对的也必须是 dirs。
     // 先按未过滤的候选列表建 key 会错位，把 A 目录的体积安到 B 头上。
-    let measured = crate::parallel::map(dirs.clone(), |p| dir_stat(&p));
+    let measured = crate::util::parallel::map(dirs.clone(), |p| dir_stat(&p));
     let mut map = BTreeMap::new();
     for (p, m) in dirs.into_iter().zip(measured) {
         map.insert(p.to_string_lossy().to_lowercase(), m);
@@ -195,7 +195,7 @@ fn scan_project(root: &Path, out: &mut Vec<Item>) {
     for _ in walker {}
 
     // 每个命中目录可能藏着几万个文件（尤其是 build/ 和 dist/），并行量
-    let sized = crate::parallel::map(hits, |p| {
+    let sized = crate::util::parallel::map(hits, |p| {
         let m = dir_stat(&p);
         (p, m)
     });
@@ -878,7 +878,7 @@ fn scan_temp(out: &mut Vec<Item>) {
             stale.push(p);
         }
     }
-    for (p, (b, f)) in crate::parallel::map(stale, |p| {
+    for (p, (b, f)) in crate::util::parallel::map(stale, |p| {
         let m = if p.is_dir() {
             dir_stat(&p)
         } else {
@@ -1129,7 +1129,7 @@ pub fn is_locked(path: &Path) -> bool {
             // 必须改回来：这一步失败的话，用户目录会顶着 `.jingwei-probe` 这个名字
             // 留在原地，而界面上什么都不会说。这不是"清理时的边角"，是改了用户的东西。
             if let Err(e) = std::fs::rename(&probe, path) {
-                crate::dlog::e(
+                crate::util::dlog::e(
                     "9003",
                     &format!(
                         "占用探测后目录名没还原：{} 仍叫 {}（{e}）——请手工改回",
@@ -1256,7 +1256,7 @@ pub fn delete(items: &[Item], permanent: bool) -> DeleteReport {
     if batch.is_empty() {
         return rep;
     }
-    crate::dlog::i(
+    crate::util::dlog::i(
         "3001",
         &format!("targets={} permanent={}", batch.len(), permanent),
     );

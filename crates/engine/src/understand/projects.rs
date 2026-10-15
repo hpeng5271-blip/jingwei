@@ -2,8 +2,8 @@
 //!
 //! 新手最需要被省掉的一步就是「先写一份配置」。所以这里反着来：
 //! 先扫，再猜，猜出来的每一条都说清是从哪儿看出来的，最后交给人改。
-use crate::contract::{Contract, ReadyWhen};
-use crate::lang::Lang;
+use crate::understand::contract::{Contract, ReadyWhen};
+use crate::detect::lang::Lang;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -159,7 +159,7 @@ fn walk_from(root: &Path, dir: &Path, level: usize, max: usize, now: u64, out: &
         let child = e.path();
         // 网络盘 / 联接点 / 超长路径：进去之前先问一句。
         // 这三样的共同症状都是"卡住不动"，而用户看不出为什么。
-        if crate::scan::should_skip(&child, root).is_some() {
+        if crate::util::scan::should_skip(&child, root).is_some() {
             continue;
         }
         walk_from(root, &child, level + 1, max, now, out);
@@ -184,7 +184,7 @@ fn describe(dir: &Path, now: u64) -> Found {
             .unwrap_or_else(|| dir.to_string_lossy().to_string()),
         has_git: dir.join(".git").is_dir(),
         has_contract: dir.join("env.contract.json").is_file(),
-        kinds: crate::lang::detect_all(dir)
+        kinds: crate::detect::lang::detect_all(dir)
             .iter()
             .map(|l| l.name().to_string())
             .collect(),
@@ -260,7 +260,7 @@ pub fn draft(root: &Path) -> (Contract, Vec<String>) {
         }
         // Python 的"编译"= 语法检查 + 字节码，不出产物，所以用 compileall 当构建位
         c.commands.build = Some("python -m compileall -q .".into());
-        let venvs = crate::probe::scan_venvs(root);
+        let venvs = crate::detect::probe::scan_venvs(root);
         if let Some(v) = venvs.first() {
             let exe = Path::new(v).join("Scripts").join("python.exe");
             let exe_unix = Path::new(v).join("bin").join("python");

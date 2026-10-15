@@ -7,7 +7,7 @@
 //! vcpkg、Conan 或者源码树，我们没有可靠办法知道它装没装；
 //! 那就显示「无法确认」，绝不报成「未安装」。
 
-use crate::lang::Lang;
+use crate::detect::lang::Lang;
 use std::path::Path;
 
 /// 一条依赖边：谁把谁捎带进来了。
@@ -92,7 +92,7 @@ pub fn rust_tree(root: &Path) -> (Vec<TreeEdge>, usize) {
 pub fn collect(
     root: &Path,
     langs: &[Lang],
-    contract: Option<&crate::contract::Contract>,
+    contract: Option<&crate::understand::contract::Contract>,
     py_installed: &[String],
 ) -> (Vec<crate::facts::DepDetail>, std::collections::BTreeMap<String, bool>) {
     let mut decls = declared_all(root, langs);
@@ -382,7 +382,7 @@ fn cpp_decls(root: &Path) -> Vec<Decl> {
 
 // ── Python：requirements.txt（由 contract 那侧统一解析）────
 fn python_decls(root: &Path) -> Vec<Decl> {
-    crate::contract::Contract::declared_deps_spec(root)
+    crate::understand::contract::Contract::declared_deps_spec(root)
         .into_iter()
         .map(|(name, want)| Decl { name, want, from: "requirements.txt".into(), lang: Lang::Python, kind: DepKind::Runtime })
         .collect()
@@ -448,12 +448,12 @@ pub fn installed(root: &Path, lang: Lang, name: &str, py_installed: &[String]) -
         }
         Lang::Cpp => Verdict::Unknown,
         _ => {
-            let norm = crate::contract::norm_name(name);
+            let norm = crate::understand::contract::norm_name(name);
             py_installed
                 .iter()
                 .find_map(|s| {
                     let (n, v) = s.split_once("==")?;
-                    if crate::contract::norm_name(n) == norm {
+                    if crate::understand::contract::norm_name(n) == norm {
                         Some(v.trim().to_string())
                     } else {
                         None

@@ -45,7 +45,12 @@ pub struct Resolution {
     /// 确定的关系：`(调用者 id, 被调者 id)`。
     pub resolved: Vec<(String, String)>,
     /// 命中多个候选——**不猜**。
-    pub ambiguous: usize,
+    ///
+    /// 记的是**名字本身**，不是个数。第一版记了个计数，
+    /// 结果"46 条拿不准"这句话我一句都解释不了：**不知道该去看什么**。
+    /// 记下名字，才有得查——这是这个项目反复学到的那条：
+    /// **事实比计数有用**。
+    pub ambiguous: Vec<String>,
     /// 一个候选都没有：**外部符号**（标准库、别的 crate、宏生成的）。
     pub external: usize,
     /// 压根没有调用者的（模块级引用），单独算一类——
@@ -53,12 +58,27 @@ pub struct Resolution {
     pub module_level: usize,
 }
 
-/// 全局符号表：名字 → 所有同名符号的 id。
+/// 符号表里的一条：id 加上它属于**哪个命名空间**。
+///
+/// 为什么必须带这个：《Rust Reference》说"名字被分进不同的命名空间，
+/// 让不同命名空间里的实体可以同名而不冲突"。所以 `foo()` 这个**调用**
+/// 只该在**值命名空间**里解析——同名的 struct / trait / mod 根本不该进候选。
+///
+/// 少了这一条，46 条"拿不准"里有相当一部分是**白白拿不准**的
+/// （不是真的分不清，是我们压根没看名字的种类）。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SymbolEntry {
+    pub id: String,
+    /// `value` / `type` / `module` / `other`（见 `parse::symbol_class`）。
+    pub class: String,
+}
+
+/// 全局符号表：名字 → 所有同名符号。
 ///
 /// **为什么是"所有"而不是"一个"**：同名符号在不同文件里很常见
 /// （`new`、`from_str`、`main`）。只留一个的话，等于随机挑一个连上去——
 /// 那就是在猜。留着全部，才有机会说"这个拿不准"。
-pub type SymbolTable = BTreeMap<String, Vec<String>>;
+pub type SymbolTable = BTreeMap<String, Vec<SymbolEntry>>;
 
 /// 把一个文件里的引用解析成关系。
 ///
@@ -68,10 +88,27 @@ pub fn resolve_file(
     rel: &str,
     refs: &[RefFact],
     own_file: &SymbolTable,
+    imports: &[super::parse::ImportFact],
     all: &SymbolTable,
 ) -> Resolution {
     let mut out = Resolution::default();
     for r in refs {
+        // ⓪ **先看这个文件自己写了什么 `use`**——那是它自己说出来的话，
+        //    比任何推测都准：`use crate::util::winutil::which;` 就等于告诉了我们
+        //    "本文件里的 `which` 是那个"。
+        //
+        //    这一步是这一轮唯一的新东西，**不再往细里打磨**——
+        //    剩下的（`super::`、重导出、可见性）留给整体联调时一起收拾。
+        if let Some(hit) = through_import(r, imports, all) {
+            if let Some(caller) = r.scope.last() {
+                if &hit != caller {
+                    out.resolved.push((caller.clone(), hit));
+                }
+            } else {
+                out.module_level += 1;
+            }
+            continue;
+        }
         // ① 先在自己这个文件里找：沿作用域链**从内往外**找第一个匹配。
         //    这就是遮蔽规则——内层同名遮蔽外层。（stack-graphs 用一个符号栈
         //    在路径搜索时保证同一件事，我们这里退化成"从栈顶往下找"。）
@@ -93,18 +130,26 @@ pub fn resolve_file(
         //    所以"唯一命中"也仍然可能连错。**这不是终局**：
         //    等做到模块级解析时，这里要换成真正的路径匹配。
         //    现在这样做的代价是**宁可少连**，而不是乱连。
-        match all.get(&r.name) {
-            Some(ids) if ids.len() == 1 => {
+        // **只在值命名空间里找**：`foo()` 是调用，命中的必须是个能调的东西。
+        // 同名的 struct / trait / mod 在这条路上一律不算候选。
+        let values: Vec<&SymbolEntry> = all
+            .get(&r.name)
+            .map(|v| v.iter().filter(|e| e.class == "value").collect())
+            .unwrap_or_default();
+        match values.len() {
+            1 => {
                 if let Some(caller) = r.scope.last() {
-                    if &ids[0] != caller {
-                        out.resolved.push((caller.clone(), ids[0].clone()));
+                    if &values[0].id != caller {
+                        out.resolved.push((caller.clone(), values[0].id.clone()));
                     }
                 } else {
                     out.module_level += 1;
                 }
             }
-            Some(_) => out.ambiguous += 1,
-            None => out.external += 1,
+            0 => out.external += 1,
+            // 值命名空间里也有多个——**这才是真的拿不准**，不猜；
+            // 但把**名字**记下来，因为"46 条拿不准"这句话不告诉你该去看什么。
+            _ => out.ambiguous.push(r.name.clone()),
         }
     }
     out.resolved.sort();
@@ -113,13 +158,69 @@ pub fn resolve_file(
     out
 }
 
+/// 顺着本文件的 `use` 找：`which` → `crate::util::winutil::which` → 那个符号。
+///
+/// **路径 → 文件**这条映射是这里唯一的假设：`crate::a::b::name`
+/// 对应文件 `a/b.rs` 里的 `name`。Rust 真实的模块树还要看 `mod` 声明在哪，
+/// 但我们的目录结构和模块路径是对齐的（`src/graph/parse.rs` ↔ `crate::graph::parse`），
+/// 所以这条假设在本项目里成立。
+///
+/// **它不成立的地方**：`pub use` 重导出、`#[path]` 属性、`mod.rs` 的层级。
+/// 那些**留给整体联调**——现在这里只做"能确定的那一条路"。
+fn through_import(
+    r: &RefFact,
+    imports: &[super::parse::ImportFact],
+    all: &SymbolTable,
+) -> Option<String> {
+    let imp = imports.iter().find(|i| i.local == r.name)?;
+    let segs: Vec<&str> = imp.path.split("::").filter(|s| !s.is_empty()).collect();
+    // 只处理 `crate::…` 开头的（相对当前 crate 的路径）。
+    // `super::` / `self::` 要结合当前模块位置算，留给整体联调。
+    if segs.first() != Some(&"crate") || segs.len() < 2 {
+        return None;
+    }
+    let body = &segs[1..];
+    // 路径末段可能就是名字本身（`crate::a::b::which`），也可能指向模块
+    // （`crate::a::b`）——两种情况都试一次。
+    let (file_part, name_part) = if body.len() >= 2 {
+        (body[..body.len() - 1].join("/"), body[body.len() - 1].to_string())
+    } else {
+        (body.join("/"), String::new())
+    };
+    let mut candidates = Vec::new();
+    if !name_part.is_empty() {
+        candidates.push(format!("{file_part}.rs"));
+    }
+    // `use crate::graph::parse;` 这种：末段就是模块名
+    let as_file = body.join("/");
+    candidates.push(format!("{as_file}.rs"));
+    candidates.push(format!("{as_file}/mod.rs"));
+
+    for cand in candidates {
+        let want_name = if name_part.is_empty() {
+            r.name.clone()
+        } else {
+            name_part.clone()
+        };
+        let key = format!("symbol:{cand}#{want_name}");
+        if let Some(entries) = all.get(&want_name) {
+            if let Some(e) = entries.iter().find(|e| e.id == key) {
+                return Some(e.id.clone());
+            }
+        }
+    }
+    None
+}
+
 /// 从作用域链**从内往外**找第一个匹配。
 ///
 /// `scope` 是从外往内压的栈，所以**末尾是最内层**——从后往前找就对了。
 /// 找不到任何一个匹配时，退回"这个文件里有唯一同名"也算命中
 /// （函数定义在作用域外、但同文件可见的情况）。
 fn nearest_in_scope(r: &RefFact, own_file: &SymbolTable) -> Option<String> {
-    let ids = own_file.get(&r.name)?;
+    let all = own_file.get(&r.name)?;
+    // 同样只在值命名空间里找。
+    let ids: Vec<&SymbolEntry> = all.iter().filter(|e| e.class == "value").collect();
     if ids.is_empty() {
         return None;
     }
@@ -127,13 +228,13 @@ fn nearest_in_scope(r: &RefFact, own_file: &SymbolTable) -> Option<String> {
     // 作用域链里存的是符号 id（`symbol:a.rs#L::a`），而候选 id 也是同一种形状，
     // 所以"前缀"这个词是字面意思：`…#L::a` 是 `…#L::a::inner` 的前缀。
     for scope_id in r.scope.iter().rev() {
-        if let Some(hit) = ids.iter().find(|id| id.starts_with(scope_id.as_str())) {
-            return Some(hit.clone());
+        if let Some(hit) = ids.iter().find(|e| e.id.starts_with(scope_id.as_str())) {
+            return Some(hit.id.clone());
         }
     }
     // 不在任何已知作用域里，但这个文件里只有一个同名——那就是它。
     if ids.len() == 1 {
-        Some(ids[0].clone())
+        Some(ids[0].id.clone())
     } else {
         None
     }
@@ -166,7 +267,7 @@ pub fn summary(res: &Resolution) -> String {
     format!(
         "连上 {} 条 · 拿不准 {} 条 · 外部符号 {} 个 · 模块级引用 {} 处",
         res.resolved.len(),
-        res.ambiguous,
+        res.ambiguous.len(),
         res.external,
         res.module_level
     )
@@ -193,10 +294,54 @@ mod tests {
             .map(|(k, v)| {
                 (
                     (*k).to_string(),
-                    v.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                    // 默认当成**值命名空间**（能调用的那种）——
+                    // 引用都是从调用点抽出来的，本来就该在值命名空间里找。
+                    v.iter()
+                        .map(|s| SymbolEntry {
+                            id: (*s).to_string(),
+                            class: "value".to_string(),
+                        })
+                        .collect::<Vec<_>>(),
                 )
             })
             .collect()
+    }
+
+    /// **命名空间是白捡的确定性**。
+    ///
+    /// 一个 struct 和一个同名函数并存时，`foo()` 是调用，
+    /// 它只可能指向那个函数——不该因为"有两个同名"就说拿不准。
+    /// 《Rust Reference》管这叫"名字被分进不同的命名空间，
+    /// 让不同命名空间里的实体可以同名而不冲突"。
+    #[test]
+    fn 同名的类型不该算作候选() {
+        // 直接构造一个混合表：**同一个名字下，一个是值、一个是类型**。
+        // （注意 `BTreeMap::extend` 是替换同 key，不是追加——第一版就是这么写错的。）
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "Foo".to_string(),
+            vec![
+                SymbolEntry {
+                    id: "symbol:a.rs#Foo_fn".to_string(),
+                    class: "value".to_string(),
+                },
+                SymbolEntry {
+                    id: "symbol:a.rs#Foo_struct".to_string(),
+                    class: "type".to_string(),
+                },
+            ],
+        );
+        let refs = vec![rf("Foo", &["symbol:a.rs#caller"])];
+        let r = resolve_file("a.rs", &refs, &SymbolTable::new(), &[], &all);
+        assert_eq!(
+            r.resolved,
+            vec![(
+                "symbol:a.rs#caller".to_string(),
+                "symbol:a.rs#Foo_fn".to_string()
+            )],
+            "值命名空间里只有一个，那就是它"
+        );
+        assert!(r.ambiguous.is_empty());
     }
 
     #[test]
@@ -204,7 +349,7 @@ mod tests {
         // 表的 key 是**名字**（解析时查的就是名字），值是所有同名符号的 id。
         let own = table(&[("helper", &["symbol:a.rs#helper"])]);
         let refs = vec![rf("helper", &["symbol:a.rs#caller"])];
-        let r = resolve_file("a.rs", &refs, &own, &own);
+        let r = resolve_file("a.rs", &refs, &own, &[], &own);
         assert_eq!(
             r.resolved,
             vec![(
@@ -224,9 +369,9 @@ mod tests {
             &["symbol:a.rs#A::new", "symbol:b.rs#B::new"],
         )]);
         let refs = vec![rf("new", &["symbol:a.rs#caller"])];
-        let r = resolve_file("a.rs", &refs, &own, &all);
+        let r = resolve_file("a.rs", &refs, &own, &[], &all);
         assert!(r.resolved.is_empty());
-        assert_eq!(r.ambiguous, 1);
+        assert_eq!(r.ambiguous, vec!["new".to_string()]);
     }
 
     /// 全图谱里**唯一**同名——可以连（保守，但这是"能确定"的那部分）。
@@ -235,7 +380,7 @@ mod tests {
         let own: SymbolTable = table(&[]);
         let all = table(&[("helper", &["symbol:b.rs#helper"])]);
         let refs = vec![rf("helper", &["symbol:a.rs#caller"])];
-        let r = resolve_file("a.rs", &refs, &own, &all);
+        let r = resolve_file("a.rs", &refs, &own, &[], &all);
         assert_eq!(
             r.resolved,
             vec![(
@@ -253,10 +398,10 @@ mod tests {
         let own: SymbolTable = table(&[]);
         let all: SymbolTable = table(&[]);
         let refs = vec![rf("from_std", &["symbol:a.rs#caller"])];
-        let r = resolve_file("a.rs", &refs, &own, &all);
+        let r = resolve_file("a.rs", &refs, &own, &[], &all);
         assert!(r.resolved.is_empty());
         assert_eq!(r.external, 1);
-        assert_eq!(r.ambiguous, 0, "外部的不是拿不准——是压根不归我们管");
+        assert!(r.ambiguous.is_empty(), "外部的不是拿不准——是压根不归我们管");
     }
 
     /// 模块级引用（不在任何函数里）单独算一类，
@@ -265,7 +410,7 @@ mod tests {
     fn 模块级引用单独计数() {
         let own = table(&[("compute", &["symbol:a.rs#compute"])]);
         let refs = vec![rf("compute", &[])];
-        let r = resolve_file("a.rs", &refs, &own, &own);
+        let r = resolve_file("a.rs", &refs, &own, &[], &own);
         assert_eq!(r.module_level, 1);
         assert!(r.resolved.is_empty(), "没有调用者就没有边");
     }

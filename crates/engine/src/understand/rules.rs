@@ -1,11 +1,11 @@
 use crate::facts::Facts;
-use crate::snapshot;
+use crate::state::snapshot;
 
 /// Java：撞得最多的三件事——只有 JRE、JAVA_HOME 指歪、装了多个 JDK 却用错版本。
 fn r_java(x: &Facts) -> Vec<Finding> {
     let Some(j) = &x.jvm else { return vec![] };
     let mut out = Vec::new();
-    let jdks: Vec<&crate::jvm::Jdk> = j.jdks.iter().filter(|d| d.is_jdk).collect();
+    let jdks: Vec<&crate::detect::jvm::Jdk> = j.jdks.iter().filter(|d| d.is_jdk).collect();
 
     if j.jdks.is_empty() {
         out.push(f(
@@ -317,9 +317,9 @@ pub fn run_all(facts: &Facts, prev: Option<&Facts>) -> Vec<Finding> {
     let mut out = Vec::new();
     // 按项目类型分派。打开一个 Java 项目却报「没找到 Python 解释器」，
     // 是这一轮之前真实存在的假警报——规则不分语言，等于在乱指路。
-    let has = |l: crate::lang::Lang| facts.langs.contains(&l);
-    let pythonic = has(crate::lang::Lang::Python)
-        || (facts.langs.is_empty() && facts.lang == crate::lang::Lang::Unknown);
+    let has = |l: crate::detect::lang::Lang| facts.langs.contains(&l);
+    let pythonic = has(crate::detect::lang::Lang::Python)
+        || (facts.langs.is_empty() && facts.lang == crate::detect::lang::Lang::Unknown);
     if pythonic {
         out.extend(r_isolated(facts));
         out.extend(r_python_missing(facts));
@@ -329,13 +329,13 @@ pub fn run_all(facts: &Facts, prev: Option<&Facts>) -> Vec<Finding> {
         out.extend(r_venv_unbound(facts));
         out.extend(r_encoding(facts));
     }
-    if has(crate::lang::Lang::Java) {
+    if has(crate::detect::lang::Lang::Java) {
         out.extend(r_java(facts));
     }
-    if has(crate::lang::Lang::Cpp) {
+    if has(crate::detect::lang::Lang::Cpp) {
         out.extend(r_cc(facts));
     }
-    if has(crate::lang::Lang::Web) {
+    if has(crate::detect::lang::Lang::Web) {
         out.extend(r_web(facts));
     }
     out.extend(r_contract(facts));
@@ -984,7 +984,7 @@ mod tests {
     fn a_plain_python_project_raises_no_errors() {
         let d = scratch("healthy");
         std::fs::write(d.join("main.py"), "print('hi')\n").unwrap();
-        let facts = crate::probe::make_facts(&d, None);
+        let facts = crate::detect::probe::make_facts(&d, None);
         let e = errors(&facts);
         assert!(e.is_empty(), "一个普通项目不该有「要修」级别的问题，实际有：{:?}", e);
         let _ = std::fs::remove_dir_all(&d);
@@ -996,7 +996,7 @@ mod tests {
     fn missing_java_home_is_never_an_error() {
         let d = scratch("java");
         std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
-        let facts = crate::probe::make_facts(&d, None);
+        let facts = crate::detect::probe::make_facts(&d, None);
         let hit = run_all(&facts, None)
             .into_iter()
             .find(|f| f.id == "java-home-missing");
@@ -1011,7 +1011,7 @@ mod tests {
     fn a_pure_java_project_gets_no_python_findings() {
         let d = scratch("pure");
         std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
-        let facts = crate::probe::make_facts(&d, None);
+        let facts = crate::detect::probe::make_facts(&d, None);
         let ids: Vec<String> = run_all(&facts, None).into_iter().map(|f| f.id).collect();
         assert!(
             !ids.iter().any(|i| i.starts_with("python") || i == "not-in-venv" || i == "isolated-interpreter"),
@@ -1023,7 +1023,7 @@ mod tests {
 
     fn mem_facts(paging: bool, reliable: bool, avail_mb: u64) -> Facts {
         Facts {
-            last_mem: Some(crate::mem::MemFacts {
+            last_mem: Some(crate::sys::mem::MemFacts {
                 at: "2026-01-01T00:00:00Z".into(),
                 command: "python main.py".into(),
                 reliable,
@@ -1103,7 +1103,7 @@ mod tests {
     fn no_rule_can_ship_an_unverifiable_error() {
         let d = scratch("audit");
         // 空目录是最容易同时触发好几条的状态
-        let facts = crate::probe::make_facts(&d, None);
+        let facts = crate::detect::probe::make_facts(&d, None);
         let got = run_all(&facts, None);
         for x in &got {
             if x.severity == Severity::Error {

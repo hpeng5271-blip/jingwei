@@ -43,8 +43,8 @@ pub struct IndexReport {
     pub edges_expired: usize,
     /// **解析期连上的跨文件关系**（含就近遮蔽命中的）。
     pub resolved: usize,
-    /// 命中多个候选、**不猜**的引用数。
-    pub ambiguous: usize,
+    /// 命中多个候选、**不猜**的引用（记名字，不记个数——个数解释不了任何事）。
+    pub ambiguous: Vec<String>,
     /// **外部符号**（标准库 / 别的 crate / 宏生成）——不是错误，是不归我们管。
     pub external: usize,
 }
@@ -98,7 +98,7 @@ fn collect_rust_files(root: &Path, rep: &mut IndexReport) -> Vec<(String, PathBu
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
                 // 网络盘、联接点、超长路径——同一道闸，别处用过就也在这儿用
-                if crate::scan::should_skip(&p, root).is_some() {
+                if crate::util::scan::should_skip(&p, root).is_some() {
                     continue;
                 }
                 if matches!(
@@ -151,7 +151,7 @@ pub struct RunRecorded {
 /// 没索引过的文件不该凭空出现在图谱里。这种情形记进 `unknown_targets`，
 /// 由调用方决定要不要先补一次索引。
 pub fn record_run(
-    store: &mut crate::store::Store,
+    store: &mut crate::graph::store::Store,
     root: &Path,
     command: &str,
     exit_code: i32,
@@ -257,7 +257,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 /// 这里只管"给我一个目录，我把图谱对齐"。
 pub fn index_rust(
     root: &Path,
-    store: &mut crate::store::Store,
+    store: &mut crate::graph::store::Store,
 ) -> Result<IndexReport> {
     let now = now_ms();
     let mut rep = IndexReport::default();
@@ -303,6 +303,8 @@ pub fn index_rust(
     let mut all_names: crate::graph::resolve::SymbolTable =
         std::collections::BTreeMap::new();
     let mut pending_refs: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
+    let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::parse::ImportFact>> =
+        std::collections::BTreeMap::new();
 
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
@@ -328,7 +330,7 @@ pub fn index_rust(
             rep.unreadable += 1;
             continue;
         };
-        let file = crate::textfile::decode(&bytes);
+        let file = crate::util::textfile::decode(&bytes);
         if !file.readable {
             rep.unreadable += 1;
             continue;
@@ -368,12 +370,25 @@ pub fn index_rust(
         {
             let ft = file_tables.entry(rel.clone()).or_default();
             for s in &parsed.symbols {
-                ft.entry(s.name.clone()).or_default().push(s.id.clone());
-                all_names
-                    .entry(s.name.clone())
-                    .or_default()
-                    .push(s.id.clone());
+                // **带上命名空间**：解析调用时只该在值命名空间里找
+                // （《Rust Reference》：名字被分进不同命名空间，可以同名而不冲突）。
+                let class = s
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("sym"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("other")
+                    .to_string();
+                let entry = crate::graph::resolve::SymbolEntry {
+                    id: s.id.clone(),
+                    class,
+                };
+                ft.entry(s.name.clone()).or_default().push(entry.clone());
+                all_names.entry(s.name.clone()).or_default().push(entry);
             }
+        }
+        if !parsed.imports.is_empty() {
+            file_imports.insert(rel.clone(), parsed.imports.clone());
         }
         if !parsed.references.is_empty() {
             pending_refs.push((rel.clone(), parsed.references.clone()));
@@ -423,7 +438,7 @@ pub fn index_rust(
         }
         nodes.push(file_node);
 
-        let state = crate::store::FileState {
+        let state = crate::graph::store::FileState {
             size,
             mtime_ns: mt,
             content_sha: Some(sha),
@@ -453,9 +468,11 @@ pub fn index_rust(
         let mut extra: Vec<Edge> = Vec::new();
         for (rel, refs) in &pending_refs {
             let ft = file_tables.get(rel).unwrap_or(&empty);
-            let res = crate::graph::resolve::resolve_file(rel, refs, ft, &all_names);
+            let no_imports: Vec<crate::graph::parse::ImportFact> = Vec::new();
+            let imps = file_imports.get(rel).unwrap_or(&no_imports);
+            let res = crate::graph::resolve::resolve_file(rel, refs, ft, imps, &all_names);
             rep.resolved += res.resolved.len();
-            rep.ambiguous += res.ambiguous;
+            rep.ambiguous.extend(res.ambiguous.iter().cloned());
             rep.external += res.external;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
         }

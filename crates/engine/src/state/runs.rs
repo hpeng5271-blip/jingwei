@@ -37,7 +37,7 @@ pub struct RunRecord {
     pub tail: Vec<String>,
     /// 这次跑的时候内存怎么样。有了它，下次跑才能比。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory: Option<crate::mem::MemReport>,
+    pub memory: Option<crate::sys::mem::MemReport>,
 }
 
 fn file(root: &Path) -> PathBuf {

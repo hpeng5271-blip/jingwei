@@ -204,7 +204,7 @@ mod tests {
             .args(["/FI", &format!("PID eq {}", pid), "/NH"])
             .output()
         {
-            Ok(o) => crate::textfile::decode_output(&o.stdout),
+            Ok(o) => crate::util::textfile::decode_output(&o.stdout),
             Err(_) => String::new(),
         }
     }

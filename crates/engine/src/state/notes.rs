@@ -331,7 +331,7 @@ pub fn migrate_legacy(root: &Path) -> usize {
         // 把旧格式文件挪开、免得下次又导一遍。挪不动最多是重复导入被下面去重挡住。
         if let Err(e) = std::fs::rename(&old, crate::data_dir(root).join("notes.jsonl.migrated"))
         {
-            crate::dlog::w("9005", &format!("旧格式笔记未改名：{e}"));
+            crate::util::dlog::w("9005", &format!("旧格式笔记未改名：{e}"));
         }
     }
     moved

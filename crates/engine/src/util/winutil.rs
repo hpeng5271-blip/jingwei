@@ -61,8 +61,8 @@ pub fn run_cmd(
     });
     match rx.recv_timeout(timeout) {
         Ok(Ok(out)) => {
-            let mut s = crate::textfile::decode_output(&out.stdout);
-            s.push_str(&crate::textfile::decode_output(&out.stderr));
+            let mut s = crate::util::textfile::decode_output(&out.stdout);
+            s.push_str(&crate::util::textfile::decode_output(&out.stderr));
             Some((out.status.success(), s.trim().to_string()))
         }
         _ => None,

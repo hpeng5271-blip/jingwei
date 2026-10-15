@@ -255,7 +255,7 @@ fn manifest_kind(name: &str) -> Option<&'static str> {
 fn read_text(p: &Path) -> Option<String> {
     let bytes = std::fs::read(p).ok()?;
     // 清单文件也可能是 GBK（中文 Windows 上很常见），按本机代码页认
-    let s = crate::textfile::decode(&bytes).text;
+    let s = crate::util::textfile::decode(&bytes).text;
     Some(s.trim_start_matches('\u{feff}').to_string())
 }
 
@@ -314,7 +314,7 @@ fn walk(dir: &Path, root: &Path, depth: usize, w: &mut Walk) {
             // 联接点可能指回上一层、超长路径老式接口读不了。
             // 这道闸原来只拦"扫项目列表"那一步，进来之后就没人管了——
             // 而 junction 在 node_modules 里遍地都是。
-            if crate::scan::should_skip(&p, root).is_some() {
+            if crate::util::scan::should_skip(&p, root).is_some() {
                 continue;
             }
             if n == "src" || n == "app" {
@@ -403,7 +403,7 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
         root: root.to_string_lossy().to_string(),
         deep,
         has_git: root.join(".git").is_dir(),
-        langs: crate::lang::detect_all(root)
+        langs: crate::detect::lang::detect_all(root)
             .iter()
             .map(|l| l.name().to_string())
             .collect(),
@@ -509,7 +509,7 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
     let mut artifacts: Vec<DirStat> = Vec::new();
     for (rel, _kind) in &w.artifacts {
         let (bytes, files) = if deep {
-            crate::clean::dir_stat(&root.join(rel))
+            crate::sys::clean::dir_stat(&root.join(rel))
         } else {
             (0, 0)
         };

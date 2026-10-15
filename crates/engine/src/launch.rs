@@ -1,10 +1,10 @@
 //! 启动：6 阶段 + 流式输出 + 就绪判定。
 //! 事件走回调（CLI 打印 / Tauri 推前端），逻辑层不打印任何东西。
 
-use crate::contract::{Contract, ReadyWhen};
-use crate::runs;
+use crate::understand::contract::{Contract, ReadyWhen};
+use crate::state::runs;
 use crate::facts::now_iso;
-use crate::probe;
+use crate::detect::probe;
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -82,7 +82,7 @@ pub struct Outcome {
     pub diagnosis: Option<Diagnosis>,
     /// 这次跑的时候内存怎么样。只在采到东西时才有。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory: Option<crate::mem::MemReport>,
+    pub memory: Option<crate::sys::mem::MemReport>,
     /// 和这个项目上一次跑同一条命令相比，哪里变了。空 = 没变化或没法比。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory_delta: Vec<String>,
@@ -102,7 +102,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     let root = opts.root.clone();
     let began = Instant::now();
     let (contract, contract_err) = Contract::load(&root);
-    crate::dlog::i(
+    crate::util::dlog::i(
         "2000",
         &format!(
             "root={} cmd={} task={}",
@@ -188,11 +188,11 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     let installed_norm: Vec<String> = pyf
         .installed
         .iter()
-        .map(|s| crate::contract::norm_name(s.split("==").next().unwrap_or("")))
+        .map(|s| crate::understand::contract::norm_name(s.split("==").next().unwrap_or("")))
         .collect();
     let missing: Vec<String> = wanted
         .iter()
-        .filter(|d| !installed_norm.contains(&crate::contract::norm_name(d)))
+        .filter(|d| !installed_norm.contains(&crate::understand::contract::norm_name(d)))
         .cloned()
         .collect();
     cb(Event::Stage {
@@ -244,12 +244,12 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONPATH", root.to_string_lossy().to_string());
     // 桌面外壳拉起 python 时也会弹一个黑框；工具自己负责跑它，不需要窗口
-    crate::winutil::hide_console(&mut cmd);
+    crate::util::winutil::hide_console(&mut cmd);
     let mut child = cmd.spawn().with_context(|| format!("拉起失败：{}", run_cmd))?;
     let pid = child.id();
     // 把子进程收进一个 Job：跑完/超时/用户停止时，连它的子孙一起收掉。
     // 不做这件事，`cargo run` 拉起的编译器/链接器会成为孤儿继续占端口和内存。
-    let job = match crate::jobobj::Job::new() {
+    let job = match crate::util::jobobj::Job::new() {
         Ok(j) => {
             if let Err(e) = j.assign(&child) {
                 cb(Event::Stage {
@@ -267,7 +267,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     };
     // 内存只在跑东西的时候采：200ms 一次，跑完就停。
     // 常驻监控看着专业，实际没人在编译时盯着它，却要一直付资源。
-    let mut mem = crate::mem::Sampler::new(pid);
+    let mut mem = crate::sys::mem::Sampler::new(pid);
     let mut next_mem_sample = Instant::now();
 
     let (tx, rx) = mpsc::channel::<(Source, String)>();
@@ -388,7 +388,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
                     // 定位失败会让这一轮从文件开头读——日志行会重复出现，看的人
                     // 会以为程序反复启动了。不能静默。
                     if let Err(e) = fh.seek(SeekFrom::Start(*off)) {
-                        crate::dlog::w("9005", &format!("日志定位失败（{}）：{e}", path.display()));
+                        crate::util::dlog::w("9005", &format!("日志定位失败（{}）：{e}", path.display()));
                     }
                     let mut buf = String::new();
                     if fh.read_to_string(&mut buf).is_ok() {
@@ -517,17 +517,17 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     for h in readers {
         // 输出读取线程 panic 才会有 Err；那多半是管道被提前关了，属收尾噪声。
         if h.join().is_err() {
-            crate::dlog::w("9005", "输出读取线程异常结束");
+            crate::util::dlog::w("9005", "输出读取线程异常结束");
         }
     }
     // 收尾：把整棵树带走（服务型项目里，父进程退了子进程还在占端口的坑）
     if let Some(j) = &job {
         if let Err(e) = j.terminate() {
-            crate::dlog::w("9005", &format!("收掉进程树失败（子进程可能还占着端口）：{e}"));
+            crate::util::dlog::w("9005", &format!("收掉进程树失败（子进程可能还占着端口）：{e}"));
         }
     }
     if let Err(e) = child.kill() {
-        crate::dlog::w("9005", &format!("杀主进程失败：{e}"));
+        crate::util::dlog::w("9005", &format!("杀主进程失败：{e}"));
     }
     while let Ok((src, text)) = rx.try_recv() {
         lines += 1;
@@ -544,7 +544,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
 
     let memory = mem.finish();
     if let Some(m) = &memory {
-        crate::dlog::i(
+        crate::util::dlog::i(
             "2100",
             &format!(
                 "peak_mb={} commit_mb={} faults={} paging={} reliable={} samples={} ms={}",
@@ -559,7 +559,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         );
     }
     // 失败时把症结也记上——别人发回来的日志里，这一行往往就是答案
-    crate::dlog::i(
+    crate::util::dlog::i(
         "2002",
         &format!(
             "exit={} ready={} lines={} crux={} ms={}",
@@ -572,18 +572,18 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     );
     // 跟这个项目上一次跑同一条命令比一比。比不出来就老实空着，
     // 不硬凑一个「一切正常」。
-    let prev = crate::runs::list(&root, 8)
+    let prev = crate::state::runs::list(&root, 8)
         .into_iter()
         .find(|r| r.command == run_cmd && r.memory.is_some());
     let memory_delta = match (&memory, prev.as_ref().and_then(|r| r.memory.as_ref())) {
-        (Some(cur), Some(old)) => crate::mem::compare(old, cur),
+        (Some(cur), Some(old)) => crate::sys::mem::compare(old, cur),
         _ => Vec::new(),
     };
     // 记一笔：卡片的用处不在当次，而在下次回来能比。
     // 这一笔写不进去，下次回来就"没有上一版可比"——卡片的价值正好在这里。
-    if let Err(e) = crate::runs::append(
+    if let Err(e) = crate::state::runs::append(
         &root,
-        &crate::runs::RunRecord {
+        &crate::state::runs::RunRecord {
             at: now_iso(),
             kind: if opts.purpose == Purpose::Task {
                 "task".into()
@@ -599,7 +599,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
             memory: memory.clone(),
         },
     ) {
-        crate::dlog::w("9006", &format!("运行记录写入失败：{e}"));
+        crate::util::dlog::w("9006", &format!("运行记录写入失败：{e}"));
     }
     Ok(Outcome {
         exit_code: code,
@@ -778,7 +778,7 @@ fn spawn_reader<R: Read + Send + 'static>(
                     while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
                         buf.pop();
                     }
-                    let text = crate::textfile::decode_output(&buf);
+                    let text = crate::util::textfile::decode_output(&buf);
                     if tx.send((src, text)).is_err() {
                         break;
                     }

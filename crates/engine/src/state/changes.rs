@@ -315,7 +315,7 @@ fn take_inner(root: &Path, deep: bool) -> Result<Digest> {
         if let Err(e) = std::fs::create_dir_all(&dir)
             .and_then(|_| std::fs::write(dir.join("watch.json"), t))
         {
-            crate::dlog::w("9002", &format!("变更基线写入失败（{}）：{e}", dir.display()));
+            crate::util::dlog::w("9002", &format!("变更基线写入失败（{}）：{e}", dir.display()));
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::contract::Contract;
+use crate::understand::contract::Contract;
 use crate::facts::*;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 /// 跑一条命令拿输出；超时返回 None（探针永不阻塞）
 // 这两个是纯工具，已经下沉到 `winutil`（Q6 拆循环）。
 // 这里转发一下：**所有调用点都不用改**，而依赖方向从此是单向的。
-pub use crate::winutil::{run_cmd, which};
+pub use crate::util::winutil::{run_cmd, which};
 
 // ---------------------------------------------------------------- system
 
@@ -333,7 +333,7 @@ pub fn find_pythons(root: &Path, contract: Option<&Contract>, include_versions: 
     if include_versions {
         let n = out.len().min(12);
         let idx: Vec<usize> = (0..n).collect();
-        let versions = crate::parallel::map(idx, |i| probe_version(&out[i].path));
+        let versions = crate::util::parallel::map(idx, |i| probe_version(&out[i].path));
         for (i, v) in versions.into_iter().enumerate() {
             out[i].version = v;
         }
@@ -426,9 +426,9 @@ pub fn probe_project(root: &Path) -> ProjectFacts {
     // 依赖清单按语言分派，和 GUI 那条路径共用同一段逻辑。
     // 这里没有 pip 清单（快速路径），Python 那一档会标成「无法确认」——
     // 不猜，是因为猜错一次，用户就再也不信这一栏了。
-    let langs = crate::lang::detect_all(root);
+    let langs = crate::detect::lang::detect_all(root);
     let (deps_detail, deps_status) =
-        crate::deps::collect(root, &langs, contract.as_ref(), &[]);
+        crate::detect::deps::collect(root, &langs, contract.as_ref(), &[]);
     ProjectFacts {
         root: root.to_string_lossy().to_string(),
         exists: true,
@@ -515,21 +515,21 @@ pub fn make_facts(root: &Path, python_exe: Option<&Path>) -> Facts {
     });
 
     // 最近一次跑这个项目时的内存。规则要靠它把「为什么慢」接进排查链。
-    let last_mem = crate::runs::list(root, 1)
+    let last_mem = crate::state::runs::list(root, 1)
         .into_iter()
         .next()
-        .and_then(|r| r.memory.map(|m| crate::mem::MemFacts::from_report(&r.at, &r.command, &m)));
+        .and_then(|r| r.memory.map(|m| crate::sys::mem::MemFacts::from_report(&r.at, &r.command, &m)));
 
     // 按项目类型分派：只探该探的那门语言。
     // 打开一个 Python 项目去 spawn 一串 java，纯属浪费——这也是「小体量」的一部分。
-    let langs = crate::lang::detect_all(root);
-    let lang = langs.first().copied().unwrap_or(crate::lang::Lang::Unknown);
+    let langs = crate::detect::lang::detect_all(root);
+    let lang = langs.first().copied().unwrap_or(crate::detect::lang::Lang::Unknown);
     let (jvm, cc) = match lang {
-        crate::lang::Lang::Java => (Some(crate::jvm::probe_jvm(root)), None),
-        crate::lang::Lang::Cpp => (None, Some(crate::ccpp::probe_cc(root))),
-        crate::lang::Lang::Web => (None, None),
-        _ if langs.contains(&crate::lang::Lang::Java) => {
-            (Some(crate::jvm::probe_jvm(root)), None)
+        crate::detect::lang::Lang::Java => (Some(crate::detect::jvm::probe_jvm(root)), None),
+        crate::detect::lang::Lang::Cpp => (None, Some(crate::detect::ccpp::probe_cc(root))),
+        crate::detect::lang::Lang::Web => (None, None),
+        _ if langs.contains(&crate::detect::lang::Lang::Java) => {
+            (Some(crate::detect::jvm::probe_jvm(root)), None)
         }
         _ => (None, None),
     };
@@ -538,7 +538,7 @@ pub fn make_facts(root: &Path, python_exe: Option<&Path>) -> Facts {
     // 顺带把「装上的版本」也留下——依赖管理的价值就是这两列并排：
     // 清单里要什么、机器上是什么、对得上对不上。
     // 依赖清单与两列状态：和快速路径共用同一段逻辑（见 deps::collect）
-    let (detail, status) = crate::deps::collect(root, &langs, contract.as_ref(), &py.installed);
+    let (detail, status) = crate::detect::deps::collect(root, &langs, contract.as_ref(), &py.installed);
     project.deps_detail = detail;
     project.deps_status = status;
 

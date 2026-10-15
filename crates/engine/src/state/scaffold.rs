@@ -181,7 +181,7 @@ pub fn create(opts: &NewOptions) -> Result<NewReport> {
     }
 
     let purpose = opts.purpose.as_ref().map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
-    let ct = crate::contract::Contract {
+    let ct = crate::understand::contract::Contract {
         schema_version: Some(1),
         name: Some(name.clone()),
         description: Some(
@@ -189,12 +189,12 @@ pub fn create(opts: &NewOptions) -> Result<NewReport> {
                 .clone()
                 .unwrap_or_else(|| "一句话说清这个项目是干什么的".into()),
         ),
-        runtime: crate::contract::Runtime {
+        runtime: crate::understand::contract::Runtime {
             python: Some(">=3.10".into()),
             python_exe: opts.python_exe.as_ref().map(|p| p.to_string_lossy().to_string()),
         },
-        deps: crate::contract::Deps::default(),
-        commands: crate::contract::Commands {
+        deps: crate::understand::contract::Deps::default(),
+        commands: crate::understand::contract::Commands {
             install: Some("python -m pip install -r requirements.txt".into()),
             build: Some("python -m compileall -q .".into()),
             run: Some("python main.py".into()),
@@ -205,7 +205,7 @@ pub fn create(opts: &NewOptions) -> Result<NewReport> {
             },
         },
         log_files: Vec::new(),
-        ready_when: Some(crate::contract::ReadyWhen {
+        ready_when: Some(crate::understand::contract::ReadyWhen {
             port: None,
             log_match: None,
             exit_code: Some(0),
@@ -227,9 +227,9 @@ pub fn create(opts: &NewOptions) -> Result<NewReport> {
                 text.replace("一句话说清它解决什么问题。", p),
             )?;
         }
-        crate::notes::save(
+        crate::state::notes::save(
             root,
-            &crate::notes::NoteInput {
+            &crate::state::notes::NoteInput {
                 slug: None,
                 kind: "goal".into(),
                 title: "为什么做它".into(),
@@ -253,7 +253,7 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
     }
     std::fs::create_dir_all(root).with_context(|| format!("建目录失败 {}", root.display()))?;
     let n = name.clone();
-    let (files, commands): (Vec<(String, String)>, crate::contract::Commands) = match opts.lang {
+    let (files, commands): (Vec<(String, String)>, crate::understand::contract::Commands) = match opts.lang {
         Lang::Rust => (
             vec![
                 (
@@ -272,7 +272,7 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
                 ),
                 (".gitignore".into(), "/target\n".into()),
             ],
-            crate::contract::Commands {
+            crate::understand::contract::Commands {
                 install: Some("cargo fetch".into()),
                 build: Some("cargo build".into()),
                 run: Some("cargo run".into()),
@@ -294,7 +294,7 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
                 ),
                 (".gitignore".into(), "node_modules/\n".into()),
             ],
-            crate::contract::Commands {
+            crate::understand::contract::Commands {
                 install: Some("npm install".into()),
                 build: None,
                 run: Some("npm start".into()),
@@ -316,7 +316,7 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
                 ),
                 (".gitignore".into(), "target/\n".into()),
             ],
-            crate::contract::Commands {
+            crate::understand::contract::Commands {
                 install: Some("mvn -q dependency:go-offline".into()),
                 build: Some("mvn -q -DskipTests package".into()),
                 run: Some("mvn -q compile exec:java -Dexec.mainClass=Main".into()),
@@ -338,7 +338,7 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
                 ),
                 (".gitignore".into(), "build/\n".into()),
             ],
-            crate::contract::Commands {
+            crate::understand::contract::Commands {
                 install: Some("cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON".into()),
                 build: Some("cmake --build build".into()),
                 // 跑的是刚构建出来的那个可执行文件。留空的话 C++ 项目在
@@ -369,12 +369,12 @@ fn create_native(opts: &NewOptions) -> Result<NewReport> {
     )?;
     rep.created.push("README.md".into());
 
-    let ct = crate::contract::Contract {
+    let ct = crate::understand::contract::Contract {
         schema_version: Some(1),
         name: Some(name.clone()),
         description: opts.purpose.clone(),
         commands,
-        ready_when: Some(crate::contract::ReadyWhen {
+        ready_when: Some(crate::understand::contract::ReadyWhen {
             exit_code: Some(0),
             timeout_s: Some(120),
             ..Default::default()
@@ -578,7 +578,7 @@ mod tests {
     /// 命令行看起来一切正常，直到新手第一次 run 才炸。
     #[test]
     fn every_template_compiles() {
-        let Some((py, _)) = crate::probe::first_working(Path::new("."), None, 3) else {
+        let Some((py, _)) = crate::detect::probe::first_working(Path::new("."), None, 3) else {
             return; // 这台机器没有 Python，跳过（本机测试环境的正常情况）
         };
         for t in [Template::Script, Template::Package, Template::Cli] {
@@ -592,7 +592,7 @@ mod tests {
                 purpose: Some("测试用".into()),
             })
             .unwrap();
-            let (ok, out) = crate::winutil::run_cmd(
+            let (ok, out) = crate::util::winutil::run_cmd(
                 &py,
                 &["-m", "compileall", "-q", &d.to_string_lossy()],
                 Duration::from_secs(90),
@@ -600,7 +600,7 @@ mod tests {
             .unwrap_or((false, "跑不起来".into()));
             assert!(ok, "模板 {} 生成的代码编译不过：\n{}", t.id(), out);
             // 顺手验证记录真的落盘了
-            assert_eq!(crate::notes::count(&d), 1, "{} 模板没记下目的", t.id());
+            assert_eq!(crate::state::notes::count(&d), 1, "{} 模板没记下目的", t.id());
             let _ = std::fs::remove_dir_all(&d);
         }
     }
@@ -632,7 +632,7 @@ mod tests {
             assert!(d.join(entry).is_file(), "{} 没生成 {}", lang.id(), entry);
             assert!(!d.join("requirements.txt").exists(), "{} 不该有 Python 的清单", lang.id());
             // 契约里至少要有「装 / 跑」两步，否则一条龙走到一半就断
-            let (ct, _) = crate::contract::Contract::load(&d);
+            let (ct, _) = crate::understand::contract::Contract::load(&d);
             let ct = ct.unwrap_or_else(|| panic!("{} 契约没落盘", lang.id()));
             assert!(ct.commands.install.is_some(), "{} 契约缺 install", lang.id());
             assert!(ct.commands.run.is_some(), "{} 契约缺 run", lang.id());

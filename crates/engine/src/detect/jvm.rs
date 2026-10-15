@@ -6,8 +6,8 @@
 //!      ——「我明明装了 21」，编译却报 class file version 52
 //!   3. pom 里写着 17，实际用的是 8
 
-use crate::parallel;
-use crate::winutil::{run_cmd, which};
+use crate::util::parallel;
+use crate::util::winutil::{run_cmd, which};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -89,7 +89,7 @@ fn roots() -> Vec<PathBuf> {
         r"C:\SDK",
         r"D:\Java",
     ] {
-        let p = crate::editors::expand(raw);
+        let p = crate::detect::editors::expand(raw);
         if p.is_dir() {
             v.push(p);
         }

@@ -241,7 +241,7 @@ fn reg_list_subkeys(path: &str) -> Vec<(String, String)> {
     else {
         return Vec::new();
     };
-    let Some((true, listing)) = crate::winutil::run_cmd(
+    let Some((true, listing)) = crate::util::winutil::run_cmd(
         &reg_exe,
         &["query", path],
         std::time::Duration::from_secs(8),
@@ -341,7 +341,7 @@ fn cpuid_brand() -> String {
         s[o + 12..o + 16].copy_from_slice(&r.edx.to_le_bytes());
     }
     // 注册表/系统信息里的中文也要按本机代码页认，不然机器清单全是问号
-    crate::textfile::decode_output(&s)
+    crate::util::textfile::decode_output(&s)
         .replace('\0', "")
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -585,7 +585,7 @@ fn reg(path: &str, key: &str) -> Option<String> {
     let reg_exe = std::env::var("SystemRoot")
         .map(|r| std::path::PathBuf::from(r).join("System32").join("reg.exe"))
         .ok()?;
-    let (ok, out) = crate::winutil::run_cmd(
+    let (ok, out) = crate::util::winutil::run_cmd(
         &reg_exe,
         &["query", path, "/v", key],
         std::time::Duration::from_secs(8),
@@ -655,7 +655,7 @@ impl Sampler {
             .or_else(|| disks.first());
         // 一次进程快照把要数的都数完：python_procs 也从这里出，不再单独走一趟。
         // 状态栏每几秒问一次，走只数名字的轻路径（不查内存）
-        let dev = crate::mem::count_many_fast(DEV_PROC_NAMES);
+        let dev = crate::sys::mem::count_many_fast(DEV_PROC_NAMES);
         let python_procs = dev
             .iter()
             .find(|(k, _)| k == "python")
@@ -829,7 +829,7 @@ fn reg_values(path: &str) -> Vec<String> {
     else {
         return Vec::new();
     };
-    let Some((true, out)) = crate::winutil::run_cmd(
+    let Some((true, out)) = crate::util::winutil::run_cmd(
         &reg_exe,
         &["query", path],
         std::time::Duration::from_secs(8),

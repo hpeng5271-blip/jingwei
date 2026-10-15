@@ -64,7 +64,7 @@ pub fn disk_properties() -> Vec<DiskProps> {
             .position(|c| *c == 0)
             .map(|i| off + i)
             .unwrap_or(buf.len());
-        crate::textfile::decode_output(&buf[off..end]).trim().to_string()
+        crate::util::textfile::decode_output(&buf[off..end]).trim().to_string()
     };
     let u32_at = |b: &[u8], o: usize| -> u32 {
         if o + 3 < b.len() {
@@ -185,7 +185,7 @@ fn reg_subkeys(path: &str) -> Vec<String> {
     else {
         return Vec::new();
     };
-    let Some((true, out)) = crate::winutil::run_cmd(
+    let Some((true, out)) = crate::util::winutil::run_cmd(
         &reg_exe,
         &["query", path],
         std::time::Duration::from_secs(8),

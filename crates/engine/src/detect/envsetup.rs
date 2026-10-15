@@ -4,9 +4,9 @@
 //! 不需要 activate、不依赖 PATH。这对新手是决定性的——
 //! 「激活没生效」这类问题从此不存在。
 
-use crate::contract::Contract;
-use crate::probe;
-use crate::winutil::run_cmd;
+use crate::understand::contract::Contract;
+use crate::detect::probe;
+use crate::util::winutil::run_cmd;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,7 +33,7 @@ impl Method {
 
 /// 这台解释器能怎么造虚拟环境——问它自己，不猜。
 pub fn method_for(python: &Path) -> Method {
-    if crate::winutil::which("uv.exe").is_some() {
+    if crate::util::winutil::which("uv.exe").is_some() {
         return Method::Uv;
     }
     match run_cmd(
@@ -90,7 +90,7 @@ pub fn create_venv(root: &Path, python: &Path, name: &str) -> Result<Created> {
     let method = method_for(python);
     let (log, ok) = match method {
         Method::Uv => {
-            let Some(uv) = crate::winutil::which("uv.exe") else {
+            let Some(uv) = crate::util::winutil::which("uv.exe") else {
                 bail!("uv 在「查到」和「调用」之间不见了，再试一次");
             };
             let r = run_cmd(

@@ -17,7 +17,7 @@
 //! **分层原来只写在《复审记录》里，没进代码结构**——那是 R2 记下的一条"没兑现"。
 //! 重建时把它落成了目录：**光看文件在哪，就知道它该依赖谁。**
 //!
-//! 下面那一串 `pub use` 是**过渡用的兼容路径**：旧的 `crate::winutil::` 仍然能用，
+//! 下面那一串 `pub use` 是**过渡用的兼容路径**：旧的 `crate::util::winutil::` 仍然能用，
 //! 免得一次改几十处 `use`。新写的代码请直接用 `crate::util::winutil::`——
 //! 兼容层是为了让这次搬迁能一步到位，不是为了长期留着。
 
@@ -45,7 +45,7 @@ pub mod sys {
 /// L2 · 探测：把外部世界的事实拿进来。
 ///
 /// **目录叫 `detect` 而不是 `probe`**：层里那个模块本来就叫 `probe.rs`，
-/// 层名与模块名撞在一起的话，`crate::probe::xxx` 到底指层还是指模块就说不清了。
+/// 层名与模块名撞在一起的话，`crate::detect::probe::xxx` 到底指层还是指模块就说不清了。
 /// 层用"这一层在干什么"命名（detect / understand），模块用"它是什么"命名。
 pub mod detect {
     pub mod ccpp;
@@ -129,7 +129,7 @@ pub fn data_dir(root: &std::path::Path) -> std::path::PathBuf {
 /// 也不能因为搬不动就把用户的东西弄丢。
 fn move_dir(from: &std::path::Path, to: &std::path::Path) {
     if let Err(e) = std::fs::rename(from, to) {
-        crate::dlog::w(
+        crate::util::dlog::w(
             "9001",
             &format!("数据目录搬迁失败 {} → {}：{e}", from.display(), to.display()),
         );

@@ -97,7 +97,7 @@ pub fn read(root: &Path, rel: &str) -> Result<Opened> {
         return Ok(o);
     }
     // 认编码与换行：GBK 的中文文件不再被读成乱码，CRLF 也不会被悄悄改掉
-    let tf = crate::textfile::decode(&bytes);
+    let tf = crate::util::textfile::decode(&bytes);
     o.text = tf.text;
     o.encoding = tf.encoding;
     o.eol = tf.eol;
@@ -135,7 +135,7 @@ pub fn apply(root: &Path, rel: &str, text: &str) -> Result<Draft> {
 /// 按指定编码与换行写回。界面会把打开时记下的（encoding, eol）原样传回来——
 /// 这是"不悄悄改用户文件"的落点。
 pub fn apply_as(root: &Path, rel: &str, text: &str, encoding: &str, eol: &str) -> Result<Draft> {
-    let body = crate::textfile::encode(text, encoding, eol);
+    let body = crate::util::textfile::encode(text, encoding, eol);
     apply_bytes(root, rel, &body, text)
 }
 
@@ -222,7 +222,7 @@ pub fn restore(root: &Path, rel: &str, id: &str) -> Result<()> {
     if full.exists() {
         // 回滚前先留档。留不上还不至于让回滚失败，但事后想找回被覆盖的那一版就没了。
         if let Err(e) = snapshot(root, rel) {
-            crate::dlog::w("9005", &format!("回滚前留档失败（{rel}）：{e}"));
+            crate::util::dlog::w("9005", &format!("回滚前留档失败（{rel}）：{e}"));
         }
     }
     std::fs::write(&full, &bytes)?;
@@ -340,7 +340,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let rel = "config.ini";
         let original = "# 中文注释\r\nkey = 旧值\r\n";
-        let gbk = crate::textfile::encode(original, "gbk", "crlf");
+        let gbk = crate::util::textfile::encode(original, "gbk", "crlf");
         std::fs::write(d.join(rel), &gbk).unwrap();
 
         let o = super::read(&d, rel).unwrap();
@@ -355,7 +355,7 @@ mod tests {
         let back = std::fs::read(d.join(rel)).unwrap();
         assert!(back.contains(&0x0D) && back.contains(&0x0A), "CRLF 必须保住");
         assert!(String::from_utf8(back.clone()).is_err(), "写回去还得是 GBK，不能变成 UTF-8");
-        let text = crate::textfile::decode(&back);
+        let text = crate::util::textfile::decode(&back);
         assert_eq!(text.encoding, "gbk");
         assert!(text.text.contains("新值"));
         assert!(text.text.contains("中文注释"), "中文注释不能坏");

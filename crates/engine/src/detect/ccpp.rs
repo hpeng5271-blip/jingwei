@@ -4,7 +4,7 @@
 //! C/C++ 是「装的是哪一家」的问题——GNU、LLVM、MSVC 三家的命令行参数、
 //! 目标文件格式、运行时库全都不通用，混着用会报一堆看不懂的链接错误。
 
-use crate::winutil::{run_cmd, which};
+use crate::util::winutil::{run_cmd, which};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,7 +24,7 @@ fn dev_dirs() -> Vec<PathBuf> {
         r"C:\msys64",
         r"C:\Program Files\LLVM\bin",
     ] {
-        let root = crate::editors::expand(raw);
+        let root = crate::detect::editors::expand(raw);
         if !root.is_dir() {
             continue;
         }
@@ -54,7 +54,7 @@ fn msvc_cl_from_vswhere() -> Option<PathBuf> {
         r"%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe",
     ]
     .iter()
-    .map(|r| crate::editors::expand(r))
+    .map(|r| crate::detect::editors::expand(r))
     .find(|p| p.is_file())?;
 
     let (ok, out) = run_cmd(

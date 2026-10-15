@@ -104,7 +104,7 @@ pub fn rust_check(root: &Path, timeout: Duration) -> (Vec<Diag>, Option<String>)
         let mut buf = String::new();
         // 读不到输出 ≠ 命令没有输出。两件事混成一件，排查时就会往错的方向走。
         if let Err(e) = s.read_to_string(&mut buf) {
-            crate::dlog::w("9004", &format!("读检查器 stdout 失败：{e}"));
+            crate::util::dlog::w("9004", &format!("读检查器 stdout 失败：{e}"));
         }
         buf
     });
@@ -113,7 +113,7 @@ pub fn rust_check(root: &Path, timeout: Duration) -> (Vec<Diag>, Option<String>)
         let mut s = s;
         let mut buf = String::new();
         if let Err(e) = s.read_to_string(&mut buf) {
-            crate::dlog::w("9004", &format!("读检查器 stderr 失败：{e}"));
+            crate::util::dlog::w("9004", &format!("读检查器 stderr 失败：{e}"));
         }
         buf
     });
@@ -131,7 +131,7 @@ pub fn rust_check(root: &Path, timeout: Duration) -> (Vec<Diag>, Option<String>)
         // 超时后收掉这个进程。杀不掉通常意味着它刚好自己退了（正是我们要的结果），
         // 但如果是别的原因，日志里得有这一笔。
         if let Err(e) = child.kill() {
-            crate::dlog::w("9005", &format!("超时后杀检查器进程失败：{e}"));
+            crate::util::dlog::w("9005", &format!("超时后杀检查器进程失败：{e}"));
         }
         return (Vec::new(), Some("检查超时（第一次跑要编译依赖，慢是正常的）".into()));
     }
@@ -309,7 +309,7 @@ fn run_capture(
         let mut s = String::new();
         if let Some(h) = o.as_mut() {
             if let Err(e) = h.read_to_string(&mut s) {
-                crate::dlog::w("9004", &format!("读 stdout 失败：{e}"));
+                crate::util::dlog::w("9004", &format!("读 stdout 失败：{e}"));
             }
         }
         s
@@ -319,7 +319,7 @@ fn run_capture(
         let mut s = String::new();
         if let Some(h) = e.as_mut() {
             if let Err(e) = h.read_to_string(&mut s) {
-                crate::dlog::w("9004", &format!("读 stderr 失败：{e}"));
+                crate::util::dlog::w("9004", &format!("读 stderr 失败：{e}"));
             }
         }
         s
@@ -332,7 +332,7 @@ fn run_capture(
             Ok(None) => {
                 if started.elapsed() >= timeout {
                     if let Err(e) = child.kill() {
-                        crate::dlog::w("9005", &format!("超时后杀进程失败：{e}"));
+                        crate::util::dlog::w("9005", &format!("超时后杀进程失败：{e}"));
                     }
                     return Err("检查超时".into());
                 }
@@ -355,7 +355,7 @@ pub fn check_all(root: &Path, timeout: Duration) -> (Vec<Diag>, Vec<String>) {
         list.extend(d);
         if let Some(n) = n { notes.push(n); }
     }
-    if crate::lang::detect_all(root).contains(&crate::lang::Lang::Python) {
+    if crate::detect::lang::detect_all(root).contains(&crate::detect::lang::Lang::Python) {
         let ruff = which::find("ruff");
         match ruff {
             Some(p) => {

@@ -41,6 +41,12 @@ pub struct ParseOutcome {
     /// 所以"解析不了"不该只留一个数字——**那个引用本身是有用的料**：
     /// 名字、在哪个函数里、第几行。跨文件解析那一步就靠它。
     pub references: Vec<RefFact>,
+    /// 本文件的 `use` 语句——索引期就能确定的"名字 → 路径"映射。
+    ///
+    /// **为什么它属于索引期**：`use crate::util::winutil::which;` 这句话本身
+    /// 就把"本文件里的 `which` 指那条路径"写死了，**不需要看别的文件**。
+    /// （跨文件的那一步是"路径 → 符号 id"——那个才要全图。）
+    pub imports: Vec<ImportFact>,
     /// 语法树里**没有**错误/缺失子树。
     ///
     /// 调用方拿它决定"能不能建调用关系"：`false` 时只出符号，不出关系。
@@ -70,6 +76,24 @@ pub struct RefFact {
     pub raw: String,
 }
 
+/// 一条 `use` 语句——**索引期能确定的"名字 → 路径"映射**。
+///
+/// 为什么它是"事实"而不是"解析结果"：`use crate::util::winutil::which;`
+/// 这句话本身就把"本文件里的 `which` 指那条路径"写死了，
+/// **不需要看到别的文件**就能记下来。所以它属于索引期。
+///
+/// 跨文件那一步（路径 → 符号 id）才需要全图——
+/// 因为 `crate::util::winutil` 到底对应哪个文件，要看整棵模块树。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ImportFact {
+    /// 引入后在本文件里用的名字（`use ...::which` → `which`；带 `as` 时用别名）。
+    pub local: String,
+    /// 原来的路径，原样留着（`crate::util::winutil::which`）。
+    /// **不在这里拆**：拆成模块段与末段是解析期的事，
+    /// 而且要处理 `self` / `super` / `crate` / 通配 这些形状。
+    pub path: String,
+}
+
 /// 解析一段 Rust 源码。`rel` 是项目内的相对路径（用 / 分隔），`now` 是毫秒时间戳。
 ///
 /// **不 panic**：起不来解析器、解析失败、文件不是 UTF-8，一律返回
@@ -89,6 +113,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     let mut symbols = Vec::new();
     let mut scope: Vec<String> = Vec::new();
     collect(root, src, rel, now, None, &mut scope, &mut symbols);
+    let imports = collect_imports(root, src);
     // 按 id 去重：树没坏透时可能抽到同名的，去重比让主键撞车好。
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
     symbols.dedup_by(|a, b| a.id == b.id);
@@ -115,8 +140,99 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         symbols,
         calls,
         references: refs,
+        imports,
         complete,
     }
+}
+
+/// 抽 `use` 语句。
+///
+/// 只处理**能确定**的三种形状：
+/// - `use a::b::c;` → `c` 指向 `a::b::c`
+/// - `use a::b::c as d;` → `d` 指向 `a::b::c`
+/// - `use a::b::{c, d};` → 展开成两条
+///
+/// **不处理**的：`use a::*;`（通配——一个名字可能来自任何地方，
+/// 记下来也没法用，反而会让人以为"这里有个确定的名字"）。
+/// 宁可少收，也不收一条用不上的。
+fn collect_imports(root: TsNode<'_>, src: &str) -> Vec<ImportFact> {
+    let mut out = Vec::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "use_declaration" {
+            if let Ok(text) = child.utf8_text(src.as_bytes()) {
+                expand_use(text.trim(), &mut out);
+            }
+        }
+        // 模块里的 use 也要收（`mod x { use ...; }`）
+        if matches!(child.kind(), "mod_item" | "declaration_list") {
+            out.extend(collect_imports(child, src));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// 把一句 `use` 展开成若干条"本文件的名字 → 路径"。
+///
+/// 这是**字符串层面**的展开，不建语法树——能确定的那几种形状用字符串就分得清，
+/// 而通配和复杂嵌套本来就要丢。
+fn expand_use(text: &str, out: &mut Vec<ImportFact>) {
+    let body = text
+        .strip_prefix("use")
+        .unwrap_or(text)
+        .trim()
+        .trim_end_matches(';')
+        .trim();
+    if body.is_empty() || body.contains('*') {
+        return; // 通配不收
+    }
+    // 花括号：`a::b::{c, d as e}` → 前缀 `a::b` + 每一项
+    if let Some(open) = body.find('{') {
+        if let Some(close) = body.rfind('}') {
+            let prefix = body[..open].trim().trim_end_matches("::").to_string();
+            let inner = &body[open + 1..close];
+            for item in inner.split(',') {
+                let item = item.trim();
+                if item.is_empty() || item.contains('*') {
+                    continue;
+                }
+                let full = format!("{prefix}::{item}");
+                push_import(&full, out);
+            }
+            return;
+        }
+    }
+    push_import(body, out);
+}
+
+/// `a::b::c` 或 `a::b::c as d` → 一条 import。
+fn push_import(full: &str, out: &mut Vec<ImportFact>) {
+    let (path, alias) = match full.split_once(" as ") {
+        Some((p, a)) => (p.trim(), Some(a.trim())),
+        None => (full, None),
+    };
+    let mut segs: Vec<&str> = path.split("::").filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return;
+    }
+    // 名字取路径末段（`crate::a::b::c` → `c`）；
+    // 末段是 `self` 的（`use a::b::{self}`）指向的是 `b` 本身。
+    let mut local = segs.pop().unwrap_or("").to_string();
+    if local == "self" {
+        local = segs.pop().unwrap_or("").to_string();
+    }
+    if let Some(a) = alias {
+        local = a.to_string();
+    }
+    if local.is_empty() {
+        return;
+    }
+    out.push(ImportFact {
+        local,
+        path: path.to_string(),
+    });
 }
 
 /// 走一遍语法树，把**文件内能确定的调用**挑出来。
@@ -340,6 +456,14 @@ fn push_symbol(
         Confidence::High,
         now,
     );
+    // **符号的子类要记下来**，因为 Rust 有命名空间——
+    // 《Rust Reference》的原话是"名字被分进不同的命名空间，
+    // 让不同命名空间里的实体可以同名而不冲突"。
+    //
+    // 具体到这里：`foo()` 是个**调用**，它只可能在**值命名空间**里解析，
+    // 所以同名的 struct / trait / mod 根本不该进候选。
+    // 不记这一条的话，46 条"拿不准"里有相当一部分是白白拿不准的。
+    n.data = Some(serde_json::json!({ "sym": symbol_class(item.kind()) }));
     // 内容指纹：种类 + 名字 + 容器 + 文件。**故意不含行号**——
     // 方法往下挪两行不算"内容变了"，而抽样校验问的正是"内容变了没"。
     //
@@ -355,6 +479,22 @@ fn push_symbol(
     let id = n.id.clone();
     out.push(n.with_file(rel, line));
     Some(id)
+}
+
+/// 语法节点 → 符号子类。
+///
+/// 只分到**够用**为止：我们要的是"它在哪个命名空间"，
+/// 不是一份完整的 Rust 语法分类表。
+fn symbol_class(kind: &str) -> &'static str {
+    match kind {
+        // 值命名空间：可以被 `foo()` 这样调用
+        "function_item" | "const_item" | "static_item" => "value",
+        // 类型命名空间：不能直接当函数调
+        "struct_item" | "enum_item" | "union_item" | "trait_item" | "type_item" => "type",
+        // 模块：既不是值也不是类型，单独算
+        "mod_item" => "module",
+        _ => "other",
+    }
 }
 
 /// **符号 key 的唯一拼法**（`collect` 与 `collect_calls` 共用一份）。

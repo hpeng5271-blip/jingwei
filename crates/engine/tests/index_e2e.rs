@@ -33,6 +33,25 @@ fn open(root: &Path) -> Store {
     Store::open(&root.join(".jingwei").join("graph.db")).expect("开库失败")
 }
 
+/// 按给定的文件内容铺一个临时项目。
+///
+/// 为什么要这个：`make_project` 是固定内容，而"闭包""重导出"这些东西
+/// **只有写成具体形状才测得出来**——它们本来就是形状问题。
+fn make_tree(tag: &str, files: &[(&str, &str)]) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("jw-e2e-{tag}-{}", std::process::id()));
+    if d.exists() {
+        std::fs::remove_dir_all(&d).expect("清临时目录失败");
+    }
+    for (rel, body) in files {
+        let p = d.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).expect("建目录失败");
+        }
+        std::fs::write(&p, body).expect("写文件失败");
+    }
+    d
+}
+
 #[test]
 fn 一个目录索引完图谱里就有了东西() {
     let root = make_project("basic");
@@ -245,5 +264,71 @@ fn 指向未索引文件的诊断会被如实报出来() {
     assert!(
         s.node("file:src/never_seen.rs").expect("读失败").is_none(),
         "不许为了挂上它而凭空造一个文件节点"
+    );
+}
+
+// ── 解析期最要紧的两条路：局部绑定、跨文件 use ─────────────────────
+//
+// 这两条在单元测试里各有一段（parse 层抽得到、resolve 层连得上），
+// 但**单元测试各自都对、接起来跑不通**这件事，这个项目已经吃过一次亏
+// （见 `through_import` 那段注释：路径参照系不同，全等比对永远不命中）。
+// 所以它们必须在集成层也有一条断言。
+
+/// **闭包算符号，而且真的连成边**。
+///
+/// `let inner = |x| ...;` 之后那句 `inner(1)` 是个调用，它指向的东西
+/// **本来在图谱里不存在**——于是解析期只能报"拿不准"。收成符号之后，
+/// 这里该出现一条 `outer → outer::inner` 的 calls 边。
+#[test]
+fn 闭包被调用时连成边() {
+    let root = make_tree(
+        "closure",
+        &[(
+            "src/a.rs",
+            "fn outer() {\n    let inner = |x: i64| x + 1;\n    inner(1);\n}\n",
+        )],
+    );
+    let mut s = open(&root);
+    index::index_rust(&root, &mut s).expect("索引失败");
+
+    assert!(
+        s.node("symbol:src/a.rs#outer::inner").expect("读失败").is_some(),
+        "闭包要作为一个符号进图谱，id 带它的作用域链"
+    );
+    assert_eq!(
+        s.neighbors("symbol:src/a.rs#outer", EdgeKind::Calls, Dir::Out)
+            .expect("查失败"),
+        vec!["symbol:src/a.rs#outer::inner".to_string()],
+        "调用它的就是那个闭包，不该拿不准也不该指向别处"
+    );
+}
+
+/// **一句 `pub use` 就能定死一个名字的去向**，跨文件也一样。
+///
+/// `probe.rs` 里那句 `pub use crate::util::{which};` 等于它自己说清楚了
+/// "本文件的 `which` 是 `util.rs` 里那个"——解析期不该拿不准。
+///
+/// 这条是实测逼出来的：拿不准的名单里一度只剩它，而它明明有 `use`。
+/// 根因是 `pub use` 没被当成 use（`strip_prefix("use")` 对 `pub use ` 失败）。
+#[test]
+fn pub_use_把跨文件的调用连起来() {
+    let root = make_tree(
+        "pubuse",
+        &[
+            ("src/util.rs", "pub fn which() {}\n"),
+            (
+                "src/probe.rs",
+                "pub use crate::util::{which};\n\nfn probe() {\n    which();\n}\n",
+            ),
+        ],
+    );
+    let mut s = open(&root);
+    index::index_rust(&root, &mut s).expect("索引失败");
+
+    assert_eq!(
+        s.neighbors("symbol:src/probe.rs#probe", EdgeKind::Calls, Dir::Out)
+            .expect("查失败"),
+        vec!["symbol:src/util.rs#which".to_string()],
+        "use 说得很清楚，跨文件也要连上"
     );
 }

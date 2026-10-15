@@ -7,7 +7,7 @@
 //!
 //! ## 三态，与 `model::Verdict` 同构
 //!
-//! ```
+//! ```text
 //! { "state": "yes",     "data": { … } }
 //! { "state": "no",      "reason": "这几处都看过了，确实没有" }
 //! { "state": "unknown", "reason": "这几种方式都读不到（多半是权限或驱动）" }

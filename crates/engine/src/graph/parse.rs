@@ -16,6 +16,8 @@
 use jingwei_model::{Confidence, Node, NodeKind, Source};
 use tree_sitter::Node as TsNode;
 
+use super::imports::{collect_imports, ImportFact};
+
 /// 一次解析的结果。
 #[derive(Debug, Clone, Default)]
 pub struct ParseOutcome {
@@ -74,24 +76,6 @@ pub struct RefFact {
     /// 原始文本。`self.m()` / `Type::m()` 这种形状**原样留着**——
     /// 以后要做接收者类型推断时，需要看到完整的写法，而不是被我压扁的名字。
     pub raw: String,
-}
-
-/// 一条 `use` 语句——**索引期能确定的"名字 → 路径"映射**。
-///
-/// 为什么它是"事实"而不是"解析结果"：`use crate::util::winutil::which;`
-/// 这句话本身就把"本文件里的 `which` 指那条路径"写死了，
-/// **不需要看到别的文件**就能记下来。所以它属于索引期。
-///
-/// 跨文件那一步（路径 → 符号 id）才需要全图——
-/// 因为 `crate::util::winutil` 到底对应哪个文件，要看整棵模块树。
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ImportFact {
-    /// 引入后在本文件里用的名字（`use ...::which` → `which`；带 `as` 时用别名）。
-    pub local: String,
-    /// 原来的路径，原样留着（`crate::util::winutil::which`）。
-    /// **不在这里拆**：拆成模块段与末段是解析期的事，
-    /// 而且要处理 `self` / `super` / `crate` / 通配 这些形状。
-    pub path: String,
 }
 
 /// 解析一段 Rust 源码。`rel` 是项目内的相对路径（用 / 分隔），`now` 是毫秒时间戳。
@@ -159,7 +143,28 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     let mut calls = Vec::new();
     let mut refs = Vec::new();
     let mut scope: Vec<String> = Vec::new();
-    collect_calls(root, src, rel, None, &mut scope, &by_name, &mut calls, &mut refs);
+    // **本文件内"路径 → id"的反查表**：`L::post` → `symbol:a.rs#L::post`。
+    //
+    // 为什么需要它：`self.m()` 这种形状，目标不是"某个名字"，而是
+    // **"某个类型上的某个方法"**。只靠名字查会撞上不同 impl 里的同名方法，
+    // 而路径（`L::m`）是本文件里唯一的。
+    let mut by_path: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for s in &symbols {
+        if let Some((_, p)) = s.id.split_once('#') {
+            by_path.insert(p.to_string(), s.id.clone());
+        }
+    }
+    collect_calls(
+        root,
+        src,
+        rel,
+        None,
+        &mut scope,
+        &by_name,
+        &by_path,
+        &mut calls,
+        &mut refs,
+    );
     // 同一个调用点可能在多处出现（同一个函数调 `helper()` 两次）——
     // 图上只该有一条边：**边表达的是"有关系"，不是"关系发生了几次"**。
     calls.sort();
@@ -185,86 +190,6 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
 /// **不处理**的：`use a::*;`（通配——一个名字可能来自任何地方，
 /// 记下来也没法用，反而会让人以为"这里有个确定的名字"）。
 /// 宁可少收，也不收一条用不上的。
-fn collect_imports(root: TsNode<'_>, src: &str) -> Vec<ImportFact> {
-    let mut out = Vec::new();
-    let mut cursor = root.walk();
-    for child in root.children(&mut cursor) {
-        if child.kind() == "use_declaration" {
-            if let Ok(text) = child.utf8_text(src.as_bytes()) {
-                expand_use(text.trim(), &mut out);
-            }
-        }
-        // 模块里的 use 也要收（`mod x { use ...; }`）
-        if matches!(child.kind(), "mod_item" | "declaration_list") {
-            out.extend(collect_imports(child, src));
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// 把一句 `use` 展开成若干条"本文件的名字 → 路径"。
-///
-/// 这是**字符串层面**的展开，不建语法树——能确定的那几种形状用字符串就分得清，
-/// 而通配和复杂嵌套本来就要丢。
-fn expand_use(text: &str, out: &mut Vec<ImportFact>) {
-    let body = text
-        .strip_prefix("use")
-        .unwrap_or(text)
-        .trim()
-        .trim_end_matches(';')
-        .trim();
-    if body.is_empty() || body.contains('*') {
-        return; // 通配不收
-    }
-    // 花括号：`a::b::{c, d as e}` → 前缀 `a::b` + 每一项
-    if let Some(open) = body.find('{') {
-        if let Some(close) = body.rfind('}') {
-            let prefix = body[..open].trim().trim_end_matches("::").to_string();
-            let inner = &body[open + 1..close];
-            for item in inner.split(',') {
-                let item = item.trim();
-                if item.is_empty() || item.contains('*') {
-                    continue;
-                }
-                let full = format!("{prefix}::{item}");
-                push_import(&full, out);
-            }
-            return;
-        }
-    }
-    push_import(body, out);
-}
-
-/// `a::b::c` 或 `a::b::c as d` → 一条 import。
-fn push_import(full: &str, out: &mut Vec<ImportFact>) {
-    let (path, alias) = match full.split_once(" as ") {
-        Some((p, a)) => (p.trim(), Some(a.trim())),
-        None => (full, None),
-    };
-    let mut segs: Vec<&str> = path.split("::").filter(|s| !s.is_empty()).collect();
-    if segs.is_empty() {
-        return;
-    }
-    // 名字取路径末段（`crate::a::b::c` → `c`）；
-    // 末段是 `self` 的（`use a::b::{self}`）指向的是 `b` 本身。
-    let mut local = segs.pop().unwrap_or("").to_string();
-    if local == "self" {
-        local = segs.pop().unwrap_or("").to_string();
-    }
-    if let Some(a) = alias {
-        local = a.to_string();
-    }
-    if local.is_empty() {
-        return;
-    }
-    out.push(ImportFact {
-        local,
-        path: path.to_string(),
-    });
-}
-
 /// 走一遍语法树，把**文件内能确定的调用**挑出来。
 ///
 /// `scope` 是**作用域栈**（从外到内），它是这套抽取的骨架：
@@ -280,6 +205,7 @@ fn collect_calls(
     container: Option<&str>,
     scope: &mut Vec<String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
+    by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
 ) {
@@ -311,6 +237,7 @@ fn collect_calls(
                         container,
                         scope,
                         by_name,
+                        by_path,
                         out,
                         refs,
                     );
@@ -333,6 +260,7 @@ fn collect_calls(
                         ty.as_deref(),
                         scope,
                         by_name,
+                        by_path,
                         out,
                         refs,
                     );
@@ -340,7 +268,9 @@ fn collect_calls(
             }
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
-                    collect_calls(body, src, rel, container, scope, by_name, out, refs);
+                    collect_calls(
+                        body, src, rel, container, scope, by_name, by_path, out, refs,
+                    );
                 }
             }
             "call_expression" => {
@@ -348,6 +278,34 @@ fn collect_calls(
                     continue;
                 };
                 let txt = f.utf8_text(src.as_bytes()).unwrap_or("").trim().to_string();
+
+                // ① **`self.m()` —— 接收者类型就在眼前，不用推断**。
+                //
+                //    在 `impl L { fn a(&self) { self.b(); } }` 里，
+                //    `self` 的类型**由它所在的 impl 块写着**（就是 `L`）。
+                //    这不需要任何跨文件类型推断，是"局部就能确定"的那一类——
+                //    而这正是方法调用里最常见的一种。
+                if f.kind() == "field_expression" {
+                    let recv = f
+                        .child_by_field_name("value")
+                        .and_then(|v| v.utf8_text(src.as_bytes()).ok())
+                        .map(|s| s.trim().to_string());
+                    let field = f
+                        .child_by_field_name("field")
+                        .and_then(|v| v.utf8_text(src.as_bytes()).ok())
+                        .map(|s| s.trim().to_string());
+                    if let (Some("self"), Some(m), Some(c)) = (recv.as_deref(), field, container) {
+                        let path = format!("{c}::{m}");
+                        if let Some(id) = by_path.get(&path) {
+                            if let Some(caller) = scope.last() {
+                                if id != caller {
+                                    out.push((caller.clone(), id.clone()));
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
                 // 只认裸标识符。带 `::` 或 `.` 的都要真正的符号解析，这里不猜。
                 let is_plain = !txt.is_empty()
                     && txt.chars().all(|c| c.is_alphanumeric() || c == '_')
@@ -397,7 +355,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, by_name, out, refs);
+                collect_calls(child, src, rel, container, scope, by_name, by_path, out, refs);
             }
         }
     }
@@ -573,6 +531,36 @@ fn collect_closures(
             if let Some(o) = own {
                 inner.push(o.to_string());
             }
+            // **函数参数里"能被调用的那些"也是局部绑定**——
+            // `fn launch(cb: &mut dyn FnMut(Event))` 之后那句 `cb(Event::Stage{..})`
+            // 是一个**调用**，而它指向的东西就在签名里写着。
+            //
+            // 只收类型里带 `Fn` 的（`Fn` / `FnMut` / `FnOnce` / `dyn Fn`）：
+            // 普通参数（`x: u32`）不会被当函数调，收进来只会让图谱变胖。
+            if let Some(params) = child.child_by_field_name("parameters") {
+                let mut pc = params.walk();
+                for p in params.children(&mut pc) {
+                    if p.kind() != "parameter" {
+                        continue;
+                    }
+                    let ty = p
+                        .child_by_field_name("type")
+                        .and_then(|t| t.utf8_text(src.as_bytes()).ok())
+                        .unwrap_or("");
+                    if !ty.contains("Fn") {
+                        continue;
+                    }
+                    let nm = p
+                        .child_by_field_name("pattern")
+                        .and_then(|n| n.utf8_text(src.as_bytes()).ok())
+                        .map(|s| s.trim().to_string());
+                    if let Some(nm) = nm {
+                        if !nm.is_empty() && nm.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                            out.push((nm, inner.clone()));
+                        }
+                    }
+                }
+            }
             if let Some(body) = child.child_by_field_name("body") {
                 collect_closures(body, src, &inner, out);
             }
@@ -719,43 +707,6 @@ fn use_them() {
 
     /// 宏调用不是函数调用——`println!` 不该被当成边。
     /// 这正是设计 §6.1 说的"`format!` 是宏不是函数"，语法层直接挡住了。
-    /// **`use` 抽取要真的抽到**——这是 `through_import` 能工作的前提。
-    ///
-    /// 三种能确定的形状都收，通配一律不收（`use a::*` 记下来也没法用，
-    /// 反而会让人以为"这里有个确定的名字"）。
-    #[test]
-    fn use_抽取只收能确定的形状() {
-        let src = r#"
-use crate::util::winutil::{run_cmd, which};
-use crate::graph::store::Store as S;
-use std::collections::BTreeMap;
-use crate::*;
-"#;
-        let r = parse_rust("a.rs", src, 1);
-        let got: Vec<(String, String)> = r
-            .imports
-            .iter()
-            .map(|i| (i.local.clone(), i.path.clone()))
-            .collect();
-        assert!(
-            got.contains(&("which".into(), "crate::util::winutil::which".into())),
-            "{got:?}"
-        );
-        assert!(
-            got.contains(&("run_cmd".into(), "crate::util::winutil::run_cmd".into())),
-            "{got:?}"
-        );
-        assert!(
-            got.contains(&("S".into(), "crate::graph::store::Store".into())),
-            "别名要记：{got:?}"
-        );
-        assert!(
-            got.contains(&("BTreeMap".into(), "std::collections::BTreeMap".into())),
-            "{got:?}"
-        );
-        assert!(!got.iter().any(|(l, _)| l == "*"), "通配不收：{got:?}");
-    }
-
     #[test]
     fn 宏调用不算调用关系() {
         let src = "fn a() { println!(\"x\"); }\nfn println() {}\n";

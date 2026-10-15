@@ -68,9 +68,11 @@ pub mod understand {
     pub mod rules;
 }
 
-/// L4 · 图谱：存与查。`store` 是库、`parse` 是解析、`index` 是把两者接起来、`envelope` 是对外协议。
+/// L4 · 图谱：存与查。`store` 是库、`parse` 是解析、`imports` 是 `use` 的字符串展开、
+/// `resolve` 是把引用变关系、`index` 是把它们接起来、`envelope` 是对外协议。
 pub mod graph {
     pub mod envelope;
+    pub mod imports;
     pub mod index;
     pub mod parse;
     pub mod resolve;

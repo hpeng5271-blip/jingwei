@@ -303,7 +303,7 @@ pub fn index_rust(
     let mut all_names: crate::graph::resolve::SymbolTable =
         std::collections::BTreeMap::new();
     let mut pending_refs: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
-    let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::parse::ImportFact>> =
+    let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::imports::ImportFact>> =
         std::collections::BTreeMap::new();
 
     for (rel, abs) in files {
@@ -468,7 +468,7 @@ pub fn index_rust(
         let mut extra: Vec<Edge> = Vec::new();
         for (rel, refs) in &pending_refs {
             let ft = file_tables.get(rel).unwrap_or(&empty);
-            let no_imports: Vec<crate::graph::parse::ImportFact> = Vec::new();
+            let no_imports: Vec<crate::graph::imports::ImportFact> = Vec::new();
             let imps = file_imports.get(rel).unwrap_or(&no_imports);
             let res = crate::graph::resolve::resolve_file(rel, refs, ft, imps, &all_names);
             rep.resolved += res.resolved.len();

@@ -88,7 +88,7 @@ pub fn resolve_file(
     rel: &str,
     refs: &[RefFact],
     own_file: &SymbolTable,
-    imports: &[super::parse::ImportFact],
+    imports: &[super::imports::ImportFact],
     all: &SymbolTable,
 ) -> Resolution {
     let mut out = Resolution::default();
@@ -177,7 +177,7 @@ pub fn resolve_file(
 /// 那些**留给整体联调**——现在这里只做"能确定的那一条路"。
 fn through_import(
     r: &RefFact,
-    imports: &[super::parse::ImportFact],
+    imports: &[super::imports::ImportFact],
     all: &SymbolTable,
 ) -> Option<String> {
     let imp = imports.iter().find(|i| i.local == r.name)?;
@@ -442,7 +442,7 @@ mod tests {
     /// 在 parse 里已经展开成两条，这里只面对"一个名字一个路径"。
     #[test]
     fn 顺着_use_能找到跨文件的定义() {
-        use crate::graph::parse::ImportFact;
+        use crate::graph::imports::ImportFact;
         let mut all: SymbolTable = BTreeMap::new();
         all.insert(
             "which".to_string(),

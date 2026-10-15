@@ -1,0 +1,31 @@
+{
+  "title": "经纬 · 门禁",
+  "note": "这一份是门禁清单的唯一真源：改门禁只改这里，不改脚本。脚本保持纯 ASCII —— Windows PowerShell 5.1 会把没有 BOM 的 .ps1 按 ANSI 读，中文注释会当场烂成乱码（这条踩过）。",
+  "steps": [
+    {
+      "name": "单元与集成测试",
+      "cmd": "cargo test --workspace --all-targets",
+      "why": "引擎六层、真实 SQLite、外壳命令、图谱端到端的行为"
+    },
+    {
+      "name": "文档测试",
+      "cmd": "cargo test --workspace --doc",
+      "why": "文档里的示例必须是真的能跑的东西；这一道长期没进任何门禁，坏了一个月没人知道"
+    },
+    {
+      "name": "静态检查",
+      "cmd": "cargo clippy --workspace --all-targets -- -D warnings",
+      "why": "零警告，不是少一点"
+    },
+    {
+      "name": "工程门禁",
+      "cmd": "node tools/gate.mjs",
+      "why": "版本号三处一致、单文件行数只许降不许升、每条动机都有落点"
+    },
+    {
+      "name": "外壳测试",
+      "cmd": "node tools/uitest.mjs",
+      "why": "打开 → 编辑器 → 运行 → 问题栏 → 图谱；任何 JS 异常即失败"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+/target
+/dist
+/.drydock
+/node_modules
+/.idea
+/.vscode
+/ui/.cache
+src-tauri/gen
+# Tauri 会顺手生成手机端图标。这个工具只做桌面，需要时 npx tauri icon 一条命令就回来了。
+src-tauri/icons/android
+src-tauri/icons/ios
+**/*.rs.bk
+*.pdb

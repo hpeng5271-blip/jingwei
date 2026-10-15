@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+# 重建中：先只放领域模型（零依赖、纯资产），跑通了再加下一层。
+# 这样每一步都是"能编译、能测试"的状态，出问题一眼能看出是哪一步引进来的。
+members = ["crates/model", "crates/engine", "crates/cli", "src-tauri"]
+# 默认只建内核和命令行：桌面外壳那堆依赖编译很贵，
+# 改一行诊断规则不该等五分钟。要它时用 -p jingwei-app 或者 npx tauri dev。
+default-members = ["crates/model", "crates/engine", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+# 设计 §11：架构约束写进编译期，而不是靠自觉。
+#
+# 这组规则**四个 crate 全都要继承**（各自声明 `[lints] workspace = true`）。
+# 曾经只有 model 继承，于是那条"忽略 Result 要显式"的 lint 在最容易犯错的地方
+# （engine 有 40 多处系统调用）根本没生效——规矩写在文档里没人执行，等于没有。
+[workspace.lints.rust]
+# 在 `unsafe fn` 里做不安全操作，也必须显式写 `unsafe {}` 块，
+# 否则"这里有不安全操作"会藏在函数签名后面，读的人扫不出来。
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# 设计 §11「错误必须可见、可追溯」：忽略一个 Result 必须是有意的，
+# 而不是"顺手 .ok() / let _ ="。打开这条 lint，所有忽略点会被逐个列出来，
+# 让人逐条判定"这处忽略是否安全"——而不是靠人记得。
+let_underscore_must_use = "warn"
+# 每个 `unsafe {}` 块前面必须写 `// SAFETY:`，说清"凭什么这是安全的"。
+# unsafe 是这套代码里唯一能弄出内存不安全的地方；假设不写下来，
+# 就没有第二个人（包括三个月后的自己）能复核它。
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+# 工具是 I/O 密集的，但启动路径上有几千次 syscall 和若干次进程创建；
+# codegen-units=1 让编译器跨模块内联，panic=abort 省掉展开表。
+# 代价是构建慢十几秒，换来更小更快的产物——发行版该这么配。
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

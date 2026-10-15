@@ -1,0 +1,43 @@
+{
+  "note": "动机清单——用户当初要什么，落在设计里的哪一处。",
+  "为什么要有这个文件": [
+    "R3 通审发现：设计是跟着『能力』长的，不是跟着『动机』长的。",
+    "做内核时想的是节点和边，做外壳时想的是卡片和通知——而『我想看一张能转起来的关系图』",
+    "这个动机正好掉进两者的缝里，设计里搜『可视化』零命中。",
+    "这一问（用户当初为什么要这个？那个东西现在有地方放吗？）在 R3 之前没有任何一次问过。",
+    "**但『下次记得问』不是机制，是许愿**——所以这里把它变成一份可检查的清单，由 gate.mjs 守着。"
+  ],
+  "怎么用": [
+    "state=landed：`landing` 那段文字必须在《设计.md》里真实出现，指不到就报错（防『以为写了』）。",
+    "state=pending：必须写 `trigger`（满足什么条件才做）——这是 §13 第 3 条，不许留无条件 TODO。",
+    "加新动机时先想『它会落在哪』；想不出来，说明这个需求还没被消化，别急着做。"
+  ],
+  "motives": [
+    { "id": "core", "want": "终端与 IDE 之间的理解层：信息过滤 + 信息反馈", "landing": "信息管线", "state": "landed" },
+    { "id": "lines", "want": "四条不许破的线（数据正确 / 不生成修复命令 / 无自查不报错 / 关系必有来源）", "landing": "四条不许破的线", "state": "landed" },
+    { "id": "model", "want": "领域模型：实体与关系，两端合法矩阵在构造期生效", "landing": "两端合法矩阵", "state": "landed" },
+    { "id": "datastore", "want": "数据层：SQLite + FTS5 + 索引 + 迁移 + 保留策略", "landing": "数据层设计.md#访问路径 → 索引", "state": "landed" },
+    { "id": "parse", "want": "解析：tree-sitter 为主力，遇错误不建关系", "landing": "错误门控", "state": "landed" },
+    { "id": "incremental", "want": "增量更新：三级检测 + 符号级双哈希", "landing": "三级变更检测", "state": "landed" },
+    { "id": "onestop", "want": "一条龙：契约 → 跑 → 记录，并接进图谱", "landing": "契约与一条龙接图谱", "state": "landed" },
+    { "id": "graphview", "want": "关系图谱展示（近乎炫技的那件事）", "landing": "关系图谱怎么展示", "state": "landed" },
+    { "id": "canvas", "want": "工作区是画布，卡片只用来浮", "landing": "工作区是画布", "state": "landed" },
+    { "id": "deps", "want": "依赖按 Maven 读法组织（声明 → 实际 → 传递）", "landing": "依赖工具窗按 Maven 读法组织", "state": "landed" },
+    { "id": "visual", "want": "暖色治愈 + 借 IDEA 的信息组织 + 学 MC 的动效与按压反馈", "landing": "视觉语言六条", "state": "landed" },
+    { "id": "motion", "want": "动效与反馈：每条回答『发生了什么』", "landing": "动效与反馈", "state": "landed" },
+    { "id": "editor", "want": "编辑器：够用的窗口 + 外跳给成熟工具", "landing": "内置编辑器的投入就此冻结", "state": "landed" },
+    { "id": "env", "want": "环境探测：多源整合，能问的就不猜", "landing": "工具链探测写", "state": "landed" },
+    { "id": "lsp", "want": "LSP 集成（语义层）", "landing": null, "state": "pending", "trigger": "M1–M6 完成且 tree-sitter 管线稳定" },
+    { "id": "learning", "want": "学习引导 / 教学性（让不懂的人也能上手）", "landing": null, "state": "pending", "trigger": "图谱自己连续三个月在用（§16 第 3 条）" },
+    { "id": "lifecycle", "want": "项目生命周期：发现 / 创建 / 起草契约（移动与删除明确不做）", "landing": "项目生命周期——发现、创建、起草", "state": "landed" },
+    { "id": "notebook", "want": "笔记：固定几类、可引用、删了能捞回来", "landing": "笔记是**记录**，不是文档编辑器", "state": "landed" },
+    { "id": "machine", "want": "机器清单：多源整合，读不到就说读不到", "landing": "机器清单要多源印证", "state": "landed" },
+    { "id": "clean", "want": "清理：能删 / 要权限 / 别碰，默认回收站", "landing": "清理要\"先探后删\"", "state": "landed" },
+    { "id": "share", "want": "打包给别人用（绿色免安装）", "landing": "交付形态是\"绿色压缩包\"", "state": "landed" },
+    { "id": "crossplatform", "want": "跨平台（Linux / macOS）", "landing": null, "state": "pending", "trigger": "真有非 Windows 用户时；那之前路径小写化这条必须先改" }
+    ,
+    { "id": "sysreport", "want": "计算机检测报告：跑完能出报告、问一句存到桌面", "landing": null, "state": "pending", "trigger": "机器清单那一章的内容被真实用过一轮之后（现在连'报告'这个载体都没有，先别做导出）" },
+    { "id": "c_drive", "want": "C 盘空间结构：空间到底被什么吃了", "landing": null, "state": "pending", "trigger": "下次动 clean.rs 时扩到盘级——它现在已经在扫缓存目录，加一层聚合即可" },
+    { "id": "startup", "want": "启动项检查（电脑从地基到应用层都看看）", "landing": null, "state": "pending", "trigger": "有用户报'开机慢/后台有一堆东西'时——读 Run 键是只读操作，代价很小，但**它离'开发'比前面几条远**，优先级排最后" }
+  ]
+}

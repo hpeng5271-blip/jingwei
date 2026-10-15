@@ -1,0 +1,15 @@
+[package]
+name = "jingwei-model"
+version.workspace = true
+edition.workspace = true
+description = "经纬的领域模型：实体、关系、来源、置信度、结论。零依赖（只有 serde）。"
+
+# 设计 §3.1：model 是依赖方向的最内层。
+# 这里只允许出现 serde——一旦出现 sqlite / tokio / reqwest，
+# 「领域层不依赖基础设施」这条约束就破了。谁想加，先改设计。
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

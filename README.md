@@ -36,10 +36,16 @@ IDE 和终端不是不会这些，是它们**不负责筛**：所有信息一律
 ```
 crates/model     领域模型：实体、关系、来源、置信度、结论。零依赖（只有 serde）。
 crates/engine    全部逻辑。不依赖任何 GUI，对外只给 JSON。
-crates/cli       命令行外壳：只负责排版和参数解析。
+                 分六层（util / sys / detect / understand / graph / state）+ launch 编排；
+                 一条龙的前四个阶段按语言分家（launch/python.rs · node.rs · java.rs），
+                 后两个阶段（拉起进程、等待就绪）三种语言共用 launch.rs 里那一处实现。
+crates/cli       命令行外壳：只负责排版和参数解析。命令按领域分成六个文件
+                 （cmd_machine / cmd_doctor / cmd_project / cmd_run / cmd_clean）。
 src-tauri        桌面外壳：只做展示和转接，逻辑一个都不重复。
-ui               前端（静态页面，无打包器）。
-tools            门禁与探针脚本。
+                 payload.rs 专门负责"一次体检的全部材料"打包成前端能直接用的形状。
+ui               前端（静态页面，无打包器）。按一屏/一域拆成 7 个经典脚本，
+                 加载顺序写在 index.html 里——`const` 不会提升，顺序是硬约束。
+tools            门禁与探针脚本（gates.json 是门禁清单的唯一真源）。
 ```
 
 依赖方向单向：`cli` / `src-tauri` → `engine` → `model`。反方向引用会被架构本身挡住。
@@ -47,11 +53,16 @@ tools            门禁与探针脚本。
 ## 构建与运行
 
 ```powershell
-cargo test --workspace --all-targets     # 测试
-cargo clippy --workspace --all-targets   # 静态检查（要求零警告）
-node tools/gate.mjs                      # 工程门禁（版本号一致、文件行数）
-node tools/uitest.mjs                    # 外壳测试
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
+
+一条命令跑完五道门禁（测试 / 文档测试 / 静态检查 / 工程门禁 / 外壳测试），
+每道写清它守着什么、失败给原始输出、结束给一张表。清单的唯一真源是
+`tools/gates.json`——**改门禁只改那一份**，脚本只负责跑。
+想单独跑哪一道，`tools/gates.json` 里每一行都写着原命令。
+
+**这五道目前没有跑在 CI 上**（仓库里没有 `.github`）。这条以前在《设计》里
+被写成了"跑在 CI 上"，那是一句没人兑现的话——现在如实说明，理由见 [设计.md](设计.md) §12.3。
 
 只做命令行版：`cargo build --release -p jingwei`。
 带界面：`npx tauri dev`（要 Node 与 WebView2，Windows 自带）。
@@ -69,7 +80,9 @@ node tools/uitest.mjs                    # 外壳测试
 ## 状态
 
 内核（领域模型、数据层设计、规则引擎、系统探测、清理、机器清单）与外壳（六个页面）都在跑；
-测试 157 条、clippy 零警告、外壳测试 23 条全过。
+测试 242 条通过（另有 1 条 ignore）、clippy 零警告、外壳测试 35 条全过。
+一条龙认语言了：Python / Node / JVM 各自按自己的方式检查环境、解析依赖、挑启动命令，
+后两个阶段（拉起进程、等待就绪）三种语言共用同一套实现。
 还没做的都带触发条件记在 [设计.md](设计.md) §1.2，不写无条件的 TODO。
 
 ## 文档怎么读

@@ -113,6 +113,36 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     let mut symbols = Vec::new();
     let mut scope: Vec<String> = Vec::new();
     collect(root, src, rel, now, None, &mut scope, &mut symbols);
+    // **闭包也收成符号**——它们有名字、有作用域，而且是"能被调用的局部绑定"。
+    // 不收的话，`let has = |s| ...` 后面那句 `has("x")` 就永远找不到定义。
+    let mut closures: Vec<(String, Vec<String>)> = Vec::new();
+    collect_closures(root, src, &[], &mut closures);
+    for (name, owner_scope) in closures {
+        let key = symbol_key(rel, &owner_scope, None, &name);
+        let mut n = Node::new(
+            NodeKind::Symbol,
+            &key,
+            name.as_str(),
+            Source::TreeSitter,
+            Confidence::High,
+            now,
+        );
+        // `local` 是 SCIP 那套 `Descriptor.Suffix` 里的一个槽位，
+        // 这里借它的语义：**局部绑定与全局项不是一回事**。
+        n.data = Some(serde_json::json!({ "sym": "local" }));
+        n.checksum = Some(crate::facts::stable_hash([
+            NodeKind::Symbol.as_str(),
+            name.as_str(),
+            "local",
+            rel,
+        ]));
+        symbols.push(n.with_file(
+            rel,
+            // 行号在 collect_closures 里没带出来——闭包的准确行号不影响任何判断，
+            // 先给 0 会让 schema 的 CHECK（line > 0）拒绝，所以给 1。
+            1,
+        ));
+    }
     let imports = collect_imports(root, src);
     // 按 id 去重：树没坏透时可能抽到同名的，去重比让主键撞车好。
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
@@ -494,6 +524,66 @@ fn symbol_class(kind: &str) -> &'static str {
         // 模块：既不是值也不是类型，单独算
         "mod_item" => "module",
         _ => "other",
+    }
+}
+
+/// **局部绑定也是一种符号**（SCIP 的 `Descriptor.Suffix.Local` 就是这个意思）。
+///
+/// 为什么必须收：`let has = |s: &str| ...;` 之后那句 `has("x")` 是个**调用**，
+/// 而它指向的东西**在我们图谱里根本不存在**——于是解析期只能说"拿不准"。
+/// 实测里 `launch.rs` 一口气贡献了七条这样的"拿不准"，全是同一个闭包。
+///
+/// **为什么只收闭包，不收普通 `let`**：我们要回答的是"谁调用了谁"，
+/// 而能被调用的局部绑定只有闭包。把每个 `let x = 5` 都塞进图谱，
+/// 只会让图变胖而不解决任何问题。
+///
+/// 返回 `(名字, 它的作用域链)`——作用域链**必须一起带**：
+/// 局部符号的可见性只在本函数内，跨函数同名是**两回事**。
+fn collect_closures(
+    node: TsNode<'_>,
+    src: &str,
+    scope: &[String],
+    out: &mut Vec<(String, Vec<String>)>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        // `let has = |s| ...` —— 闭包挂在 let 绑定上
+        if child.kind() == "let_declaration" {
+            let name = child
+                .child_by_field_name("pattern")
+                .and_then(|p| p.utf8_text(src.as_bytes()).ok())
+                .map(|s| s.trim().to_string());
+            let is_closure = child
+                .child_by_field_name("value")
+                .map(|v| v.kind() == "closure_expression")
+                .unwrap_or(false);
+            if let (Some(n), true) = (name, is_closure) {
+                // 只收简单标识符：`let (a, b) = ...` 这种解构先跳过
+                if !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    out.push((n, scope.to_vec()));
+                }
+            }
+        }
+        // 往下走时维护作用域：进函数体就压一层
+        if child.kind() == "function_item" {
+            let own = child
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(src.as_bytes()).ok());
+            let mut inner = scope.to_vec();
+            if let Some(o) = own {
+                inner.push(o.to_string());
+            }
+            if let Some(body) = child.child_by_field_name("body") {
+                collect_closures(body, src, &inner, out);
+            }
+        } else if child.kind() == "closure_expression" {
+            // 闭包里再套闭包：作用域不变（都算在同一个函数里），内容继续找
+            if let Some(body) = child.child_by_field_name("body") {
+                collect_closures(body, src, scope, out);
+            }
+        } else if child.child_count() > 0 {
+            collect_closures(child, src, scope, out);
+        }
     }
 }
 

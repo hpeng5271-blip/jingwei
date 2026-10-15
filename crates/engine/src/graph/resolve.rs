@@ -132,9 +132,15 @@ pub fn resolve_file(
         //    现在这样做的代价是**宁可少连**，而不是乱连。
         // **只在值命名空间里找**：`foo()` 是调用，命中的必须是个能调的东西。
         // 同名的 struct / trait / mod 在这条路上一律不算候选。
+        // **值命名空间 = `value` + `local`**：闭包是能被调用的局部绑定，
+        // 它在符号空间里的位置和函数一样（只是可见范围小得多）。
         let values: Vec<&SymbolEntry> = all
             .get(&r.name)
-            .map(|v| v.iter().filter(|e| e.class == "value").collect())
+            .map(|v| {
+                v.iter()
+                    .filter(|e| e.class == "value" || e.class == "local")
+                    .collect()
+            })
             .unwrap_or_default();
         match values.len() {
             1 => {
@@ -241,7 +247,10 @@ fn through_import(
 fn nearest_in_scope(r: &RefFact, own_file: &SymbolTable) -> Option<String> {
     let all = own_file.get(&r.name)?;
     // 同样只在值命名空间里找。
-    let ids: Vec<&SymbolEntry> = all.iter().filter(|e| e.class == "value").collect();
+    let ids: Vec<&SymbolEntry> = all
+        .iter()
+        .filter(|e| e.class == "value" || e.class == "local")
+        .collect();
     if ids.is_empty() {
         return None;
     }

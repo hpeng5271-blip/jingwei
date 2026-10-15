@@ -80,6 +80,25 @@ function stubTauri() {
                 frameworks: ['Vite'],
                 notes: ['依赖装在仓库根，成员目录里没有 node_modules'],
               },
+              // Java 那一摊：**这次会用哪个 JDK**。
+              // 桩里给的是"装了三个、说不清用哪个"这个真实处境——
+              // 它正是这一栏最该说清楚的一种。
+              jvm: {
+                java_home: null,
+                java_home_ok: false,
+                jdks: [
+                  { major: 17, home: 'D:/SDK/jdk-17', is_jdk: true },
+                  { major: 21, home: 'D:/SDK/jdk-21.0.12', is_jdk: true },
+                  { major: 8, home: 'D:/SDK/jdk-8', is_jdk: true },
+                ],
+                java_on_path: null,
+                required: 17,
+                required_from: 'pom.xml',
+                maven: true,
+                gradle: false,
+                resolved: null,
+              },
+              jvmBuild: { name: 'mvnw', wrapper: true },
               runs: [], hasTest: true, contractName: 'env.contract.json', runCommand: 'cargo run',
             };
           case 'list_files':
@@ -243,8 +262,8 @@ try {
   //     这一段是"为什么依赖显示未安装"的答案，所以断言要落到**内容**上，
   //     不是"有这个区块就算过"。
   st = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('#railBody .web-row'));
-    const note = document.querySelector('#railBody .web-note');
+    const rows = Array.from(document.querySelectorAll('#railBody .rt-row'));
+    const note = document.querySelector('#railBody .rt-note');
     return {
       n: rows.length,
       keys: rows.map((r) => r.querySelector('.k').textContent.trim()),
@@ -260,6 +279,29 @@ try {
     st.keys.includes('依赖位置'), st.keys.join(','));
   check('Node：说清"为什么可能看着不对"的那句话在',
     st.note.includes('仓库根'), st.note);
+
+  // 2.7 JVM 那一摊：一台机器上三个 JDK 的时候，"用哪个"比"有没有"重要
+  st = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#railBody .rt-row'));
+    const secs = Array.from(document.querySelectorAll('#railBody .rail-sec')).map((s) => s.textContent.trim());
+    const pick = rows.find((r) => r.querySelector('.k').textContent.trim() === '会用哪个');
+    const jdks = rows.find((r) => r.querySelector('.k').textContent.trim() === '装了哪些');
+    const notes = Array.from(document.querySelectorAll('#railBody .rt-note')).map((n) => n.textContent.trim());
+    return {
+      secs,
+      pick: pick ? pick.querySelector('.v').textContent.trim() : '',
+      pickTip: pick ? (pick.getAttribute('data-tip') || '') : '',
+      jdks: jdks ? jdks.querySelector('.v').textContent.trim() : '',
+      notes,
+    };
+  });
+  check('JVM：有独立的一栏', st.secs.includes('JVM / 运行时'), st.secs.join('|'));
+  check('JVM：说不清用哪个就如实说"说不清"（不编一个）',
+    st.pick === '说不清' && st.pickTip.includes('JAVA_HOME'), `${st.pick} / ${st.pickTip}`);
+  check('JVM：三个 JDK 都列出来了',
+    st.jdks.includes('17') && st.jdks.includes('21') && st.jdks.includes('8'), st.jdks);
+  check('JVM：给出"怎么让它确定"的那句话',
+    st.notes.some((n) => n.includes('JAVA_HOME')), st.notes.join('|'));
 
   // 3. 运行：阶段流（面板 + 关键行上限 3 + 原始输出折叠）
   await page.evaluate(() => { switchTab('run'); doRun('test'); });

@@ -72,6 +72,12 @@ pub(crate) fn inspect_payload(root: &Path) -> Value {
         // Node / 前端那一摊：**用什么包管理器、依赖装到哪去了、版本要求写在哪**。
         // 非 Node 项目是 `null`（不是空对象）——界面上"没有"和"没查"必须分得清。
         "web": jingwei_engine::web::probe_web(root),
+        // JVM 那一摊：**这次会用哪个 JDK、凭据是什么、项目钉了哪个构建工具**。
+        // 事实早就算过了（`facts.jvm`，诊断规则也在用它），这里只是把它露出来——
+        // 一台机器上装了三个 JDK 的时候，"用的是哪个"比"有没有"重要得多。
+        "jvm": facts.jvm,
+        "jvmBuild": jingwei_engine::jvm::build_tool(root)
+            .map(|(name, wrapper)| json!({ "name": name, "wrapper": wrapper })),
     })
 }
 

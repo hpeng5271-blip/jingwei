@@ -65,6 +65,33 @@ pub struct Resolved {
     pub major: u32,
 }
 
+/// 这个项目会用哪个构建工具：名字 + 是不是**项目自带的 wrapper**。
+///
+/// 为什么把它放在探测层（而不是启动那一层）：这是一条**关于这个项目的事实**——
+/// 目录里有没有 `mvnw`，跟"这次要怎么跑"无关。界面上也要显示它
+/// （"这个项目钉的是 Maven 3.9，不是 PATH 上那个"是能省掉半天排查的一句话）。
+/// 而"因此该执行哪个文件"是启动那一层的决定：事实在这里，决定在那里。
+///
+/// 判据只看文件：`pom.xml` / `build.gradle` / `build.gradle.kts`（有没有项目可言），
+/// 再看目录里有没有 wrapper 脚本。
+pub fn build_tool(root: &Path) -> Option<(&'static str, bool)> {
+    let gradle = root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file();
+    let maven = root.join("pom.xml").is_file() || gradle;
+    if !maven {
+        return None;
+    }
+    if gradle {
+        let wrapper = root.join("gradlew.bat").is_file() || root.join("gradlew").is_file();
+        return Some(if wrapper {
+            ("gradlew", true)
+        } else {
+            ("gradle", false)
+        });
+    }
+    let wrapper = root.join("mvnw.cmd").is_file() || root.join("mvnw").is_file();
+    Some(if wrapper { ("mvnw", true) } else { ("mvn", false) })
+}
+
 fn roots() -> Vec<PathBuf> {
     let mut v = Vec::new();
     for raw in [
@@ -428,6 +455,33 @@ mod tests {
     // 而不是让 lint 在整个 crate 里静默失声。
     #![allow(clippy::let_underscore_must_use)]
     use super::*;
+
+    /// **构建工具只看文件**：有没有 pom / build.gradle、有没有 wrapper 脚本。
+    /// 一条都不许靠"PATH 上有没有 mvn"来判——那是"这台机器有什么"，
+    /// 跟"这个项目钉的是什么"是两件事。
+    #[test]
+    fn build_tool_只看项目里的文件() {
+        let d = std::env::temp_dir().join(format!("pl-jvm-tool-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(build_tool(&d), None, "空目录没有构建工具");
+
+        std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
+        assert_eq!(build_tool(&d), Some(("mvn", false)), "没 wrapper 就是全局 mvn");
+
+        std::fs::write(d.join("mvnw.cmd"), "@echo off\n").unwrap();
+        assert_eq!(build_tool(&d), Some(("mvnw", true)), "有 wrapper 就优先");
+
+        std::fs::write(d.join("build.gradle"), "").unwrap();
+        assert_eq!(
+            build_tool(&d),
+            Some(("gradle", false)),
+            "Gradle 优先于 Maven：有 build.gradle 就是 Gradle 项目"
+        );
+        std::fs::write(d.join("gradlew.bat"), "@echo off\n").unwrap();
+        assert_eq!(build_tool(&d), Some(("gradlew", true)));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn java_8_is_read_as_8_not_1() {

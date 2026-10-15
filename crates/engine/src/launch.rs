@@ -12,8 +12,12 @@
 //! 用户看到的第一句话是「没有可用的 Python，无法启动」——**答非所问比不回答更糟**，
 //! 它会把人引到错的方向上。
 
+mod java;
 mod node;
 mod python;
+mod ready;
+
+use ready::serving_url;
 
 use crate::understand::contract::{Contract, ReadyWhen};
 use crate::state::runs;
@@ -163,7 +167,17 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     // 契约只决定「跑哪条命令」（那是用户写下的东西，优先级最高）；
     // 但一个 Node 项目要检查的是 node 与包管理器，不是解释器——
     // 拿错那一边去检查，用户看到的第一句话会与他的项目毫无关系。
-    let prep = if crate::detect::web::is_node_project(&root) {
+    // 走哪条路，**由「这个项目是什么」决定**：
+    //   · 有 pom.xml / build.gradle → JVM
+    //   · 有 package.json → Node
+    //   · 其余（含 Python）→ 现在那条路
+    // 复合项目（根目录里既有 pom.xml 又有 package.json，比如前端工具链挂在
+    // 一个 Spring 项目下）按 Maven/Gradle 优先：那种 package.json 往往是给
+    // 前端资源打包用的，而"启动这个项目"问的是后端。
+    // **顺序写下来，是为了让两难时有一致的答案**，而不是每次换个样。
+    let prep = if has_jvm_build_file(&root) {
+        java::prepare(&root, opts, &contract, &contract_err, cb)?
+    } else if crate::detect::web::is_node_project(&root) {
         node::prepare(&root, opts, &contract, &contract_err, cb)?
     } else {
         python::prepare(&root, opts, &contract, &contract_err, cb)?
@@ -596,71 +610,17 @@ fn quoted_after<'a>(tail: &'a VecDeque<String>, needle: &str) -> Option<&'a str>
     line.split('\'').nth(1).filter(|s| !s.is_empty())
 }
 
-/// 从一行输出里认出「它说自己在哪个地址上服务」。
+/// 这个目录是不是一个 JVM 项目。
 ///
-/// ## 为什么不按框架名单去猜
-///
-/// 猜的话就得维护一张表：Vite 打 `Local: http://localhost:5173/`、
-/// Next 打 `ready - started server on 0.0.0.0:3000`、`python -m http.server`
-/// 打 `Serving HTTP on 0.0.0.0 port 8000`。**表里没有的那个**——用户自己写的服务、
-/// 刚出的新框架、改了名的老框架——就会被判成「没起来」。
-///
-/// 换成「这一行里有没有 `host:port`」：**这是进程自己说出来的话**，
-/// 跟它叫什么名字无关。而「看到地址」与「真的通了」是两件事，
-/// 所以调用方还会去连一次那个端口（见等待就绪那一段）。
-fn serving_url(line: &str) -> Option<(String, u16)> {
-    // 先认"一看就是本机"的那几种写法。
-    const HOSTS: [&str; 4] = ["localhost:", "127.0.0.1:", "0.0.0.0:", "[::1]:"];
-    for h in HOSTS {
-        let Some(i) = line.find(h) else { continue };
-        let tail = &line[i + h.len()..];
-        let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() {
-            continue;
-        }
-        // 端口 0 不是能连的东西；超出 65535 的也不是端口。
-        let Ok(p) = digits.parse::<u16>() else { continue };
-        if p == 0 {
-            continue;
-        }
-        return Some((format!("{h}{p}"), p));
-    }
-    // 再认"带协议头的 IPv4 地址"。
-    //
-    // 为什么不能只认上面那几种：Vite 把地址分两行打，`Local` 是 localhost，
-    // `Network` 是局域网地址；而有些框架**只打网络那一行**。
-    // 要求它必须带 `http://` 或 `https://` 是为了别把普通字符串（版本号、
-    // 时间戳、`a.b.c.d:e` 这种）当成服务地址——那个代价是又一条假就绪。
-    ipv4_url(line)
+/// 判据只看**构建文件**：`pom.xml`（Maven）、`build.gradle` / `build.gradle.kts`（Gradle）。
+/// 不看 `.java` 文件——有一堆 `.java` 却没有构建文件的那种目录，
+/// 是"从别处抄来的代码片段"，不是能启动的项目。
+fn has_jvm_build_file(root: &Path) -> bool {
+    ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle"]
+        .iter()
+        .any(|f| root.join(f).is_file())
 }
 
-/// 从 `http://192.168.1.5:5173/` 这种写法里取出 `(192.168.1.5:5173, 5173)`。
-fn ipv4_url(line: &str) -> Option<(String, u16)> {
-    for scheme in ["http://", "https://"] {
-        let Some(i) = line.find(scheme) else { continue };
-        let rest = &line[i + scheme.len()..];
-        let host: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect();
-        let parts: Vec<&str> = host.split('.').collect();
-        // 四段、每段都在 0..=255 之内，才是一个真的 IPv4
-        if parts.len() != 4 || parts.iter().any(|s| s.parse::<u16>().map(|n| n > 255) != Ok(false)) {
-            continue;
-        }
-        let after = &rest[host.len()..];
-        let Some(port_part) = after.strip_prefix(':') else {
-            continue;
-        };
-        let digits: String = port_part.chars().take_while(|c| c.is_ascii_digit()).collect();
-        let Ok(p) = digits.parse::<u16>() else { continue };
-        if p == 0 {
-            continue;
-        }
-        return Some((format!("{host}:{p}"), p));
-    }
-    None
-}
 
 fn shadowed_by_local_file(name: &str, root: &Path) -> Diagnosis {
     Diagnosis {
@@ -847,54 +807,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
-    }
-
-    /// 三种框架三种说法，抓着同一件事：**它说自己在哪儿服务**。
-    ///
-    /// 这张表就是"不按框架名单猜"的证据：Vite、Next、`http.server` 的措辞
-    /// 完全不同，但都落在同一个形状上（`host:port`）。
-    #[test]
-    fn 各家框架报出来的监听地址都认() {
-        for (line, port) in [
-            ("  ➜  Local:   http://localhost:5173/", 5173u16),
-            (
-                "ready - started server on 0.0.0.0:3000, url: http://localhost:3000",
-                3000,
-            ),
-            (
-                "Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...",
-                8000,
-            ),
-            ("  - Network: http://192.168.1.5:5173/", 5173),
-        ] {
-            assert_eq!(serving_url(line).map(|(_, p)| p), Some(port), "{line}");
-        }
-    }
-
-    /// **连不上的报错里也有地址**——它必须被认出来交给下一步去连，
-    /// 而不是被当成「已经起来了」。认地址、连端口是两道，缺一不可。
-    #[test]
-    fn 连不上的报错里那个地址也认得出来() {
-        let line = "Error: connect ECONNREFUSED 127.0.0.1:3000";
-        assert_eq!(
-            serving_url(line),
-            Some(("127.0.0.1:3000".to_string(), 3000)),
-            "认出来之后由调用方去连——连不上就不算就绪"
-        );
-    }
-
-    #[test]
-    fn 没有地址的行不会瞎认() {
-        assert!(serving_url("vite v5.2.0 building for production...").is_none());
-        assert!(serving_url("localhost 是不可用的").is_none(), "没有端口号");
-        assert!(
-            serving_url("connecting to localhost:0").is_none(),
-            "端口 0 不是端口"
-        );
-        assert!(
-            serving_url("see http://localhost:99999/").is_none(),
-            "超出 65535"
-        );
     }
 
     #[test]

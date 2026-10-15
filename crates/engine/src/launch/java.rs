@@ -253,31 +253,30 @@ fn describe_env(f: &jvm::JvmFacts) -> (StageStatus, String) {
 /// 项目的构建工具。**wrapper 优先**：它钉着这个项目自己的版本，
 /// 而 PATH 上那个全局的可能是另一代（Maven 3 与 4、Gradle 7 与 8 差别不小）。
 fn pick_tool(root: &Path) -> Option<Tool> {
-    let maven_project =
-        root.join("pom.xml").is_file() || root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file();
-    if !maven_project {
-        return None;
-    }
-    let is_gradle =
-        root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file();
-    let kind = if is_gradle {
+    // **事实在探测层**（`jvm::build_tool`：这个项目钉的是哪个工具），
+    // 这里只负责"因此该执行哪个文件"。两边共用同一个判据，
+    // 免得界面上说"用 mvnw"、真正跑起来却用了全局 mvn。
+    let (name, wrapper) = jvm::build_tool(root)?;
+    let kind = if name.starts_with("gradle") {
         ToolKind::Gradle
     } else {
         ToolKind::Maven
     };
-    // Windows 上是 .cmd / .bat，别的平台上没有后缀
-    let wrappers: &[&str] = match kind {
-        ToolKind::Maven => &["mvnw.cmd", "mvnw"],
-        ToolKind::Gradle => &["gradlew.bat", "gradlew"],
-    };
-    for w in wrappers {
-        let p = root.join(w);
-        if p.is_file() {
-            return Some(Tool {
-                exe: p,
-                wrapper: true,
-                kind,
-            });
+    if wrapper {
+        // Windows 上是 .cmd / .bat，别的平台上没有后缀——两个都试一下
+        let candidates: &[&str] = match kind {
+            ToolKind::Maven => &["mvnw.cmd", "mvnw"],
+            ToolKind::Gradle => &["gradlew.bat", "gradlew"],
+        };
+        for w in candidates {
+            let p = root.join(w);
+            if p.is_file() {
+                return Some(Tool {
+                    exe: p,
+                    wrapper: true,
+                    kind,
+                });
+            }
         }
     }
     let global = match kind {

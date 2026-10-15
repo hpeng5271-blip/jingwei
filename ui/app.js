@@ -624,6 +624,25 @@ function railDepHtml(detail, deps) {
 
 const RAIL_SEEN = new Set();
 
+// 「运行时事实」的一行：键 → 值，凭据走悬停。
+//
+// 为什么长这样：这一栏要回答的是同一类问题——**这次到底会用哪个东西，凭什么**。
+// Node 那一摊（包管理器、依赖装到哪）和 JVM 那一摊（哪个 JDK、哪个构建工具）
+// 是同一类事实的两种形态，所以共用一套行。
+function rtRow(k, v, why) {
+  return '<div class="rt-row" data-tip="' + esc(why || k) + '">'
+    + '<span class="k">' + esc(k) + '</span>'
+    + '<span class="v">' + esc(v) + '</span></div>';
+}
+
+function rtSection(title, rows, notes) {
+  let html = '<div class="rail-sec">' + esc(title) + '</div>' + rows.join('');
+  if (notes && notes.length) {
+    html += notes.map((n) => '<div class="rt-note">' + esc(n) + '</div>').join('');
+  }
+  return html;
+}
+
 // Node / 前端那一摊：**用什么包管理器、依赖装到哪去了、版本要求写在哪**。
 //
 // 为什么这几条值得占位置：它们是"为什么依赖那一栏显示未安装"的答案。
@@ -632,35 +651,72 @@ const RAIL_SEEN = new Set();
 //
 // 每条都带凭据（悬停可见）：界面上"你凭什么这么说"必须有答案。
 function webSection(w) {
+  const row = rtRow;
   const rows = [];
-  const row = (k, v, why) => rows.push(
-    '<div class="web-row" data-tip="' + esc(why || k) + '">'
-    + '<span class="k">' + esc(k) + '</span>'
-    + '<span class="v">' + esc(v) + '</span></div>');
   const pm = w.package_manager
     ? w.package_manager + (w.pm_pinned ? ' ' + w.pm_pinned : '')
     : '还看不出来';
-  row('包管理器', pm, w.pm_from || '没有锁文件，也没有 packageManager 字段');
-  if (w.link_kind) row('依赖位置', w.link_kind, w.link_from || '');
+  rows.push(row('包管理器', pm, w.pm_from || '没有锁文件，也没有 packageManager 字段'));
+  if (w.link_kind) rows.push(row('依赖位置', w.link_kind, w.link_from || ''));
   if (w.node_pins && w.node_pins.length) {
-    row('Node 要求',
+    rows.push(row('Node 要求',
       w.node_pins.map((p) => p.spec).join('  /  '),
-      w.node_pins.map((p) => p.from + '：' + p.spec).join('\n'));
+      w.node_pins.map((p) => p.from + '：' + p.spec).join('\n')));
   }
-  if (w.workspaces) row('工作区', w.workspaces, 'monorepo：依赖可能被提升到仓库根');
+  if (w.workspaces) rows.push(row('工作区', w.workspaces, 'monorepo：依赖可能被提升到仓库根'));
   if (w.frameworks && w.frameworks.length) {
-    row('框架', w.frameworks.join(' / '), '从 package.json 的依赖里认出来的');
+    rows.push(row('框架', w.frameworks.join(' / '), '从 package.json 的依赖里认出来的'));
   }
-  if (w.typescript) row('TypeScript', '有 tsconfig', '根目录下有 tsconfig*.json');
+  if (w.typescript) rows.push(row('TypeScript', '有 tsconfig', '根目录下有 tsconfig*.json'));
   if (w.scripts && w.scripts.length) {
-    row('脚本', w.scripts.map((s) => s[0]).join(' / '),
-      w.scripts.map((s) => s[0] + ' → ' + s[1]).join('\n'));
+    rows.push(row('脚本', w.scripts.map((s) => s[0]).join(' / '),
+      w.scripts.map((s) => s[0] + ' → ' + s[1]).join('\n')));
   }
-  let html = '<div class="rail-sec">Node / 前端</div>' + rows.join('');
-  if (w.notes && w.notes.length) {
-    html += w.notes.map((n) => '<div class="web-note">' + esc(n) + '</div>').join('');
+  return rtSection('Node / 前端', rows, w.notes);
+}
+
+// JVM 那一摊：**这次会用哪个 JDK、项目要求哪个、装了哪几个、构建工具是谁**。
+//
+// 为什么值得占位置：一台机器上装三个 JDK 是常态，而"用的是哪个"正是
+// 「我明明装了 21，编译却报 class file version 52」的答案。
+// 后端跑不起来的一半原因在这一栏里。
+function jvmSection(j, build) {
+  const row = rtRow;
+  const rows = [];
+  const res = j.resolved;
+  rows.push(row(
+    '会用哪个',
+    res ? ('JDK ' + res.major) : '说不清',
+    res ? ('凭据：' + res.source + (res.home ? ' · ' + res.home : '')) : 'JAVA_HOME 没设、PATH 上没有 java',
+  ));
+  if (res && res.home) rows.push(row('JDK 位置', res.home, 'JAVA_HOME 会按这个设，Maven/Gradle 都认它'));
+  if (j.required) rows.push(row('项目要求', 'Java ' + j.required, j.required_from || ''));
+  const list = j.jdks || [];
+  if (list.length) {
+    rows.push(row(
+      '装了哪些',
+      list.map((d) => d.major + (d.is_jdk ? '' : '（只有 JRE）')).join(' / '),
+      list.map((d) => 'JDK ' + d.major + (d.is_jdk ? '' : '（没有 javac，只能跑不能编）') + '：' + d.home).join('\n'),
+    ));
   }
-  return html;
+  if (build) {
+    rows.push(row(
+      '构建工具',
+      build.name + (build.wrapper ? '（项目自带）' : '（PATH 上的全局）'),
+      build.wrapper
+        ? '项目自带的 wrapper 钉着它自己的版本，比 PATH 上那个全局的更准'
+        : '这个项目没有 wrapper，用的是 PATH 上那个',
+    ));
+  }
+  const notes = [];
+  if (!res && list.length > 1) {
+    notes.push('装了 ' + list.length + ' 个 JDK 却说不清用哪个——把 JAVA_HOME 指到你要的那个，结果就确定了');
+  }
+  const onlyJre = list.filter((d) => !d.is_jdk);
+  if (onlyJre.length && list.length === onlyJre.length) {
+    notes.push('这几个都只有 JRE，没有 javac——能跑，但编译不了');
+  }
+  return rtSection('JVM / 运行时', rows, notes);
 }
 
 function renderRail() {
@@ -709,6 +765,7 @@ function renderRail() {
       + '<b>' + esc(m.path) + '</b><span>' + esc(m.note || '') + '</span></div>').join('');
   }
   if (d.web) html += webSection(d.web);
+  if (d.jvm) html += jvmSection(d.jvm, d.jvmBuild);
   if (!total) {
     html += '<div class="rail-empty">该项目未声明依赖。'
       + (manifests.length ? '' : '<br>也未找到依赖清单文件。') + '</div>';

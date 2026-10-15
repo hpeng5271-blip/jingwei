@@ -149,7 +149,9 @@ pub fn resolve_file(
             0 => out.external += 1,
             // 值命名空间里也有多个——**这才是真的拿不准**，不猜；
             // 但把**名字**记下来，因为"46 条拿不准"这句话不告诉你该去看什么。
-            _ => out.ambiguous.push(r.name.clone()),
+            // 记**名字 + 位置**：只有名字的话，看到 "which" 也不知道是哪一条，
+            // 还得回去翻全文。位置是免费的，而且一眼能定位。
+            _ => out.ambiguous.push(format!("{}:{}", rel, r.line)),
         }
     }
     out.resolved.sort();
@@ -188,6 +190,7 @@ fn through_import(
         (body.join("/"), String::new())
     };
     let mut candidates = Vec::new();
+    let mut hits: Vec<String> = Vec::new();
     if !name_part.is_empty() {
         candidates.push(format!("{file_part}.rs"));
     }
@@ -202,14 +205,32 @@ fn through_import(
         } else {
             name_part.clone()
         };
-        let key = format!("symbol:{cand}#{want_name}");
+        // **用后缀匹配，不用全等**。
+        //
+        // 符号 id 里的路径是相对**索引根**的（`crates/engine/src/util/winutil.rs`），
+        // 而 `use` 推出来的路径是相对 **crate 根**的（`util/winutil.rs`）——
+        // 中间差一个 crate 根前缀。全等比对永远对不上，而后缀比对正好绕开这个差异。
+        //
+        // 这一条是实测出来的：改之前 `through_import` 一次都没命中，
+        // 而每一步单看都是对的（use 抽对了、逻辑对、接线对）——
+        // **差异藏在两个"路径"的参照系不同上**，光看代码看不出来。
+        let tail = format!("/{cand}#{want_name}");
         if let Some(entries) = all.get(&want_name) {
-            if let Some(e) = entries.iter().find(|e| e.id == key) {
-                return Some(e.id.clone());
+            for e in entries {
+                if e.id.ends_with(&tail) {
+                    hits.push(e.id.clone());
+                }
             }
         }
     }
-    None
+    hits.sort();
+    hits.dedup();
+    // **恰好一个才连**：多个说明这条路径在不同 crate 里都有同名文件，
+    // 而我们不知道当前在哪个 crate——那就回到"不猜"。
+    match hits.len() {
+        1 => Some(hits.remove(0)),
+        _ => None,
+    }
 }
 
 /// 从作用域链**从内往外**找第一个匹配。
@@ -371,7 +392,7 @@ mod tests {
         let refs = vec![rf("new", &["symbol:a.rs#caller"])];
         let r = resolve_file("a.rs", &refs, &own, &[], &all);
         assert!(r.resolved.is_empty());
-        assert_eq!(r.ambiguous, vec!["new".to_string()]);
+        assert_eq!(r.ambiguous, vec!["a.rs:1".to_string()], "现在记的是位置，能一眼定位");
     }
 
     /// 全图谱里**唯一**同名——可以连（保守，但这是"能确定"的那部分）。
@@ -404,6 +425,40 @@ mod tests {
         assert!(r.ambiguous.is_empty(), "外部的不是拿不准——是压根不归我们管");
     }
 
+    /// **顺着 `use` 找**：本文件写 `use crate::util::winutil::which;` 时，
+    /// 那个 `which` 就确定指向 `util/winutil.rs#which`——这一步不需要看别的文件，
+    /// 因为**这句话本身就写死了**。
+    ///
+    /// `git` 那条形状（`use crate::util::winutil::{run_cmd, which}`）
+    /// 在 parse 里已经展开成两条，这里只面对"一个名字一个路径"。
+    #[test]
+    fn 顺着_use_能找到跨文件的定义() {
+        use crate::graph::parse::ImportFact;
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "which".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:util/winutil.rs#which".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let imports = vec![ImportFact {
+            local: "which".to_string(),
+            path: "crate::util::winutil::which".to_string(),
+        }];
+        let refs = vec![rf("which", &["symbol:detect/ccpp.rs#probe_cc"])];
+        let r = resolve_file("detect/ccpp.rs", &refs, &SymbolTable::new(), &imports, &all);
+        assert_eq!(
+            r.resolved,
+            vec![(
+                "symbol:detect/ccpp.rs#probe_cc".to_string(),
+                "symbol:util/winutil.rs#which".to_string()
+            )],
+            "use 说得很清楚，不该拿不准：{:?}",
+            r.ambiguous
+        );
+        assert!(r.ambiguous.is_empty());
+    }
     /// 模块级引用（不在任何函数里）单独算一类，
     /// 不能跟"解析失败"混在一起说。
     #[test]

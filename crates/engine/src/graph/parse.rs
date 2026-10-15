@@ -629,6 +629,43 @@ fn use_them() {
 
     /// 宏调用不是函数调用——`println!` 不该被当成边。
     /// 这正是设计 §6.1 说的"`format!` 是宏不是函数"，语法层直接挡住了。
+    /// **`use` 抽取要真的抽到**——这是 `through_import` 能工作的前提。
+    ///
+    /// 三种能确定的形状都收，通配一律不收（`use a::*` 记下来也没法用，
+    /// 反而会让人以为"这里有个确定的名字"）。
+    #[test]
+    fn use_抽取只收能确定的形状() {
+        let src = r#"
+use crate::util::winutil::{run_cmd, which};
+use crate::graph::store::Store as S;
+use std::collections::BTreeMap;
+use crate::*;
+"#;
+        let r = parse_rust("a.rs", src, 1);
+        let got: Vec<(String, String)> = r
+            .imports
+            .iter()
+            .map(|i| (i.local.clone(), i.path.clone()))
+            .collect();
+        assert!(
+            got.contains(&("which".into(), "crate::util::winutil::which".into())),
+            "{got:?}"
+        );
+        assert!(
+            got.contains(&("run_cmd".into(), "crate::util::winutil::run_cmd".into())),
+            "{got:?}"
+        );
+        assert!(
+            got.contains(&("S".into(), "crate::graph::store::Store".into())),
+            "别名要记：{got:?}"
+        );
+        assert!(
+            got.contains(&("BTreeMap".into(), "std::collections::BTreeMap".into())),
+            "{got:?}"
+        );
+        assert!(!got.iter().any(|(l, _)| l == "*"), "通配不收：{got:?}");
+    }
+
     #[test]
     fn 宏调用不算调用关系() {
         let src = "fn a() { println!(\"x\"); }\nfn println() {}\n";

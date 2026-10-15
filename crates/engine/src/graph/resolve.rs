@@ -53,6 +53,23 @@ pub struct Resolution {
     pub ambiguous: Vec<String>,
     /// 一个候选都没有：**外部符号**（标准库、别的 crate、宏生成的）。
     pub external: usize,
+    /// **本文件写了 `use`，但那条路径我们接不上**——名字 + 位置。
+    ///
+    /// 为什么必须单独一类：它现在被算进 `external` 里，而两者是完全不同的事。
+    /// 外部符号是"不归我们管"（`Vec` / `println!` 本来就没索引标准库）；
+    /// 这一类是"**归我们管、我们没接上**"——比如 `super::` 相对路径、
+    /// 重导出链、可见性。把它们混在一起报，等于把**自己的漏接**
+    /// 伪装成"外部"，而这类错在这套系统里最不该犯：它看起来一切正常。
+    ///
+    /// 这一条是这一轮学到的：`ambiguous` 降到 0 之后，剩下的数字是
+    /// "外部 4155 个"，而那个数字**没法判断图是不是真的全**——
+    /// 因为它把"标准库"和"我们漏了"加在了一起。
+    pub unmapped_imports: Vec<String>,
+    /// 名字在**图谱里有**，但它不落在值命名空间里——位置。
+    ///
+    /// 两种可能，都得看：要么是调用点真的写错了（把结构体当函数调），
+    /// 要么是我们的命名空间判断没跟上。**不猜**，报出来给人看。
+    pub namespace_mismatch: Vec<String>,
     /// 压根没有调用者的（模块级引用），单独算一类——
     /// 它们不是"解析失败"，只是"不属于任何函数"。
     pub module_level: usize,
@@ -99,7 +116,7 @@ pub fn resolve_file(
         //
         //    这一步是这一轮唯一的新东西，**不再往细里打磨**——
         //    剩下的（`super::`、重导出、可见性）留给整体联调时一起收拾。
-        if let Some(hit) = through_import(r, imports, all) {
+        if let Some(hit) = through_import(r, imports, all, rel) {
             if let Some(caller) = r.scope.last() {
                 if &hit != caller {
                     out.resolved.push((caller.clone(), hit));
@@ -107,6 +124,12 @@ pub fn resolve_file(
             } else {
                 out.module_level += 1;
             }
+            continue;
+        }
+        // ⓪.5 **写了 use 却没接上**：那是我们漏了，不是"外部"。
+        //      走这一步之前 `through_import` 已经失败，所以这里只判"有没有这句 use"。
+        if imports.iter().any(|i| i.local == r.name) {
+            out.unmapped_imports.push(format!("{}:{} {}", rel, r.line, r.name));
             continue;
         }
         // ① 先在自己这个文件里找：沿作用域链**从内往外**找第一个匹配。
@@ -152,7 +175,15 @@ pub fn resolve_file(
                     out.module_level += 1;
                 }
             }
-            0 => out.external += 1,
+            0 => {
+                // **名字在图谱里、但不在值命名空间**——别把它混进"外部"。
+                // 外部是"不归我们管"，这个是"有，但不是能调的东西"。
+                if all.contains_key(&r.name) {
+                    out.namespace_mismatch.push(format!("{}:{} {}", rel, r.line, r.name));
+                } else {
+                    out.external += 1;
+                }
+            }
             // 值命名空间里也有多个——**这才是真的拿不准**，不猜；
             // 但把**名字**记下来，因为"46 条拿不准"这句话不告诉你该去看什么。
             // 记**名字 + 位置**：只有名字的话，看到 "which" 也不知道是哪一条，
@@ -173,57 +204,20 @@ pub fn resolve_file(
 /// 但我们的目录结构和模块路径是对齐的（`src/graph/parse.rs` ↔ `crate::graph::parse`），
 /// 所以这条假设在本项目里成立。
 ///
-/// **它不成立的地方**：`pub use` 重导出、`#[path]` 属性、`mod.rs` 的层级。
-/// 那些**留给整体联调**——现在这里只做"能确定的那一条路"。
+/// **它不成立的地方**：`#[path]` 属性、`include!` 进来的模块、
+/// 以及"文件不在 crate 根该在的位置"。那些留在 `unmapped_imports` 里如实报出来。
 fn through_import(
     r: &RefFact,
     imports: &[super::imports::ImportFact],
     all: &SymbolTable,
+    rel: &str,
 ) -> Option<String> {
     let imp = imports.iter().find(|i| i.local == r.name)?;
-    let segs: Vec<&str> = imp.path.split("::").filter(|s| !s.is_empty()).collect();
-    // 只处理 `crate::…` 开头的（相对当前 crate 的路径）。
-    // `super::` / `self::` 要结合当前模块位置算，留给整体联调。
-    if segs.first() != Some(&"crate") || segs.len() < 2 {
-        return None;
-    }
-    let body = &segs[1..];
-    // 路径末段可能就是名字本身（`crate::a::b::which`），也可能指向模块
-    // （`crate::a::b`）——两种情况都试一次。
-    let (file_part, name_part) = if body.len() >= 2 {
-        (body[..body.len() - 1].join("/"), body[body.len() - 1].to_string())
-    } else {
-        (body.join("/"), String::new())
-    };
-    let mut candidates = Vec::new();
     let mut hits: Vec<String> = Vec::new();
-    if !name_part.is_empty() {
-        candidates.push(format!("{file_part}.rs"));
-    }
-    // `use crate::graph::parse;` 这种：末段就是模块名
-    let as_file = body.join("/");
-    candidates.push(format!("{as_file}.rs"));
-    candidates.push(format!("{as_file}/mod.rs"));
-
-    for cand in candidates {
-        let want_name = if name_part.is_empty() {
-            r.name.clone()
-        } else {
-            name_part.clone()
-        };
-        // **用后缀匹配，不用全等**。
-        //
-        // 符号 id 里的路径是相对**索引根**的（`crates/engine/src/util/winutil.rs`），
-        // 而 `use` 推出来的路径是相对 **crate 根**的（`util/winutil.rs`）——
-        // 中间差一个 crate 根前缀。全等比对永远对不上，而后缀比对正好绕开这个差异。
-        //
-        // 这一条是实测出来的：改之前 `through_import` 一次都没命中，
-        // 而每一步单看都是对的（use 抽对了、逻辑对、接线对）——
-        // **差异藏在两个"路径"的参照系不同上**，光看代码看不出来。
-        let tail = format!("/{cand}#{want_name}");
-        if let Some(entries) = all.get(&want_name) {
+    for (file, name) in import_candidates(&imp.path, rel) {
+        if let Some(entries) = all.get(&name) {
             for e in entries {
-                if e.id.ends_with(&tail) {
+                if id_is_symbol_in(&e.id, &file, &name) {
                     hits.push(e.id.clone());
                 }
             }
@@ -236,6 +230,173 @@ fn through_import(
     match hits.len() {
         1 => Some(hits.remove(0)),
         _ => None,
+    }
+}
+
+/// 这个符号 id 是不是"`file` 里的 `name`"？
+///
+/// **用后缀匹配，不用全等**：符号 id 里的路径是相对**索引根**的
+/// （`crates/engine/src/util/winutil.rs`），而 `use` 推出来的路径是相对
+/// **crate 根**的（`util/winutil.rs`）——中间差一个 crate 根前缀。
+/// 全等比对永远对不上，后缀比对正好绕开这个差异（两个参照系都是目录树，
+/// 尾部一定是同一段）。
+///
+/// **按整段比，不做字符串的宽松包含**：`util/winutil.rs` 必须配到
+/// `/util/winutil.rs` 这样一段完整的路径，不能配到 `myutil/winutil.rs`。
+/// 少这一条，图里会长出**指向错文件的边**——而错的边比没有边糟得多。
+fn id_is_symbol_in(id: &str, file: &str, name: &str) -> bool {
+    let Some(rest) = id.strip_prefix("symbol:") else {
+        return false;
+    };
+    let Some((path, key)) = rest.split_once('#') else {
+        return false;
+    };
+    // 键要和名字一致（`L::post` 这种带容器的键，只有名字就是它的时候才算）。
+    if key != name && !key.ends_with(&format!("::{name}")) {
+        return false;
+    }
+    path == file || path.ends_with(&format!("/{file}"))
+}
+
+/// 一条 `use` 路径 → 一组"文件 + 名字"候选。
+///
+/// ## 为什么不能只认 `crate::`
+///
+/// 第一版只处理 `crate::` 开头的，剩下的（`super::` / `self::` / 裸路径）
+/// 一律返回 `None`。后果不是"少连几条边"，而是**它们被算进了"外部符号"**——
+/// 那等于把自己的漏接伪装成"不归我们管"。实测自己索引自己时，这一类有 4 处：
+/// `use super::{reg, Fact}`、`use super::imports::{...}`、
+/// `pub use ram::{smbios_memory, ...}`。
+///
+/// ## 四种开头的形状
+///
+/// | 写法 | 基准目录 | 例 |
+/// |---|---|---|
+/// | `crate::a::b::n` | crate 根（用后缀匹配，见上） | `crate::util::winutil::which` |
+/// | `self::a::n` | 本文件所在模块 | 罕见，但形状要认 |
+/// | `super::a::n` | 父模块 | `sys/machine/settings.rs` 里的 `super::reg` |
+/// | `ram::n`（裸） | 本文件所在模块的子模块，或某个 crate 名 | `machine/mod.rs` 里的 `ram::smbios_memory` |
+///
+/// **`mod.rs` 与非 `mod.rs` 差一层**：`machine/mod.rs` 本身**就是** `machine` 这个模块，
+/// 而 `machine/settings.rs` 是 `machine::settings`。所以前者的 `super` 要去上上级目录，
+/// 后者的 `super` 只去上级目录。这一条弄错的话，症状是"`super::` 永远差一层目录"。
+fn import_candidates(path: &str, rel: &str) -> Vec<(String, String)> {
+    let segs: Vec<&str> = path.split("::").filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return Vec::new();
+    }
+
+    // ① 名字：末段就是它；`use a::b::{self}` 那种末段是 self 时，名字取前一段
+    //    （`push_import` 记 local 时用的是同一套规矩）。
+    let (name, mids): (String, Vec<&str>) = if segs[segs.len() - 1] == "self" {
+        if segs.len() < 2 {
+            return Vec::new();
+        }
+        (
+            segs[segs.len() - 2].to_string(),
+            segs[..segs.len() - 2].to_vec(),
+        )
+    } else {
+        (segs[segs.len() - 1].to_string(), segs[..segs.len() - 1].to_vec())
+    };
+
+    // ② 基准目录：把 crate / self / super 前缀吃掉，剩下的当"相对基准的模块路径"。
+    let (base, rest, from_crate_root) = if mids.first() == Some(&"crate") {
+        (String::new(), mids[1..].to_vec(), true)
+    } else {
+        let (own_dir, is_mod_file) = split_rel(rel);
+        // "当前模块"在磁盘上的目录：`mod.rs` 就是它自己那层；
+        // `machine/settings.rs` 是 `machine::settings`，它那层是 `machine/settings`。
+        let mut cur = if is_mod_file {
+            own_dir.to_string()
+        } else {
+            let stem = rel.rsplit('/').next().unwrap_or(rel);
+            let stem = stem.strip_suffix(".rs").unwrap_or(stem);
+            format!("{own_dir}/{stem}")
+        };
+        let mut i = 0;
+        // `self` 与 `super` 可以连着写（`super::super::x`）
+        while i < mids.len() && (mids[i] == "super" || mids[i] == "self") {
+            if mids[i] == "super" {
+                match parent_dir(&cur) {
+                    Some(p) => cur = p,
+                    None => return Vec::new(),
+                }
+            }
+            i += 1;
+        }
+        (cur, mids[i..].to_vec(), false)
+    };
+
+    let mut out = Vec::new();
+    let joined = rest.join("/");
+    // (a) 基准 + 子路径
+    out.extend(landing(&base, &joined, &name));
+    // (b) 裸路径的第二种解释：第一段其实是 **crate 名**，剩下的才是 crate 内的路径
+    //     （`use jingwei_engine::graph::index::index_rust`——那个 crate 就是我们自己，
+    //     只是 `use` 里写的是 crate 名而不是 `crate`）。
+    //     **crate 名那一节要丢掉**：它是"哪个 crate"，不是"crate 里哪个目录"。
+    if !from_crate_root && !rest.is_empty() {
+        out.extend(landing("", &rest[1..].join("/"), &name));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// 一个"模块目录 + 子路径 + 名字"的四种落法。
+///
+/// 以 `crate::util::winutil::which` 为例（模块目录 `util`，子路径 `winutil`，名字 `which`）：
+///
+/// | 候选 | 什么情况下是它 |
+/// |---|---|
+/// | `util/winutil.rs` | `winutil` 是个模块文件——**最常见的那一种** |
+/// | `util/winutil/mod.rs` | `winutil` 是个目录模块 |
+/// | `util/winutil/which.rs` | `which` 本身是个子模块（`use` 引的是模块而不是成员） |
+/// | `util/winutil/which/mod.rs` | 同上，目录式 |
+///
+/// 前两条和后两条是**两种完全不同的解释**（名字在 `winutil` 里 vs 名字**就是** `winutil` 的子模块），
+/// 必须都给出来——只给一种的话，`use crate::a::b;` 这种引模块的写法永远落不下来。
+fn landing(base: &str, joined: &str, name: &str) -> Vec<(String, String)> {
+    let dir = match (base.trim_matches('/'), joined) {
+        ("", "") => String::new(),
+        ("", j) => j.to_string(),
+        (b, "") => b.to_string(),
+        (b, j) => format!("{b}/{j}"),
+    };
+    if dir.is_empty() {
+        // 基准和子路径都是空 → 只剩"名字"这一层信息，推不出文件。
+        return vec![(format!("{name}.rs"), name.to_string())];
+    }
+    vec![
+        // 名字定义在 `dir` 这个模块里（`dir` 是模块文件或目录模块）
+        (format!("{dir}.rs"), name.to_string()),
+        (format!("{dir}/mod.rs"), name.to_string()),
+        // 名字本身是 `dir` 底下的一个子模块
+        (format!("{dir}/{name}.rs"), name.to_string()),
+        (format!("{dir}/{name}/mod.rs"), name.to_string()),
+    ]
+}
+
+/// 相对路径 → (所在目录, 是不是 `mod.rs` / `lib.rs` / `main.rs`)。
+fn split_rel(rel: &str) -> (&str, bool) {
+    let (dir, file) = match rel.rsplit_once('/') {
+        Some((d, f)) => (d, f),
+        None => ("", rel),
+    };
+    let is_mod = matches!(file, "mod.rs" | "lib.rs" | "main.rs");
+    (dir, is_mod)
+}
+
+/// 目录的上一层。已经在最外层了就返回 `None`（不是空串——空串是"crate 根"的意思）。
+fn parent_dir(dir: &str) -> Option<String> {
+    let d = dir.trim_matches('/');
+    if d.is_empty() {
+        return None;
+    }
+    match d.rsplit_once('/') {
+        Some((p, _)) => Some(p.to_string()),
+        None => Some(String::new()),
     }
 }
 
@@ -295,9 +456,11 @@ pub fn to_edges(res: &Resolution, now: i64) -> Vec<Edge> {
 /// 给外部用的一句话（界面上的"这次解析连上了多少"）。
 pub fn summary(res: &Resolution) -> String {
     format!(
-        "连上 {} 条 · 拿不准 {} 条 · 外部符号 {} 个 · 模块级引用 {} 处",
+        "连上 {} 条 · 拿不准 {} 条 · use 没接上 {} 处 · 命名空间不符 {} 处 · 外部符号 {} 个 · 模块级引用 {} 处",
         res.resolved.len(),
         res.ambiguous.len(),
+        res.unmapped_imports.len(),
+        res.namespace_mismatch.len(),
         res.external,
         res.module_level
     )
@@ -477,5 +640,211 @@ mod tests {
         let r = resolve_file("a.rs", &refs, &own, &[], &own);
         assert_eq!(r.module_level, 1);
         assert!(r.resolved.is_empty(), "没有调用者就没有边");
+    }
+
+    /// **必须是 `use` 把它接上的，不是"全图唯一同名"兜住的。**
+    ///
+    /// 为什么单独写这一条：上面那条"顺着 use 能找到跨文件的定义"，
+    /// 名字在全图里**只有一个**，所以就算 `through_import` 一次都没命中，
+    /// 后面那条"唯一命中就连"也会把它连上——**测试是绿的，机制却是坏的**。
+    /// 这正是这个项目反复学到的那件事：断言对了，不等于那件事做对了。
+    ///
+    /// 所以这里放**两个同名符号**：兜底那一条会判"拿不准"，
+    /// 只有真的读懂 `use` 才能给出唯一答案。
+    #[test]
+    fn 同名两个时只能靠_use_定夺() {
+        use crate::graph::imports::ImportFact;
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "which".to_string(),
+            vec![
+                SymbolEntry {
+                    id: "symbol:util/winutil.rs#which".to_string(),
+                    class: "value".to_string(),
+                },
+                SymbolEntry {
+                    id: "symbol:tools/which.rs#which".to_string(),
+                    class: "value".to_string(),
+                },
+            ],
+        );
+        let imports = vec![ImportFact {
+            local: "which".to_string(),
+            path: "crate::util::winutil::which".to_string(),
+        }];
+        let refs = vec![rf("which", &["symbol:detect/ccpp.rs#probe_cc"])];
+        let r = resolve_file("detect/ccpp.rs", &refs, &SymbolTable::new(), &imports, &all);
+        assert_eq!(
+            r.resolved,
+            vec![(
+                "symbol:detect/ccpp.rs#probe_cc".to_string(),
+                "symbol:util/winutil.rs#which".to_string()
+            )],
+            "两个同名时兜底会判拿不准，能连上就证明是 use 定的"
+        );
+        assert!(r.ambiguous.is_empty(), "不该走到「拿不准」那一步");
+    }
+
+    /// **`super::` 要按"当前模块在哪"算**——这是一整个形状族，不是一条特例。
+    ///
+    /// `sys/machine/settings.rs` 是 `machine::settings`，它的 `super` 是 `machine`，
+    /// 而 `machine` 这个模块**自己的文件就是 `machine/mod.rs`**。
+    /// 弄错的话症状是"`super::` 永远差一层目录"，而每一处单看都像对的。
+    #[test]
+    fn super_按当前模块算() {
+        use crate::graph::imports::ImportFact;
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "reg".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:sys/machine/mod.rs#reg".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let imports = vec![ImportFact {
+            local: "reg".to_string(),
+            path: "super::reg".to_string(),
+        }];
+        let refs = vec![rf("reg", &["symbol:sys/machine/settings.rs#system_settings"])];
+        let r = resolve_file(
+            "sys/machine/settings.rs",
+            &refs,
+            &SymbolTable::new(),
+            &imports,
+            &all,
+        );
+        assert_eq!(
+            r.resolved,
+            vec![(
+                "symbol:sys/machine/settings.rs#system_settings".to_string(),
+                "symbol:sys/machine/mod.rs#reg".to_string()
+            )],
+            "super 要落到父模块自己的文件上：{:?}",
+            r.unmapped_imports
+        );
+    }
+
+    /// **`mod.rs` 与非 `mod.rs` 差一层**——`graph/mod.rs` 的 `super` 才是 `graph` 的上级，
+    /// 而 `graph/parse.rs` 的 `super` 就是 `graph`。
+    #[test]
+    fn 同目录的兄弟模块也算相对路径() {
+        use crate::graph::imports::ImportFact;
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "collect_imports".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:crates/engine/src/graph/imports.rs#collect_imports".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let imports = vec![ImportFact {
+            local: "collect_imports".to_string(),
+            path: "super::imports::collect_imports".to_string(),
+        }];
+        let refs = vec![rf(
+            "collect_imports",
+            &["symbol:crates/engine/src/graph/parse.rs#parse_rust"],
+        )];
+        let r = resolve_file(
+            "crates/engine/src/graph/parse.rs",
+            &refs,
+            &SymbolTable::new(),
+            &imports,
+            &all,
+        );
+        assert_eq!(
+            r.resolved.len(),
+            1,
+            "`super::imports::x` 是同级模块，要能连上：{:?}",
+            r.unmapped_imports
+        );
+    }
+
+    /// **裸路径的两种解释都要试**：`pub use ram::{...}` 是**子模块**
+    /// （Rust 2018 的 uniform paths），`use jingwei_engine::...` 是**crate 名**。
+    #[test]
+    fn 裸路径既当子模块也当_crate_名() {
+        use crate::graph::imports::ImportFact;
+        // ① 子模块：`machine/mod.rs` 里的 `ram::smbios_memory`
+        let mut a: SymbolTable = BTreeMap::new();
+        a.insert(
+            "smbios_memory".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:sys/machine/ram.rs#smbios_memory".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let r = resolve_file(
+            "sys/machine/mod.rs",
+            &[rf("smbios_memory", &["symbol:sys/machine/mod.rs#spec_report"])],
+            &SymbolTable::new(),
+            &[ImportFact {
+                local: "smbios_memory".to_string(),
+                path: "ram::smbios_memory".to_string(),
+            }],
+            &a,
+        );
+        assert_eq!(r.resolved.len(), 1, "子模块那条解释失效了");
+
+        // ② crate 名：`examples/export_graph.rs` 里的 `jingwei_engine::graph::index::index_rust`
+        let mut b: SymbolTable = BTreeMap::new();
+        b.insert(
+            "index_rust".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:crates/engine/src/graph/index.rs#index_rust".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let r = resolve_file(
+            "crates/engine/examples/export_graph.rs",
+            &[rf("index_rust", &["symbol:crates/engine/examples/export_graph.rs#main"])],
+            &SymbolTable::new(),
+            &[ImportFact {
+                local: "index_rust".to_string(),
+                path: "jingwei_engine::graph::index::index_rust".to_string(),
+            }],
+            &b,
+        );
+        assert_eq!(
+            r.resolved.len(),
+            1,
+            "crate 名那条解释失效了：{:?}",
+            r.unmapped_imports
+        );
+    }
+
+    /// **写了 `use` 却没接上，是我们漏了，不许混进"外部"。**
+    ///
+    /// 这条以前没有：`external` 涨了也看不出是"标准库"还是"我们自己没接上"，
+    /// 而后者恰恰是最该被发现的那一类错——它看起来一切正常。
+    #[test]
+    fn use_没接上要单独报不许算外部() {
+        use crate::graph::imports::ImportFact;
+        let imports = vec![ImportFact {
+            local: "mystery".to_string(),
+            path: "super::nope::mystery".to_string(),
+        }];
+        let refs = vec![rf("mystery", &["symbol:a.rs#caller"])];
+        let r = resolve_file("a.rs", &refs, &SymbolTable::new(), &imports, &SymbolTable::new());
+        assert_eq!(r.external, 0, "有 use 的就不是外部");
+        assert_eq!(r.unmapped_imports.len(), 1);
+        assert!(
+            r.unmapped_imports[0].contains("mystery") && r.unmapped_imports[0].contains("a.rs:1"),
+            "要报出名字和位置：{:?}",
+            r.unmapped_imports
+        );
+    }
+
+    /// **名字在、但不在值命名空间**：既不是"外部"，也不该被静默丢掉。
+    #[test]
+    fn 命名空间不符单独报() {
+        let all = table(&[("Shape", &["symbol:a.rs#Shape"])]);
+        let mut all = all;
+        all.get_mut("Shape").unwrap()[0].class = "type".to_string();
+        let refs = vec![rf("Shape", &["symbol:a.rs#caller"])];
+        let r = resolve_file("a.rs", &refs, &SymbolTable::new(), &[], &all);
+        assert_eq!(r.external, 0, "名字在图谱里，不该说成外部");
+        assert!(r.resolved.is_empty(), "类型不能被当函数调");
+        assert_eq!(r.namespace_mismatch.len(), 1);
     }
 }

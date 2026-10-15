@@ -84,6 +84,30 @@ fn main() {
         rep.ambiguous.len(),
         rep.external
     );
+    // **"外部"里混没混着我们自己漏接的**——这两句就是回答这个问题的。
+    // 少了它们，"外部 4155 个"这个数字没法判断图是不是真的全：
+    // 它把"标准库"和"我们漏了"加在了一起。
+    println!(
+        "　　　写了 use 却没接上 {} 处 · 名字在但命名空间不符 {} 处",
+        rep.unmapped_imports.len(),
+        rep.namespace_mismatch.len()
+    );
+    for (label, list) in [
+        ("use 没接上", &rep.unmapped_imports),
+        ("命名空间不符", &rep.namespace_mismatch),
+    ] {
+        if list.is_empty() {
+            continue;
+        }
+        let mut v = list.clone();
+        v.sort();
+        v.dedup();
+        println!(
+            "　　{label}（去重后 {} 处，前 8）：{}",
+            v.len(),
+            v.iter().take(8).cloned().collect::<Vec<_>>().join(" · ")
+        );
+    }
     // **拿不准的那几个名字要打出来**——不然"46 条"这句话没法查。
     // （这条是这一轮的教训：计数解释不了任何事，事实才解释得了。）
     if !rep.ambiguous.is_empty() {

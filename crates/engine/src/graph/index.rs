@@ -47,6 +47,11 @@ pub struct IndexReport {
     pub ambiguous: Vec<String>,
     /// **外部符号**（标准库 / 别的 crate / 宏生成）——不是错误，是不归我们管。
     pub external: usize,
+    /// **写了 `use` 却没接上**的名字 + 位置（`super::` 相对路径、重导出链、
+    /// 多 crate 同名文件……）。这一类是**我们自己的漏接**，不许伪装成"外部"。
+    pub unmapped_imports: Vec<String>,
+    /// 名字在图谱里、但不在值命名空间——调用点写错了，或者我们的命名空间判断没跟上。
+    pub namespace_mismatch: Vec<String>,
 }
 
 const MAX_FILES: usize = 2000;
@@ -473,6 +478,9 @@ pub fn index_rust(
             let res = crate::graph::resolve::resolve_file(rel, refs, ft, imps, &all_names);
             rep.resolved += res.resolved.len();
             rep.ambiguous.extend(res.ambiguous.iter().cloned());
+            rep.unmapped_imports.extend(res.unmapped_imports.iter().cloned());
+            rep.namespace_mismatch
+                .extend(res.namespace_mismatch.iter().cloned());
             rep.external += res.external;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
         }

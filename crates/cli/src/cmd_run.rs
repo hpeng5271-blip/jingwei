@@ -1,0 +1,363 @@
+//! 跑起来那一摊：`run`（按契约启动 + 6 阶段进度）、`test`。
+//!
+//! 阶段进度的措辞、内存占用那一行、就绪判定后的收尾都在这里——
+//! 它们是同一件事的几个侧面：**让用户看见"现在到哪一步了"**。
+//!
+//! 从 main.rs 拆出来的理由：门禁的行数上限（见《设计》§12.3）。
+
+use super::{c, pad, wrap, BOLD, CYAN, DIM, GREEN, RED, YELLOW};
+use jingwei_engine::{launch, Contract};
+use std::path::Path;
+use std::time::Duration;
+
+pub(crate) fn print_memory(m: &jingwei_engine::mem::MemReport) {
+    println!();
+    // 采样跟不上就直说采不准。把「没采到」报成「它就是 0」，
+    // 是最不该出现的那种错——它看起来像个结论。
+    if !m.reliable {
+        println!(
+            "  {} 进程只活了 {} ms，比采样间隔还短，这次的内存数字不可信。",
+            c(DIM, "内存"),
+            m.duration_ms
+        );
+        println!(
+            "      {}",
+            c(DIM, "（工作集可能只是它刚启动时的空壳；想量得准，让程序至少跑半秒）")
+        );
+        return;
+    }
+    println!(
+        "  {} 进程峰值 {} MB（私有提交 {} MB）· 当时系统 {:.1}/{:.1} GB",
+        c(BOLD, "内存"),
+        m.peak_working_mb,
+        m.peak_commit_mb,
+        m.sys_commit_used_mb as f64 / 1024.0,
+        m.phys_total_mb as f64 / 1024.0
+    );
+    if m.paging {
+        println!(
+            "      {} 峰值时系统的已提交内存已经压过物理内存，多出来的部分被挪到了 pagefile\
+             ——编译这类负载一进磁盘就慢一个数量级。这就是它慢的原因。",
+            c(YELLOW, "换页")
+        );
+    } else if m.peak_working_mb > 0 && m.phys_avail_at_peak_mb < m.phys_total_mb / 8 {
+        println!(
+            "      {} 峰值时物理内存只剩 {} MB，已经贴着边了。这次还没换页，再加点东西就会。",
+            c(YELLOW, "贴边"),
+            m.phys_avail_at_peak_mb
+        );
+    }
+    if m.page_faults > 0 {
+        // 缺页速率才是能比较的量。写成「平均每 N 毫秒一次」在短任务上
+        // 会算出 0——那种数字看着像 bug，其实是除法取整。
+        let secs = (m.duration_ms as f64 / 1000.0).max(0.001);
+        let per_sec = (m.page_faults as f64 / secs) as u64;
+        println!(
+            "      {}",
+            c(
+                DIM,
+                &format!(
+                    "累计缺页 {} 次，约每秒 {} 次。缺页多不等于有问题——它只说明程序一直在向系统要内存",
+                    m.page_faults, per_sec
+                )
+            )
+        );
+    }
+    if !m.others.is_empty() {
+        let top: Vec<String> = m
+            .others
+            .iter()
+            .take(5)
+            .map(|p| format!("{} {}", p.name, jingwei_engine::clean::human_size(p.working_mb * 1048576)))
+            .collect();
+        println!("      当时还占着：{}", c(DIM, &top.join(" · ")));
+    }
+}
+
+pub(crate) fn cmd_run(root: &Path, run_override: Option<String>, extra: Vec<String>) -> i32 {
+    let opts = launch::LaunchOptions {
+        root: root.to_path_buf(),
+        run_override,
+        extra_args: extra,
+        timeout: Duration::from_secs(30),
+        purpose: launch::Purpose::Run,
+    };
+    println!();
+    let mut cb = |ev: launch::Event| match ev {
+        launch::Event::Stage {
+            index,
+            total,
+            title,
+            status,
+            detail,
+            ms,
+        } => {
+            let (mark, word, col) = match status {
+                launch::StageStatus::Ok => ("✓", "通过", GREEN),
+                launch::StageStatus::Note => ("!", "注意", YELLOW),
+                launch::StageStatus::Fail => ("✗", "失败", RED),
+            };
+            let head = format!("[{}/{}] {}", index, total, title);
+            println!(
+                "  {} {} {}{}",
+                c(DIM, &pad(&head, 44)),
+                c(col, &format!("{} {}", mark, word)),
+                c(DIM, "· "),
+                c(DIM, &format!("{}ms", ms))
+            );
+            if !detail.is_empty() {
+                for line in wrap(&detail, 88) {
+                    println!("        {}", c(DIM, &line));
+                }
+            }
+        }
+        launch::Event::Line { source, text } => {
+            let (pre, col) = match source {
+                launch::Source::Stdout => ("│", ""),
+                launch::Source::Stderr => ("!", RED),
+                launch::Source::Log => ("·", CYAN),
+            };
+            println!(
+                "  {} {}",
+                c(if col.is_empty() { DIM } else { col }, pre),
+                c(col, &text)
+            );
+        }
+        launch::Event::Ready { how, ms } => {
+            println!();
+            println!(
+                "  {} {} {}",
+                c(GREEN, "✓ 已就绪"),
+                how,
+                c(DIM, &format!("({}ms)", ms))
+            );
+            println!("  {}", c(DIM, "下面的输出会一直跟着；按 Ctrl+C 结束。"));
+            println!();
+        }
+        launch::Event::Exited { code } => {
+            println!();
+            if code == 0 {
+                println!("  {} 进程已退出（退出码 0）", c(GREEN, "✓"));
+            } else {
+                println!(
+                    "  {} 进程已退出（退出码 {}）",
+                    c(YELLOW, "!"),
+                    code
+                );
+            }
+        }
+    };
+
+    match launch::launch(&opts, &mut cb) {
+        Ok(out) => {
+            if out.ready.is_none() {
+                println!();
+                if out.exit_code != 0 {
+                    // 进程自己挂了：病因在它打印的话里，跟 ready_when 没关系。
+                    println!(
+                        "  {} 进程异常退出（退出码 {}）",
+                        c(RED, "✗"),
+                        out.exit_code
+                    );
+                    match &out.diagnosis {
+                        Some(d) => {
+                            println!("  {} {}", c(BOLD, "症结"), d.crux);
+                            println!("  {} {}", c(DIM, "下一步"), d.hint);
+                        }
+                        None => println!(
+                            "  {}",
+                            c(
+                                DIM,
+                                "真正的报错在上面标 ! 的行里——那是程序自己说的话，重点在那儿。"
+                            )
+                        ),
+                    }
+                } else {
+                    // 进程好好结束了，只是契约没说清「什么算成功」
+                    println!(
+                        "  {} 进程正常结束了，但契约里没写清「什么算成功」，工具说不准这次成不成。",
+                        c(YELLOW, "!")
+                    );
+                    println!(
+                        "  {} 在 env.contract.json 的 ready_when 里声明：常驻服务写 {{\"port\": 端口}}，\
+                         命令行工具写 {{\"log_match\": \"成功时才会出现的那句话\"}}",
+                        c(DIM, "下一步"),
+                    );
+                }
+            }
+            if let Some(m) = &out.memory {
+                print_memory(m);
+                if !out.memory_delta.is_empty() {
+                    println!("      {}", c(BOLD, "和上次比："));
+                    for d in &out.memory_delta {
+                        println!("        · {}", d);
+                    }
+                }
+                println!();
+            }
+            if out.exit_code < 0 {
+                1
+            } else {
+                out.exit_code
+            }
+        }
+        Err(e) => {
+            println!();
+            println!("  {} {}", c(RED, "✗ 启动失败"), e);
+            println!();
+            1
+        }
+    }
+}
+
+pub(crate) fn guess_run(root: &Path) -> Option<String> {
+    let dir_name = root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cands = [
+        "main.py",
+        "app.py",
+        "run.py",
+        "cli.py",
+        "start.py",
+        "manage.py",
+        "server.py",
+    ];
+    for n in cands {
+        if root.join(n).is_file() {
+            return Some(format!("python {}", n));
+        }
+    }
+    let nested = format!("{}.py", dir_name);
+    if root.join(&nested).is_file() {
+        return Some(format!("python {}", nested));
+    }
+    // 退化：src 下唯一的 py
+    let src = root.join("src");
+    if let Ok(rd) = std::fs::read_dir(&src) {
+        let mut hits: Vec<String> = rd
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".py") && !n.starts_with("__"))
+            .collect();
+        hits.sort();
+        if hits.len() == 1 {
+            return Some(format!("python src/{}", hits[0]));
+        }
+    }
+    None
+}
+
+// ------------------------------------------------------------------ 控制台
+
+// ------------------------------------------------------------------ 任务 / new / env / notes
+
+/// 装依赖、跑测试这类「跑完就结束」的动作：同一套 6 阶段进度，措辞换掉。
+pub(crate) fn run_task(root: &Path, command: String, extra: Vec<String>) -> i32 {
+    let opts = launch::LaunchOptions {
+        root: root.to_path_buf(),
+        run_override: Some(command),
+        extra_args: extra,
+        timeout: Duration::from_secs(30),
+        purpose: launch::Purpose::Task,
+    };
+    println!();
+    let mut cb = |ev: launch::Event| match ev {
+        launch::Event::Stage {
+            index,
+            total,
+            title,
+            status,
+            detail,
+            ms,
+        } => {
+            let (mark, word, col) = match status {
+                launch::StageStatus::Ok => ("✓", "通过", GREEN),
+                launch::StageStatus::Note => ("!", "注意", YELLOW),
+                launch::StageStatus::Fail => ("✗", "失败", RED),
+            };
+            let head = format!("[{}/{}] {}", index, total, title);
+            println!(
+                "  {} {} {}{}",
+                c(DIM, &pad(&head, 44)),
+                c(col, &format!("{} {}", mark, word)),
+                c(DIM, "· "),
+                c(DIM, &format!("{}ms", ms))
+            );
+            if !detail.is_empty() {
+                for line in wrap(&detail, 88) {
+                    println!("        {}", c(DIM, &line));
+                }
+            }
+        }
+        launch::Event::Line { source, text } => {
+            let (pre, col) = match source {
+                launch::Source::Stdout => ("│", ""),
+                launch::Source::Stderr => ("!", RED),
+                launch::Source::Log => ("·", CYAN),
+            };
+            println!(
+                "  {} {}",
+                c(if col.is_empty() { DIM } else { col }, pre),
+                c(col, &text)
+            );
+        }
+        launch::Event::Ready { how, ms } => {
+            println!("\n  {} {} {}", c(GREEN, "✓ 完成"), how, c(DIM, &format!("({}ms)", ms)));
+        }
+        launch::Event::Exited { code } => {
+            println!();
+            if code == 0 {
+                println!("  {} 全部结束（退出码 0）", c(GREEN, "✓"));
+            } else {
+                println!("  {} 命令没跑成功（退出码 {}）", c(RED, "✗"), code);
+                println!(
+                    "    {}",
+                    c(DIM, "看上面标 ! 的行：那是程序自己打印的原始报错，重点在那儿。")
+                );
+            }
+        }
+    };
+    match launch::launch(&opts, &mut cb) {
+        Ok(out) => {
+            if out.exit_code < 0 {
+                1
+            } else {
+                out.exit_code
+            }
+        }
+        Err(e) => {
+            println!("\n  {} {}\n", c(RED, "✗ 没跑起来"), e);
+            1
+        }
+    }
+}
+
+pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -> i32 {
+    let (contract, err) = Contract::load(root);
+    if let Some(e) = err {
+        println!("\n  {} 契约读不了：{}\n", c(RED, "✗"), e);
+        return 1;
+    }
+    let cmds = contract.as_ref().map(|x| x.commands.clone()).unwrap_or_default();
+    let command = override_cmd.or_else(|| match which {
+        "test" => cmds.test.clone(),
+        "install" => cmds.install.clone(),
+        _ => None,
+    });
+    let Some(command) = command else {
+        println!();
+        println!("  {} 契约里没有声明 {} 命令。", c(YELLOW, "!"), which);
+        println!(
+            "    {}",
+            c(
+                DIM,
+                "在 env.contract.json 的 commands 里补一条，或直接：jingwei run --run \"<你的命令>\""
+            )
+        );
+        println!();
+        return 1;
+    };
+    run_task(root, command, Vec::new())
+}

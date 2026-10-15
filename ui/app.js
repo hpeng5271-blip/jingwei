@@ -623,6 +623,46 @@ function railDepHtml(detail, deps) {
 }
 
 const RAIL_SEEN = new Set();
+
+// Node / 前端那一摊：**用什么包管理器、依赖装到哪去了、版本要求写在哪**。
+//
+// 为什么这几条值得占位置：它们是"为什么依赖那一栏显示未安装"的答案。
+// yarn PnP 项目压根没有 node_modules，monorepo 的依赖装在仓库根——
+// 不把这层说清楚，用户看到的就是一整列✗，然后去重装依赖，然后问题依旧。
+//
+// 每条都带凭据（悬停可见）：界面上"你凭什么这么说"必须有答案。
+function webSection(w) {
+  const rows = [];
+  const row = (k, v, why) => rows.push(
+    '<div class="web-row" data-tip="' + esc(why || k) + '">'
+    + '<span class="k">' + esc(k) + '</span>'
+    + '<span class="v">' + esc(v) + '</span></div>');
+  const pm = w.package_manager
+    ? w.package_manager + (w.pm_pinned ? ' ' + w.pm_pinned : '')
+    : '还看不出来';
+  row('包管理器', pm, w.pm_from || '没有锁文件，也没有 packageManager 字段');
+  if (w.link_kind) row('依赖位置', w.link_kind, w.link_from || '');
+  if (w.node_pins && w.node_pins.length) {
+    row('Node 要求',
+      w.node_pins.map((p) => p.spec).join('  /  '),
+      w.node_pins.map((p) => p.from + '：' + p.spec).join('\n'));
+  }
+  if (w.workspaces) row('工作区', w.workspaces, 'monorepo：依赖可能被提升到仓库根');
+  if (w.frameworks && w.frameworks.length) {
+    row('框架', w.frameworks.join(' / '), '从 package.json 的依赖里认出来的');
+  }
+  if (w.typescript) row('TypeScript', '有 tsconfig', '根目录下有 tsconfig*.json');
+  if (w.scripts && w.scripts.length) {
+    row('脚本', w.scripts.map((s) => s[0]).join(' / '),
+      w.scripts.map((s) => s[0] + ' → ' + s[1]).join('\n'));
+  }
+  let html = '<div class="rail-sec">Node / 前端</div>' + rows.join('');
+  if (w.notes && w.notes.length) {
+    html += w.notes.map((n) => '<div class="web-note">' + esc(n) + '</div>').join('');
+  }
+  return html;
+}
+
 function renderRail() {
   const body = $('#railBody');
   if (!body) return;
@@ -668,6 +708,7 @@ function renderRail() {
     html += manifests.map((m) => '<div class="dep-manifest" data-tip="' + esc(m.note || '') + '">'
       + '<b>' + esc(m.path) + '</b><span>' + esc(m.note || '') + '</span></div>').join('');
   }
+  if (d.web) html += webSection(d.web);
   if (!total) {
     html += '<div class="rail-empty">该项目未声明依赖。'
       + (manifests.length ? '' : '<br>也未找到依赖清单文件。') + '</div>';

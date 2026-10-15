@@ -56,6 +56,7 @@ pub mod detect {
     pub mod lang;
     pub mod profiles;
     pub mod probe;
+    pub mod web;
 }
 
 /// L3 · 项目理解：从事实里得出结论。（同样是层名避让模块名）

@@ -201,6 +201,42 @@ fn find_up(root: &Path, name: &str, max_hops: usize) -> Option<std::path::PathBu
     None
 }
 
+/// 往上找某个**目录**（`find_up` 的目录版）。
+/// `node_modules` 会被包管理器提升到工作区根上，所以它必须往上找。
+fn find_dir_up(root: &Path, name: &str, max_hops: usize) -> Option<std::path::PathBuf> {
+    let mut cur = Some(root);
+    for _ in 0..=max_hops {
+        let dir = cur?;
+        let p = dir.join(name);
+        if p.is_dir() {
+            return Some(p);
+        }
+        cur = dir.parent();
+    }
+    None
+}
+
+/// Node 的一个依赖装没装，装在**哪个 node_modules** 里。
+///
+/// 版本从 `node_modules/<名字>/package.json` 的 `version` 读——
+/// 这是"实际装了什么版本"唯一的就地凭据（锁文件说的是"该装什么"）。
+/// pnpm 的隔离布局下 `<名字>` 是指向 `.pnpm/…` 的符号链接，跟着走就对。
+fn node_installed(nm: &Path, name: &str) -> Verdict {
+    let p = nm.join(name);
+    if !p.is_dir() {
+        return Verdict::No;
+    }
+    let ver = std::fs::read_to_string(p.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|j| {
+            j.get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+    Verdict::Yes(ver)
+}
+
 /// 声明了哪些依赖（只按一门语言）。
 pub fn declared(root: &Path, lang: Lang) -> Vec<Decl> {
     let out = match lang {
@@ -417,10 +453,18 @@ pub fn installed(root: &Path, lang: Lang, name: &str, py_installed: &[String]) -
     }
     match lang {
         Lang::Web => {
-            if root.join("node_modules").join(name).is_dir() {
-                Verdict::Yes(None)
-            } else {
-                Verdict::No
+            // ① **PnP 项目压根没有 node_modules**——照旧逻辑会把它整个报成
+            //    "未安装"，那是实打实的误报。依赖可见性是 `.pnp.cjs` 那份映射
+            //    表说了算，而解析它要跑 JS，不在这条路径上。所以：确认不了。
+            if crate::detect::web::is_pnp(root) {
+                return Verdict::Unknown;
+            }
+            // ② `node_modules` 可能被**提升到仓库根**（npm / yarn / pnpm 的
+            //    workspace 都这么干）。只看当前目录，成员项目的依赖会全被报成
+            //    未安装——和 Rust 那边为什么要往上找 `Cargo.lock` 是同一个理由。
+            match find_dir_up(root, "node_modules", 3) {
+                Some(nm) => node_installed(&nm, name),
+                None => Verdict::No,
             }
         }
         Lang::Java => {
@@ -477,6 +521,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    // ── Node 那三种布局：**这两种原来是误报** ──────────────────────
+
+    /// **PnP 项目：没有 node_modules 是正常的，绝不能报成"未安装"。**
+    ///
+    /// 改之前这里会返回 `No`，界面上一整列依赖全是✗——而它们其实都装着。
+    /// 这类误报比"查不到"糟得多：用户会去重装依赖，然后发现问题依旧。
+    #[test]
+    fn pnp_项目不报未安装() {
+        let d = tmp("pnp");
+        std::fs::write(
+            d.join("package.json"),
+            r#"{"name":"x","dependencies":{"vue":"^3"}}"#,
+        )
+        .unwrap();
+        std::fs::write(d.join("yarn.lock"), "").unwrap();
+        std::fs::write(d.join(".pnp.cjs"), "// pnp\n").unwrap();
+        let v = installed(&d, Lang::Web, "vue", &[]);
+        assert_eq!(
+            v,
+            Verdict::Unknown,
+            "确认不了就说确认不了——不许说成没装"
+        );
+        assert_ne!(v, Verdict::No, "Unknown 绝不能被当成缺失");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **依赖被提升到仓库根**（npm / yarn / pnpm 的 workspace 都这么干）：
+    /// 成员项目自己目录里没有 node_modules，得往上找。
+    #[test]
+    fn 依赖在仓库根的_node_modules_里也算装了() {
+        let d = tmp("hoist");
+        let member = d.join("apps").join("web");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(member.join("package.json"), r#"{"name":"web"}"#).unwrap();
+        let pkg = d.join("node_modules").join("vue");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("package.json"), r#"{"version":"3.4.21"}"#).unwrap();
+        assert_eq!(
+            installed(&member, Lang::Web, "vue", &[]),
+            Verdict::Yes(Some("3.4.21".to_string())),
+            "版本要就地读出来，不是猜的"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// 一个 node_modules 都没有、也不是 PnP —— 那是真的还没装。
+    #[test]
+    fn 真的没装才说没装() {
+        let d = tmp("none");
+        std::fs::write(d.join("package.json"), r#"{"name":"x"}"#).unwrap();
+        assert_eq!(installed(&d, Lang::Web, "vue", &[]), Verdict::No);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

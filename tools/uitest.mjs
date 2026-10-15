@@ -65,6 +65,21 @@ function stubTauri() {
                 { name: 'serde', want: '1', have: '1.0.229', ok: true, unknown: false, from: 'Cargo.toml' },
                 { name: 'anyhow', want: '1', have: '', ok: false, unknown: false, from: 'Cargo.toml' }],
               depsTree: { total: 3, edges: [{ from: 'serde', to: 'serde_core' }] },
+              // Node / 前端那一摊。桩里给的是**有内容的**，
+              // 因为这一段的价值全在"凭据"上——空对象测不出任何东西。
+              web: {
+                package_manager: 'pnpm',
+                pm_from: 'pnpm-lock.yaml（锁文件）',
+                pm_pinned: null,
+                link_kind: 'pnpm 隔离布局（依赖在 .pnpm 里，node_modules 下是符号链接）',
+                link_from: 'node_modules/.pnpm',
+                node_pins: [{ from: '.nvmrc', spec: '20.11.0' }],
+                workspaces: 'package.json · workspaces（2 项）',
+                typescript: true,
+                scripts: [['dev', 'vite'], ['build', 'vite build']],
+                frameworks: ['Vite'],
+                notes: ['依赖装在仓库根，成员目录里没有 node_modules'],
+              },
               runs: [], hasTest: true, contractName: 'env.contract.json', runCommand: 'cargo run',
             };
           case 'list_files':
@@ -223,6 +238,28 @@ try {
   });
   check('依赖：点行展开详情（声明/实际/来源/状态）',
     st.has && st.text.includes('声明') && st.text.includes('来源'), st.text.slice(0, 60));
+
+  // 2.6 Node / 前端那一摊：包管理器、依赖装到哪去了、版本要求写在哪。
+  //     这一段是"为什么依赖显示未安装"的答案，所以断言要落到**内容**上，
+  //     不是"有这个区块就算过"。
+  st = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#railBody .web-row'));
+    const note = document.querySelector('#railBody .web-note');
+    return {
+      n: rows.length,
+      keys: rows.map((r) => r.querySelector('.k').textContent.trim()),
+      tip: rows.length ? (rows[1].getAttribute('data-tip') || '') : '',
+      pm: rows.length ? rows[0].querySelector('.v').textContent.trim() : '',
+      note: note ? note.textContent.trim() : '',
+    };
+  });
+  check('Node：包管理器与凭据都显示出来了',
+    st.pm.startsWith('pnpm') && st.tip.includes('.pnpm'),
+    `${st.pm} / ${st.tip}`);
+  check('Node：依赖位置说清了（PnP / 隔离布局那一类）',
+    st.keys.includes('依赖位置'), st.keys.join(','));
+  check('Node：说清"为什么可能看着不对"的那句话在',
+    st.note.includes('仓库根'), st.note);
 
   // 3. 运行：阶段流（面板 + 关键行上限 3 + 原始输出折叠）
   await page.evaluate(() => { switchTab('run'); doRun('test'); });

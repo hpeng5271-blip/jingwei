@@ -55,8 +55,15 @@ pub struct ParseOutcome {
 pub struct RefFact {
     /// 引用的名字（`foo()` 里的 `foo`）。
     pub name: String,
-    /// 在哪个函数里引用的（符号 id）。`None` = 不在函数体里。
-    pub from: Option<String>,
+    /// 引用的**作用域链，从内到外**。空 = 不在任何函数体里。
+    ///
+    /// 为什么是"链"而不是"当前在哪个函数"：真实的作用域是**嵌套**的
+    /// （函数 > 函数 > 闭包），而且有**遮蔽**——内层同名遮蔽外层。
+    ///
+    /// stack-graphs 把这件事编码成"图上的 push/pop 节点 + 搜索时维护符号栈"，
+    /// 弹栈时栈顶不匹配就不许走那条路。我们抄它的**形状**：
+    /// 记一条链，解析时**从内往外找第一个匹配**——那就是遮蔽规则的直接实现。
+    pub scope: Vec<String>,
     pub line: u32,
     /// 原始文本。`self.m()` / `Type::m()` 这种形状**原样留着**——
     /// 以后要做接收者类型推断时，需要看到完整的写法，而不是被我压扁的名字。
@@ -80,7 +87,8 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     let complete = !root.has_error();
 
     let mut symbols = Vec::new();
-    collect(root, src, rel, now, None, &mut symbols);
+    let mut scope: Vec<String> = Vec::new();
+    collect(root, src, rel, now, None, &mut scope, &mut symbols);
     // 按 id 去重：树没坏透时可能抽到同名的，去重比让主键撞车好。
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
     symbols.dedup_by(|a, b| a.id == b.id);
@@ -95,7 +103,8 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
     let mut calls = Vec::new();
     let mut refs = Vec::new();
-    collect_calls(root, src, rel, None, None, &by_name, &mut calls, &mut refs);
+    let mut scope: Vec<String> = Vec::new();
+    collect_calls(root, src, rel, None, &mut scope, &by_name, &mut calls, &mut refs);
     // 同一个调用点可能在多处出现（同一个函数调 `helper()` 两次）——
     // 图上只该有一条边：**边表达的是"有关系"，不是"关系发生了几次"**。
     calls.sort();
@@ -112,15 +121,18 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
 /// 走一遍语法树，把**文件内能确定的调用**挑出来。
 ///
-/// `current` 是"此刻在哪个函数里"——它是这套抽取的骨架：
+/// `scope` 是**作用域栈**（从外到内），它是这套抽取的骨架：
 /// 没有它，只能知道"这个文件里有调用"，说不出**谁**调用了谁。
+///
+/// 为什么是栈而不是"当前函数"：函数可以嵌在函数里，闭包又嵌在函数里，
+/// 而**内层同名会遮蔽外层**。栈正好表达这件事——解析时从栈顶往下找第一个匹配。
 #[allow(clippy::too_many_arguments)]
 fn collect_calls(
     node: TsNode<'_>,
     src: &str,
     rel: &str,
     container: Option<&str>,
-    current: Option<&str>,
+    scope: &mut Vec<String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
     out: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
@@ -129,30 +141,36 @@ fn collect_calls(
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_item" => {
-                // 进这个函数体时，把"当前函数"换成它自己的 id
+                // 进这个函数体时**压栈**，出去时弹栈——作用域链就是这么来的。
                 let own = child
                     .child_by_field_name("name")
                     .and_then(|n| n.utf8_text(src.as_bytes()).ok())
-                    .map(|name| match container {
-                        // **走 `node_id`，不要手写拼**——第一版手写成 `a.rs#caller`，
-                        // 少了 `symbol:` 前缀，于是和图里真正的节点对不上，
-                        // 而症状是"一条边都存不进去"（外键在拦），不报错只有结果为空。
-                        Some(c) => {
-                            jingwei_model::node_id(NodeKind::Symbol, &format!("{rel}#{c}::{name}"))
-                        }
-                        None => jingwei_model::node_id(NodeKind::Symbol, &format!("{rel}#{name}")),
+                    // **和 `collect` 用同一套拼法**（同一个 `symbol_key`）——
+                    // 两边各写一份的话，边就会指向一个不存在的节点，
+                    // 而症状是"一条边都存不进去"（外键在拦），不报错、只是结果为空。
+                    .map(|name| {
+                        jingwei_model::node_id(
+                            NodeKind::Symbol,
+                            &symbol_key(rel, scope, container, name),
+                        )
                     });
                 if let Some(body) = child.child_by_field_name("body") {
+                    if let Some(o) = &own {
+                        scope.push(o.clone());
+                    }
                     collect_calls(
                         body,
                         src,
                         rel,
                         container,
-                        own.as_deref(),
+                        scope,
                         by_name,
                         out,
                         refs,
                     );
+                    if own.is_some() {
+                        scope.pop();
+                    }
                 }
             }
             "impl_item" => {
@@ -167,7 +185,7 @@ fn collect_calls(
                         src,
                         rel,
                         ty.as_deref(),
-                        current,
+                        scope,
                         by_name,
                         out,
                         refs,
@@ -176,7 +194,7 @@ fn collect_calls(
             }
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
-                    collect_calls(body, src, rel, container, current, by_name, out, refs);
+                    collect_calls(body, src, rel, container, scope, by_name, out, refs);
                 }
             }
             "call_expression" => {
@@ -188,32 +206,42 @@ fn collect_calls(
                 let is_plain = !txt.is_empty()
                     && txt.chars().all(|c| c.is_alphanumeric() || c == '_')
                     && !txt.starts_with(|c: char| c.is_ascii_digit());
-                match (current, is_plain) {
+                // 当前作用域 = 栈顶（最内层的那个函数）
+                let caller = scope.last().cloned();
+                match (caller, is_plain) {
                     (Some(caller), true) => match by_name.get(txt.as_str()) {
                         Some(callee) => {
                             // 自己调自己不算一条边——那是递归，不是关系。
-                            if *callee != caller {
-                                out.push((caller.to_string(), (*callee).to_string()));
+                            if *callee != caller.as_str() {
+                                out.push((caller, (*callee).to_string()));
                             }
                         }
                         // 本文件里没有这个名字：**可能是外部的**（标准库、别的 crate），
                         // 也可能是同 crate 别的文件里的——两种都要等全局解析才分得清。
                         None => refs.push(RefFact {
                             name: txt.clone(),
-                            from: Some(caller.to_string()),
+                            scope: scope.clone(),
                             line: (f.start_position().row + 1) as u32,
                             raw: txt.clone(),
                         }),
                     },
                     // 复杂形状（`self.m()` / `Type::m()`）：解析不了，
                     // 但**原始写法留着**——以后做接收者类型推断时要用。
-                    (Some(caller), false) => refs.push(RefFact {
+                    (Some(_), false) => refs.push(RefFact {
                         name: txt.clone(),
-                        from: Some(caller.to_string()),
+                        scope: scope.clone(),
                         line: (f.start_position().row + 1) as u32,
                         raw: txt.clone(),
                     }),
-                    (None, _) => {} // 不在函数体里（比如常量里的调用），不算谁的调用
+                    // 不在函数体里（比如 `const X = compute();`）——
+                    // **它仍然是个引用**，只是作用域是模块级。
+                    // 丢掉它等于假装"这个文件里没有这个引用"，而解析期要靠它连关系。
+                    (None, _) => refs.push(RefFact {
+                        name: txt.clone(),
+                        scope: scope.clone(),
+                        line: (f.start_position().row + 1) as u32,
+                        raw: txt.clone(),
+                    }),
                 }
             }
             // **其余节点一律下钻**。
@@ -223,7 +251,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, current, by_name, out, refs);
+                collect_calls(child, src, rel, container, scope, by_name, out, refs);
             }
         }
     }
@@ -237,6 +265,7 @@ fn collect(
     rel: &str,
     now: i64,
     container: Option<&str>,
+    scope: &mut Vec<String>,
     out: &mut Vec<Node>,
 ) {
     let mut cursor = node.walk();
@@ -245,11 +274,23 @@ fn collect(
             // 有名字、且名字本身就是它的标识
             "function_item" | "struct_item" | "enum_item" | "union_item" | "trait_item"
             | "type_item" | "const_item" | "static_item" | "mod_item" => {
-                push_symbol(child, src, rel, now, container, out);
+                let own = push_symbol(child, src, rel, now, container, scope, out);
+                // **函数可以嵌在函数里**，那时它自己就是一层作用域——
+                // 内层的符号 id 要带上外层的路径，否则同名嵌套函数会撞成同一个节点。
+                // （这一条是测试逼出来的：原来两个嵌套函数各自独立成 `a.rs#outer` 和 `a.rs#inner`。）
+                if child.kind() == "function_item" {
+                    if let Some(o) = own {
+                        if let Some(body) = child.child_by_field_name("body") {
+                            scope.push(o);
+                            collect(body, src, rel, now, container, scope, out);
+                            scope.pop();
+                        }
+                    }
+                }
                 // `mod foo { … }` 里面的东西也要收——但容器路径不变（模块路径由 file_path 表达）
                 if child.kind() == "mod_item" {
                     if let Some(body) = child.child_by_field_name("body") {
-                        collect(body, src, rel, now, container, out);
+                        collect(body, src, rel, now, container, scope, out);
                     }
                 }
             }
@@ -261,7 +302,7 @@ fn collect(
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
                 if let Some(body) = child.child_by_field_name("body") {
-                    collect(body, src, rel, now, ty.as_deref(), out);
+                    collect(body, src, rel, now, ty.as_deref(), scope, out);
                 }
             }
             _ => {}
@@ -269,29 +310,25 @@ fn collect(
     }
 }
 
+/// 返回这个符号自己的 id（嵌套函数要用它当下一层的作用域）。
 fn push_symbol(
     item: TsNode<'_>,
     src: &str,
     rel: &str,
     now: i64,
     container: Option<&str>,
+    scope: &[String],
     out: &mut Vec<Node>,
-) {
-    let Some(name_node) = item.child_by_field_name("name") else {
-        return;
-    };
+) -> Option<String> {
+    let name_node = item.child_by_field_name("name")?;
     let Ok(name) = name_node.utf8_text(src.as_bytes()) else {
-        return;
+        return None;
     };
     let name = name.trim();
     if name.is_empty() {
-        return;
+        return None;
     }
-    // 容器路径：`src/lib.rs#Ledger::post` 与 `src/lib.rs#post` 是两个不同的符号。
-    let key = match container {
-        Some(c) => format!("{rel}#{c}::{name}"),
-        None => format!("{rel}#{name}"),
-    };
+    let key = symbol_key(rel, scope, container, name);
     let line = (item.start_position().row + 1) as u32;
     let mut n = Node::new(
         NodeKind::Symbol,
@@ -315,7 +352,36 @@ fn push_symbol(
         container.unwrap_or(""),
         rel,
     ]));
+    let id = n.id.clone();
     out.push(n.with_file(rel, line));
+    Some(id)
+}
+
+/// **符号 key 的唯一拼法**（`collect` 与 `collect_calls` 共用一份）。
+///
+/// 容器路径 = 外层作用域路径 + `container`（impl 的类型）+ 自己：
+/// `src/lib.rs#Ledger::post` 与 `src/lib.rs#post` 是两个不同的符号；
+/// 嵌套函数 `outer::inner` 同理。
+///
+/// **这条链就是 stack-graphs 里那个"作用域栈"的静态形态**——
+/// 它保证"同一个名字在不同作用域下是不同的东西"。
+///
+/// 返回的是**裸 key**（`a.rs#outer::inner`），不带 `symbol:` 前缀——
+/// `Node::new` 内部会走 `node_id` 加上去。这里返完整 id 的话会**双前缀**
+/// （`symbol:symbol:a.rs#...`），而症状是"边指向一个不存在的节点"。
+fn symbol_key(rel: &str, scope: &[String], container: Option<&str>, name: &str) -> String {
+    let mut parts: Vec<&str> = scope.iter().map(|s| short_name(s)).collect();
+    if let Some(c) = container {
+        parts.push(c);
+    }
+    parts.push(name);
+    format!("{rel}#{}", parts.join("::"))
+}
+
+/// 从符号 id 里取回短名（`symbol:a.rs#L::a` → `L::a`）。
+/// 作用域栈里存的是 id，拼 key 时用得上的是短名。
+fn short_name(id: &str) -> &str {
+    id.split_once('#').map(|(_, rest)| rest).unwrap_or(id)
 }
 
 #[cfg(test)]
@@ -428,6 +494,45 @@ fn use_them() {
         let src = "fn a() { println!(\"x\"); }\nfn println() {}\n";
         let r = parse_rust("a.rs", src, 1);
         assert!(r.calls.is_empty(), "宏不该被当成调用：{:?}", r.calls);
+    }
+
+    /// **作用域是链，不是"当前函数"**。
+    ///
+    /// 嵌套函数的引用要记下**从内到外**的整条链——因为解析时要按
+    /// "从内往外找第一个匹配"来做遮蔽。这一条是读完 stack-graphs 之后加的：
+    /// 它把作用域编码成图上的 push/pop 节点，我们抄它的形状。
+    #[test]
+    fn 引用记下从内到外的作用域链() {
+        let src = r#"
+fn outer() {
+    fn inner() {
+        somewhere_else();
+    }
+}
+"#;
+        let r = parse_rust("a.rs", src, 1);
+        assert_eq!(r.references.len(), 1, "{:?}", r.references);
+        let rf = &r.references[0];
+        assert_eq!(rf.name, "somewhere_else");
+        assert_eq!(
+            rf.scope,
+            vec![
+                "symbol:a.rs#outer".to_string(),
+                "symbol:a.rs#outer::inner".to_string()
+            ],
+            "**栈顶是最内层**——从外往里压栈，所以最内层在末尾。
+             解析时从末尾往前找第一个匹配，那就是遮蔽规则。"
+        );
+    }
+
+    /// 不在函数体里的引用（比如 `const X: i32 = f();`）作用域链是空的——
+    /// **它不是"在某个函数里"的引用**，硬塞一个归属会造假。
+    #[test]
+    fn 函数体外的引用作用域链为空() {
+        let src = "const X: i32 = compute();\n";
+        let r = parse_rust("a.rs", src, 1);
+        assert_eq!(r.references.len(), 1, "{:?}", r.references);
+        assert!(r.references[0].scope.is_empty(), "{:?}", r.references[0]);
     }
 
     /// 自己调自己不算边——那是递归，不是"关系"。

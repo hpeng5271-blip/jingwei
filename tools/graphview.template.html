@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>图谱渲染栈验证</title>
+<style>
+  :root { --bg:#2b2b2b; --fg:#a9b7c6; --dim:#808080; --line:#3c3f41; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#2b2b2b; color:#a9b7c6;
+    font:13px/1.5 "Microsoft YaHei", sans-serif; overflow:hidden; }
+  #cv { display:block; width:100vw; height:100vh; cursor:grab; }
+  #hud { position:fixed; left:12px; top:12px; padding:10px 14px; border-radius:8px;
+    background:rgba(43,43,43,.92); border:1px solid #3c3f41; pointer-events:none;
+    font-variant-numeric:tabular-nums; min-width:300px; }
+  #hud .k { color:#808080; }
+  #hud .warn { color:#e8bf6a; }
+  #hud .bad { color:#ff6b68; }
+  #hud .ok { color:#6a8759; }
+  #ctl { position:fixed; right:12px; top:12px; padding:10px 14px; border-radius:8px;
+    background:rgba(43,43,43,.92); border:1px solid #3c3f41; }
+  label { display:block; margin:6px 0; color:#808080; }
+  input[type=range] { width:170px; vertical-align:middle; }
+  button { background:#3c3f41; color:#a9b7c6; border:1px solid #4e5254;
+    border-radius:6px; padding:5px 10px; cursor:pointer; margin-right:6px; }
+  button:hover { background:#4e5254; }
+  .note { color:#808080; font-size:12px; max-width:240px; margin-top:8px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"></div>
+<div id="ctl">
+  <label>边密度 x<b id="densV">1</b>（模拟真实关系网）<br>
+    <input type="range" id="dens" min="1" max="8" value="1"></label>
+  <label>节点上限 <b id="capV">全部</b><br>
+    <input type="range" id="cap" min="200" max="6000" step="200" value="6000"></label>
+  <div>
+    <button id="btnLayout">重算布局</button>
+    <button id="btnStop">停/走</button>
+    <button id="btnReset">复位</button>
+  </div>
+  <div class="note">
+    拖拽平移 · 滚轮缩放。<br>
+    这个页面只做一件事：测画得动画不动。用真数据（经纬索引自己），
+    边密度可调是为了模拟"有了 calls/references 之后的真实图"。
+  </div>
+</div>
+<script>window.GRAPH_DATA = __GRAPH_JSON__;;</script>
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d', { alpha: false });
+const hud = document.getElementById('hud');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+function resize() {
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+const raw = window.GRAPH_DATA;
+let nodes = [], edges = [], N = 0, densVal = 1, capVal = 6000;
+let laid = false, seeded = false, running = true, dragging = false, lastX = 0, lastY = 0;
+let view = { x: 0, y: 0, k: 1 };
+let frames = 0, lastFpsAt = performance.now(), fps = 0;
+let lastStepMs = 0, lastDrawMs = 0;
+function build(cap, dens) {
+  const take = Math.min(cap, raw.nodes.length);
+  nodes = [];
+  const idx = new Map();
+  for (let i = 0; i < take; i++) {
+    const n = raw.nodes[i];
+    idx.set(n.id, nodes.length);
+    nodes.push({ id: n.id, kind: n.kind, name: n.name, x: 0, y: 0, vx: 0, vy: 0, deg: 0 });
+  }
+  edges = [];
+  for (const e of raw.edges) {
+    const a = idx.get(e.src), b = idx.get(e.dst);
+    if (a === undefined || b === undefined) continue;
+    edges.push({ a: a, b: b, kind: e.kind });
+    nodes[a].deg++; nodes[b].deg++;
+  }
+  const target = Math.min(take * dens * 3, take * 24);
+  let guard = 0;
+  while (edges.length < target && guard < target * 4) {
+    guard++;
+    const a = (Math.random() * nodes.length) | 0;
+    const b = (Math.random() * nodes.length) | 0;
+    if (a === b) continue;
+    edges.push({ a: a, b: b, kind: 'sim' });
+    nodes[a].deg++; nodes[b].deg++;
+  }
+  N = nodes.length;
+  laid = false; seeded = false;
+}
+function seed() {
+  const R = Math.min(W, H) * 0.42;
+  for (let i = 0; i < N; i++) {
+    const ring = nodes[i].deg > 8 ? 0.28 : (nodes[i].deg > 2 ? 0.62 : 1);
+    const a = i * 2.399963;
+    const r = R * ring * Math.sqrt((i + 1) / N);
+    nodes[i].x = Math.cos(a) * r;
+    nodes[i].y = Math.sin(a) * r;
+    nodes[i].vx = 0; nodes[i].vy = 0;
+  }
+}
+function step(iters) {
+  const rep = 900, spring = 0.02, len = 26, damp = 0.86;
+  for (let it = 0; it < iters; it++) {
+    for (let i = 0; i < N; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < N; j++) {
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.01; }
+        const f = rep / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      }
+    }
+    for (const e of edges) {
+      const a = nodes[e.a], b = nodes[e.b];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const f = (d - len) * spring;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+    }
+    for (const n of nodes) {
+      n.vx *= damp; n.vy *= damp;
+      n.x += n.vx; n.y += n.vy;
+    }
+  }
+}
+const KIND = {
+  project: { c: '#cc7832', r: 9 },
+  file:    { c: '#6a8759', r: 4.5 },
+  symbol:  { c: '#6897bb', r: 2.2 }
+};
+function draw() {
+  ctx.fillStyle = '#2b2b2b';
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2 + view.x, H / 2 + view.y);
+  ctx.scale(view.k, view.k);
+  ctx.strokeStyle = 'rgba(120,130,140,.16)';
+  ctx.lineWidth = 1 / view.k;
+  ctx.beginPath();
+  for (const e of edges) {
+    const a = nodes[e.a], b = nodes[e.b];
+    if (Math.abs(a.x) + Math.abs(a.y) > 4000 || Math.abs(b.x) + Math.abs(b.y) > 4000) continue;
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  const order = ['symbol', 'file', 'project'];
+  for (const k of order) {
+    const st = KIND[k];
+    ctx.fillStyle = st.c;
+    ctx.beginPath();
+    for (const n of nodes) {
+      if (n.kind !== k) continue;
+      const r = n.deg > 12 ? st.r * 2 : st.r;
+      ctx.moveTo(n.x + r, n.y);
+      ctx.arc(n.x, n.y, r, 0, 6.283185307179586);
+    }
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function tick() {
+  if (!running) { requestAnimationFrame(tick); return; }
+  if (!seeded) { seed(); seeded = true; }
+  const iters = laid ? 1 : (frames < 60 ? 2 : 1);
+  const t1 = performance.now();
+  step(iters);
+  const t2 = performance.now();
+  draw();
+  const t3 = performance.now();
+  lastStepMs = t2 - t1; lastDrawMs = t3 - t2;
+  if (frames > 90) laid = true;
+  frames++;
+  const now = performance.now();
+  if (now - lastFpsAt > 500) {
+    fps = Math.round((frames * 1000) / (now - lastFpsAt));
+    frames = 0; lastFpsAt = now;
+    const cls = fps >= 50 ? 'ok' : (fps >= 25 ? 'warn' : 'bad');
+    hud.innerHTML =
+      '<b>' + N + '</b> 节点 · <b>' + edges.length + '</b> 边 ' +
+      '<span class="k">(真实 ' + raw.nodes.length + '/' + raw.edges.length + '，密度 x' + densVal + ')</span><br>' +
+      '帧率 <b class="' + cls + '">' + fps + '</b> fps · 布局 <b>' + lastStepMs.toFixed(1) + '</b>ms · 绘制 <b>' + lastDrawMs.toFixed(1) + '</b>ms<br>' +
+      '<span class="k">' + (laid ? '布局已收敛（每帧 1 次迭代）' : '正在展开…') +
+      (raw.truncated ? ' · <span class="warn">导出时被截断</span>' : '') + '</span>';
+  }
+  requestAnimationFrame(tick);
+}
+cv.addEventListener('pointerdown', function (e) { dragging = true; lastX = e.clientX; lastY = e.clientY; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointerup', function () { dragging = false; });
+cv.addEventListener('pointermove', function (e) {
+  if (!dragging) return;
+  view.x += e.clientX - lastX; view.y += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+});
+cv.addEventListener('wheel', function (e) {
+  e.preventDefault();
+  view.k = Math.max(0.08, Math.min(6, view.k * (e.deltaY < 0 ? 1.12 : 0.89)));
+}, { passive: false });
+const dens = document.getElementById('dens');
+const cap = document.getElementById('cap');
+function rebuild() {
+  build(capVal >= 6000 ? 1e9 : capVal, densVal);
+  frames = 0; laid = false;
+  document.getElementById('capV').textContent = (capVal >= 6000) ? '全部' : String(capVal);
+}
+dens.addEventListener('input', function () { densVal = parseInt(dens.value, 10); document.getElementById('densV').textContent = String(densVal); rebuild(); });
+cap.addEventListener('input', function () { capVal = parseInt(cap.value, 10); rebuild(); });
+document.getElementById('btnLayout').addEventListener('click', function () { laid = false; seeded = false; frames = 0; });
+document.getElementById('btnStop').addEventListener('click', function () { running = !running; });
+document.getElementById('btnReset').addEventListener('click', function () { view = { x: 0, y: 0, k: 1 }; });
+resize();
+build(1e9, 1);
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

@@ -18,6 +18,12 @@ use std::path::{Path, PathBuf};
 pub struct IndexReport {
     pub files: usize,
     pub symbols: usize,
+    /// 抽出来的**文件内调用关系**条数。
+    /// 跨文件的那部分还没做——它要等"解析期"（设计 §6.2.1）。
+    pub calls: usize,
+    /// **解析不了**的引用条数。这个数字要显示出来：
+    /// 界面上该能回答"这张图漏了多少"，而不是让人以为"就这些调用"。
+    pub unresolved_refs: usize,
     /// 解析不完整（语法树里带错误）的文件数。**它们仍然会进图谱**（符号是真的），
     /// 只是调用方据此知道"这些文件的调用关系不可信"。
     pub incomplete: usize,
@@ -337,9 +343,12 @@ pub fn index_rust(
         let symbols = parsed.symbols.len();
         rep.symbols += symbols;
         let keep: Vec<String> = parsed.symbols.iter().map(|s| s.id.clone()).collect();
+        rep.unresolved_refs += parsed.references.len();
+        // 调用关系单独取出来——`symbols` 下面会被 move 走。
+        let calls = parsed.calls.clone();
 
         let mut nodes: Vec<Node> = Vec::with_capacity(symbols + 1);
-        let mut edges: Vec<Edge> = Vec::with_capacity(symbols + 1);
+        let mut edges: Vec<Edge> = Vec::with_capacity(symbols + 1 + calls.len());
         edges.push(edge(
             &project.id,
             &file_node.id,
@@ -362,6 +371,21 @@ pub fn index_rust(
                 now,
             )?);
             nodes.push(s);
+        }
+        // **调用关系**：只收文件内能确定的那部分（裸标识符且本文件有定义）。
+        // 跨文件的要等"解析期"——见设计 §6.2.1。
+        for (caller, callee) in calls {
+            edges.push(edge(
+                &caller,
+                &callee,
+                EdgeKind::Calls,
+                NodeKind::Symbol,
+                NodeKind::Symbol,
+                Source::TreeSitter,
+                Confidence::High,
+                now,
+            )?);
+            rep.calls += 1;
         }
         nodes.push(file_node);
 

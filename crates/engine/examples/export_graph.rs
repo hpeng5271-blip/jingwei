@@ -29,6 +29,8 @@ fn main() {
     // 库放在临时目录：这是**一次性导出**，不该在项目里留下东西。
     let db = std::env::temp_dir().join(format!("jw-export-{}.db", std::process::id()));
     for p in [&db, &db.with_extension("db-wal"), &db.with_extension("db-shm")] {
+        // 临时文件删不掉不影响导出结果——显式忽略。
+        #[allow(clippy::let_underscore_must_use)]
         let _ = std::fs::remove_file(p);
     }
 
@@ -61,6 +63,7 @@ fn main() {
         eprintln!("写文件失败：{e}");
         std::process::exit(1);
     }
+    #[allow(clippy::let_underscore_must_use)]
     let _ = std::fs::remove_file(&db);
 
     // 报告里给的是**索引器自己说的话**，不是脚本猜的。

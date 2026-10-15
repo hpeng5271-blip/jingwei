@@ -52,6 +52,7 @@
     <button data-tab="run" data-needs="project" data-tip="运行 · 装依赖 / 构建 / 测试 / 运行"><svg class="ic"><use href="#i-run"/></svg><span class="lbl">运行</span></button>
     <button data-tab="editor" data-needs="project" data-tip="编辑器 · 改动先进草稿，应用才落盘"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">编辑器</span></button>
     <button data-tab="note" data-needs="project" data-tip="记录 · 笔记 / 运行日志 / 变更"><svg class="ic"><use href="#i-journal"/></svg><span class="lbl">记录</span></button>
+    <button data-tab="graph" data-needs="project" data-tip="图谱 · 这个项目里有什么、连着什么"><svg class="ic"><use href="#i-overview"/></svg><span class="lbl">图谱</span></button>
     <span class="nav-sep"></span>
     <button data-tab="machine" data-tip="机器清单 · 装配信息与系统设置"><svg class="ic"><use href="#i-machine"/></svg><span class="lbl">机器清单</span></button>
     <button data-tab="clean" data-tip="清理 · 能删的 / 要权限的 / 别碰的"><svg class="ic"><use href="#i-clean"/></svg><span class="lbl">清理</span></button>
@@ -384,6 +385,22 @@
   </section>
 
   <!-- ───── 笔记 ───── -->
+  <!-- 图谱：画布是主体，控制条浮在右上（和编辑器一样，画布不是卡片） -->
+  <section id="view-graph" class="view">
+    <div class="graph-wrap">
+      <canvas id="graphCv"></canvas>
+      <div class="graph-hud" id="graphHud">
+        <div class="gh-row"><b id="ghNodes">—</b> 节点 · <b id="ghEdges">—</b> 边</div>
+        <div class="gh-sub" id="ghSub">正在读取…</div>
+        <div class="gh-btns">
+          <button class="btn ghost sm" id="ghIndex">索引一次</button>
+          <button class="btn ghost sm" id="ghLive">跟着变</button>
+          <button class="btn ghost sm" id="ghFit">复位</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="view-note" class="view">
     <div class="noteTop">
       <div class="noteTop-bar">

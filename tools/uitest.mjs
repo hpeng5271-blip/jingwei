@@ -100,6 +100,38 @@ function stubTauri() {
                 notes: ['没装 cargo——装它才能查'],
               },
             };
+          // ── 图谱那三条：这是"整体联调"要验的那条链 ──────────────
+          case 'graph_stats':
+            return { state: 'yes', data: { nodes: 4, edges: 3 } };
+          case 'graph_index':
+            return {
+              state: 'yes',
+              data: { files: 2, symbols: 4, calls: 1, resolved: 1, ambiguous: 0, external: 3, ms: 12 },
+            };
+          case 'graph_dump':
+            return {
+              state: 'yes',
+              data: {
+                total_nodes: 4,
+                total_edges: 3,
+                truncated: false,
+                nodes: [
+                  { id: 'project:', kind: 'project', name: 'demo' },
+                  { id: 'file:src/main.rs', kind: 'file', name: 'main.rs' },
+                  { id: 'symbol:src/main.rs#main', kind: 'symbol', name: 'main' },
+                  { id: 'symbol:src/main.rs#helper', kind: 'symbol', name: 'helper' },
+                ],
+                edges: [
+                  { src: 'project:', dst: 'file:src/main.rs', kind: 'contains' },
+                  { src: 'file:src/main.rs', dst: 'symbol:src/main.rs#main', kind: 'defines' },
+                  { src: 'symbol:src/main.rs#main', dst: 'symbol:src/main.rs#helper', kind: 'calls' },
+                ],
+              },
+            };
+          case 'watch_start':
+            return { state: 'yes', data: { watching: 'D:/projects/demo', interval_ms: 1500 } };
+          case 'watch_stop':
+            return { state: 'yes', data: { watching: null } };
           case 'open_file':
             return { text: 'fn main() {\n    let n: i32 = 1;\n}\n',
               readable: true, encoding: 'gbk', eol: 'crlf', note: '', drafts: [] };
@@ -299,6 +331,42 @@ try {
     'check_project：notes 是数组且读得出来',
     st.state === 'yes' && st.notes.length === 1,
     JSON.stringify(st),
+  );
+
+  // ── 图谱：整体联调的验收点 ────────────────────────────────────
+  // 这条链是这一轮新接的：外壳加了三条命令 + 实时层，前端加了画布与跟随。
+  // **验的就是"接上没有"**——数字要显示出来、画布上要有东西。
+  await page.evaluate(() => switchTab('graph'));
+  await page.waitForTimeout(900);
+  st = await page.evaluate(() => {
+    const cv = document.getElementById('graphCv');
+    const ctx = cv && cv.getContext('2d');
+    // **要证明画了东西**，不是只看元素在不在：
+    // 取画布中间一小块像素，看有没有非背景色。
+    let painted = 0;
+    if (ctx && cv.width > 0) {
+      const d = ctx.getImageData(Math.floor(cv.width / 2) - 60, Math.floor(cv.height / 2) - 60, 120, 120).data;
+      const first = [d[0], d[1], d[2]];
+      for (let i = 0; i < d.length; i += 4) {
+        if (Math.abs(d[i] - first[0]) + Math.abs(d[i + 1] - first[1]) + Math.abs(d[i + 2] - first[2]) > 24) painted++;
+      }
+    }
+    return {
+      nodes: document.getElementById('ghNodes').textContent,
+      edges: document.getElementById('ghEdges').textContent,
+      sub: document.getElementById('ghSub').textContent,
+      painted,
+    };
+  });
+  check(
+    '图谱：规模显示出来了',
+    st.nodes === '4' && st.edges === '3',
+    JSON.stringify(st),
+  );
+  check(
+    '图谱：画布上真的画了东西',
+    st.painted > 20,
+    '中心区域非背景像素 ' + st.painted + ' 个',
   );
 
   // 7. 新建项目弹窗

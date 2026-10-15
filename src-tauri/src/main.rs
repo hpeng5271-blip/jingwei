@@ -202,6 +202,175 @@ fn hygiene_value(s: Option<&project::ProjectScan>) -> Value {
 /// 为什么是「按需跑」而不是常驻：`cargo check` 第一次要编译依赖，
 /// 慢是正常的；挂在打字上会让人以为编辑器卡死了。手动触发一次、
 /// 结果落进「问题」栏，这个节奏更像"我点了一下，它告诉我哪里不对"。
+// ── 图谱：内核里那套东西的对外接口 ─────────────────────────────────
+//
+// 三条命令，对应图谱链的三段：
+//   graph_index  索引（扫 → 解析 → 写库 → 全局解析）
+//   graph_stats  规模（多少节点、多少边、多少拿不准）
+//   graph_dump   数据（给可视化用，天生带上限、超了会如实说截断）
+//
+// **为什么规模要单独一条**：`graph_index` 是"干活"，`graph_stats` 是"看状态"。
+// 前者可能跑几百毫秒，后者毫秒级——界面每秒问一次时只能问后者。
+// 混成一条的话，状态栏每刷新一次就重扫一遍全项目。
+
+/// 图谱库的位置（跟项目走，可删）。
+fn graph_db(root: &Path) -> PathBuf {
+    root.join(".jingwei").join("graph.db")
+}
+
+/// 实时层：正在盯哪个项目。
+///
+/// **为什么是"同时只盯一个"**：用户同一时刻只在一个项目里干活，
+/// 而每个监视器都要周期性扫磁盘。开十个监视器等于让机器替十个项目做无用功。
+/// 切项目时旧的自动停。
+#[derive(Default)]
+struct WatchState(std::sync::Arc<std::sync::Mutex<Option<(String, u64)>>>);
+
+/// 开始盯一个项目：文件一改就增量索引，并把结果推给界面。
+///
+/// **为什么用轮询而不是系统事件**（见 `state::watch` 的说明）：
+/// Windows 的事件在网络盘 / WSL / 同步盘上会**静默失效**——
+/// 界面什么都不动，而用户以为"没变化"。轮询最笨，但它在哪儿都工作，
+/// 而且失败看得见（没变就是真的没变）。
+///
+/// `interval_ms` 是**两次实际扫描之间的最小间隔**（debounce）：
+/// `git checkout` 一个分支会连续产生几千个事件，每一拍都扫一遍纯属浪费。
+#[tauri::command]
+fn watch_start(
+    app: AppHandle,
+    state: tauri::State<WatchState>,
+    root: String,
+    interval_ms: Option<u64>,
+) -> Result<Value, String> {
+    let p = PathBuf::from(&root);
+    if !p.is_dir() {
+        return Err(format!("这个目录不存在：{root}"));
+    }
+    let gap = std::time::Duration::from_millis(interval_ms.unwrap_or(1500));
+
+    // 记下"现在盯的是谁"。**先写状态再起任务**——
+    // 任务自己会检查"我还是不是当前那个"，被换掉就自己退出去。
+    let mut guard = state.0.lock().map_err(|_| "监视状态锁坏了".to_string())?;
+    let token = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    *guard = Some((root.clone(), token));
+    drop(guard);
+
+    let shared = state.0.clone();
+    let app2 = app.clone();
+    let root2 = root.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut w = jingwei_engine::state::watch::Watcher::new(Path::new(&root2), gap);
+        loop {
+            std::thread::sleep(gap);
+            // 被换掉了就退出（用户切了项目，这个任务没用了）
+            let still_mine = shared
+                .lock()
+                .map(|g| g.as_ref().map(|(_, t)| *t == token).unwrap_or(false))
+                .unwrap_or(false);
+            if !still_mine {
+                break;
+            }
+            let Some(cs) = w.poll() else { continue };
+            if cs.is_empty() {
+                continue;
+            }
+            // 有变化：增量索引。失败也要说话——**静默的实时层比没有还糟**：
+            // 界面上的数字会一直停在旧值，而用户以为那是新的。
+            let msg = match jingwei_engine::graph::store::Store::open(&graph_db(Path::new(&root2)))
+                .and_then(|mut s| jingwei_engine::graph::index::index_rust(Path::new(&root2), &mut s))
+            {
+                Ok(rep) => json!({
+                    "ok": true,
+                    "changed": cs.changed.len(),
+                    "removed": cs.removed.len(),
+                    "symbols": rep.symbols,
+                    "resolved": rep.resolved,
+                }),
+                Err(e) => json!({ "ok": false, "reason": e.to_string() }),
+            };
+            let _ = app2.emit("graph://changed", msg);
+        }
+    });
+
+    Ok(Envelope::yes(json!({ "watching": root, "interval_ms": gap.as_millis() as u64 })).to_value())
+}
+
+/// 停掉实时层。
+#[tauri::command]
+fn watch_stop(state: tauri::State<WatchState>) -> Value {
+    if let Ok(mut g) = state.0.lock() {
+        *g = None;
+    }
+    Envelope::<Value>::yes(json!({ "watching": null })).to_value()
+}
+
+/// 索引一次：扫 → 解析 → 写库 → 全局解析。
+#[tauri::command]
+fn graph_index(root: String) -> Result<Value, String> {
+    let p = PathBuf::from(&root);
+    if !p.is_dir() {
+        return Err(format!("这个目录不存在：{root}"));
+    }
+    let t0 = std::time::Instant::now();
+    let mut store = jingwei_engine::graph::store::Store::open(&graph_db(&p))
+        .map_err(|e| format!("打开图谱库失败：{e}"))?;
+    let rep = jingwei_engine::graph::index::index_rust(&p, &mut store)
+        .map_err(|e| format!("索引失败：{e}"))?;
+    Ok(Envelope::yes(json!({
+        "files": rep.files,
+        "symbols": rep.symbols,
+        "calls": rep.calls,
+        "incomplete": rep.incomplete,
+        "truncated": rep.truncated,
+        "unreadable": rep.unreadable,
+        // 解析期的三个数**分开报**——它们的说法完全不同
+        "resolved": rep.resolved,
+        "ambiguous": rep.ambiguous.len(),
+        "external": rep.external,
+        "ms": t0.elapsed().as_millis() as u64,
+    }))
+    .to_value())
+}
+
+/// 看规模。**只读打开**——状态栏问得频繁，不该跟写者抢锁。
+#[tauri::command]
+fn graph_stats(root: String) -> Value {
+    let p = PathBuf::from(&root);
+    let db = graph_db(&p);
+    if !db.is_file() {
+        // 还没索引过——**这不是错误**，是"你还没让它建过图"。
+        // 走 `no` 而不是 `unknown`：我们确知它不存在。
+        return Envelope::<Value>::no("这个项目还没建过图谱（点一下索引就行）").to_value();
+    }
+    match jingwei_engine::graph::store::Store::open_readonly(&db) {
+        Ok(s) => match s.counts() {
+            Ok((nodes, edges)) => Envelope::yes(json!({ "nodes": nodes, "edges": edges })).to_value(),
+            Err(e) => Envelope::<Value>::unknown(format!("读图谱规模失败：{e}")).to_value(),
+        },
+        Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),
+    }
+}
+
+/// 给可视化用的数据。**天生带上限**——超了截断并如实说。
+#[tauri::command]
+fn graph_dump(root: String, limit: Option<usize>) -> Value {
+    let p = PathBuf::from(&root);
+    let db = graph_db(&p);
+    if !db.is_file() {
+        return Envelope::<Value>::no("这个项目还没建过图谱").to_value();
+    }
+    match jingwei_engine::graph::store::Store::open_readonly(&db) {
+        Ok(s) => match s.dump(limit.unwrap_or(2000)) {
+            Ok(v) => Envelope::yes(v).to_value(),
+            Err(e) => Envelope::<Value>::unknown(format!("导出图谱失败：{e}")).to_value(),
+        },
+        Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),
+    }
+}
+
 #[tauri::command]
 async fn check_project(root: String) -> Value {
     let dir = std::path::PathBuf::from(&root);
@@ -726,6 +895,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(InitialProject(std::sync::Mutex::new(start)))
         .manage(SysSampler(std::sync::Mutex::new(machine::Sampler::new())))
+        // 实时层：同时只盯一个项目（见 `WatchState` 的说明）
+        .manage(WatchState::default())
         // 状态栏的数字由这里推，不由前端拉：
         // 采样要问系统，前端问不到；每秒来回一次 IPC 也不划算。
         .setup(|app| {
@@ -781,6 +952,11 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            watch_start,
+            watch_stop,
+            graph_index,
+            graph_stats,
+            graph_dump,
             initial_project,
             sample_now,
             inspect,

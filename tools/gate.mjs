@@ -124,7 +124,8 @@ const KNOWN_LONG = new Map([
   // 以后每次调大这个数都要在这一行留一句为什么，否则这条规矩就成橡皮筋了。
   ['crates/engine/src/understand/project.rs', 1803],
   ['crates/engine/src/sys/clean.rs', 1523],
-  ['crates/engine/src/sys/machine.rs', 1423],
+  // machine.rs 已拆（mod 889 / disk 219 / ram 144 / settings 121）——**债还清了，登记表就删掉**。
+  // 这条规矩的意义就在这儿：登记不是豁免，是"记着要还"。
   // 1120：Q6 拆循环，Finding/Severity 上移到 model（-27 行）。
   ['crates/engine/src/understand/rules.rs', 1120],
 ]);

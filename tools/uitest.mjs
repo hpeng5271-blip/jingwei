@@ -368,7 +368,7 @@ try {
   st = await page.evaluate(() => ({ changed: document.querySelectorAll('#settingsPanel .changed').length, revert: document.querySelectorAll('#settingsPanel .revert').length }));
   check('设置：改动后出现标记与还原', st.changed === 1 && st.revert === 1, JSON.stringify(st));
 
-  // 档位必须真的落到 CSS 变量上。这里曾经漏过:app.js 设的是 --dur*，
+  // 档位必须真的落到 CSS 变量上。这里曾经漏过:前端设的是 --dur*，
   // 而 style.css 用的是 --t*，两边不是同一批变量——设置项看着能调，实际是死的。
   st = await page.evaluate(() => ({
     t: getComputedStyle(document.documentElement).getPropertyValue('--t-fast').trim(),

@@ -492,6 +492,17 @@
 <div class="feed" id="feed" hidden></div>
 <div class="toast" id="toast" hidden></div>
 <div class="busyCursor" id="busyCursor" hidden><span class="bc-i"></span></div>
-<script src="app.js?v=22"></script>
+<!-- 前端拆成 7 个经典脚本（没有打包器是架构选择，见《设计》§10）。
+     **顺序不能动**：经典脚本按 <script> 出现的顺序求值，函数声明会提升、
+     const/let 不会。所以状态与基础工具排在最前，页面模块依次在后。
+     拆的边界按"一屏/一域"，不是按行数平均切——
+     原来的 app.js 已经到 4400 行，门禁上限 4500，再加功能就撞线了。 -->
+<script src="core.js?v=22"></script>
+<script src="shell.js?v=22"></script>
+<script src="projects.js?v=22"></script>
+<script src="notes.js?v=22"></script>
+<script src="events.js?v=22"></script>
+<script src="editor.js?v=22"></script>
+<script src="graph.js?v=22"></script>
 </body>
 </html>

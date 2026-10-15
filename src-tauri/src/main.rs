@@ -197,11 +197,6 @@ fn hygiene_value(s: Option<&project::ProjectScan>) -> Value {
     v
 }
 
-/// 跑一次真实的编译器检查。
-///
-/// 为什么是「按需跑」而不是常驻：`cargo check` 第一次要编译依赖，
-/// 慢是正常的；挂在打字上会让人以为编辑器卡死了。手动触发一次、
-/// 结果落进「问题」栏，这个节奏更像"我点了一下，它告诉我哪里不对"。
 // ── 图谱：内核里那套东西的对外接口 ─────────────────────────────────
 //
 // 三条命令，对应图谱链的三段：
@@ -291,6 +286,9 @@ fn watch_start(
                 }),
                 Err(e) => json!({ "ok": false, "reason": e.to_string() }),
             };
+            // 推送失败只可能是窗口已经关了——那时没人接这个事件。
+            // 记日志只会把热路径刷满，所以显式忽略。
+            #[allow(clippy::let_underscore_must_use)]
             let _ = app2.emit("graph://changed", msg);
         }
     });
@@ -371,6 +369,11 @@ fn graph_dump(root: String, limit: Option<usize>) -> Value {
     }
 }
 
+/// 跑一次真实的编译器检查。
+///
+/// 为什么是「按需跑」而不是常驻：`cargo check` 第一次要编译依赖，
+/// 慢是正常的；挂在打字上会让人以为编辑器卡死了。手动触发一次、
+/// 结果落进「问题」栏，这个节奏更像"我点了一下，它告诉我哪里不对"。
 #[tauri::command]
 async fn check_project(root: String) -> Value {
     let dir = std::path::PathBuf::from(&root);

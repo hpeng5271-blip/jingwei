@@ -269,7 +269,10 @@ pub(crate) fn prepare(
         alive_unready: if live { StageStatus::Note } else { StageStatus::Fail },
         url_watch: live && opts.purpose == Purpose::Run,
         ready_rule: if live && opts.purpose == Purpose::Run {
-            "输出里出现监听地址（localhost / 127.0.0.1）".to_string()
+            // 两种都算：服务把地址报出来了（且端口真的通了），或者它正常跑完退出。
+            // 只写前者的话，"已就绪 · 退出码 0（判定依据：输出里出现监听地址）"
+            // 会自相矛盾——依据和证据对不上，看的人立刻就不信这一栏了。
+            "监听地址（localhost / 127.0.0.1，且端口真的通）或正常退出".to_string()
         } else {
             "退出码 0".to_string()
         },

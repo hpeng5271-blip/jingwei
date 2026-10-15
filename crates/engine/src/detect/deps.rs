@@ -10,6 +10,11 @@
 use crate::detect::lang::Lang;
 use std::path::Path;
 
+// Node 的锁文件解析放在 `nodelock.rs`（那里只干"解析一种外部格式"这一件事）。
+// **这里再导出一遍**：对外仍然是"依赖这一层提供传递依赖图"，
+// 调用方不必知道它被拆到了哪个文件里。
+pub use super::nodelock::{web_tree, WebTree};
+
 /// 一条依赖边：谁把谁捎带进来了。
 /// 这就是 EMI 那条「recipe tree」的形状——把一件复杂的事拆开，
 /// 让你看见每一步、以及最后到底拉进来多少个包。
@@ -22,9 +27,11 @@ pub struct TreeEdge {
 /// 从 Cargo.lock 读依赖图。
 ///
 /// 为什么不用猜：Cargo.lock 里每个 `[[package]]` 都写着自己的 `dependencies`，
-/// 间接依赖是**记在案的事实**，不是推断出来的。别的语言没有这么一份现成的东西
-/// （npm 要 node_modules/*/package.json、Maven 要跑一次 dependency:tree），
-/// 所以这一层先只对 Rust 做实，其余语言留空——**不做假数据**。
+/// 间接依赖是**记在案的事实**，不是推断出来的。
+///
+/// （原来这里写着"别的语言没有这么一份现成的东西"——**那句话对 npm 是错的**：
+/// `package-lock.json` 的 `packages` 段里，键就是"被装到哪儿"的路径，
+/// 嵌套关系写在键里。见 `web_tree`。）
 pub fn rust_tree(root: &Path) -> (Vec<TreeEdge>, usize) {
     let Some(text) = find_up(root, "Cargo.lock", 3).and_then(|p| std::fs::read_to_string(p).ok())
     else {
@@ -179,7 +186,7 @@ pub enum Verdict {
     Unknown,
 }
 
-fn read(root: &Path, name: &str) -> Option<String> {
+pub(super) fn read(root: &Path, name: &str) -> Option<String> {
     std::fs::read_to_string(root.join(name)).ok()
 }
 
@@ -729,4 +736,5 @@ mod tests {
         assert_eq!(installed(&d, Lang::Cpp, "OpenCV", &[]), Verdict::Unknown);
         let _ = std::fs::remove_dir_all(&d);
     }
+
 }

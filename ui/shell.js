@@ -57,6 +57,11 @@ function renderRailProjs() {
 /// 一次算好「从某个直接依赖出发能走到多少个包」，行渲染时直接用——
 /// 这就是 EMI 那条 recipe tree 想回答的问题：这一样东西一共拉进来多少别的。
 let TREE = { adj: new Map(), cache: new Map(), ready: false };
+// 这张树是谁给的（Rust 还是 Node），以及"没有树"时的原因。
+// **来源必须显示出来**：同样是"下游树"，出自 Cargo.lock 和出自
+// package-lock.json 的可信度与含义都不一样。
+let TREE_SRC = '';
+let TREE_GAP = '';
 const RAIL = { collapsed: new Set(), q: '' };
 
 /// 依赖清单：按 Maven 工具窗的读法组织——一个清单、若干分组、一行一项。
@@ -64,13 +69,20 @@ const RAIL = { collapsed: new Set(), q: '' };
 /// 用回来的一堆边建一张邻接表
 function treeIndex(d) {
   const t = (d && d.depsTree) || null;
-  if (!t || !t.edges || !t.edges.length) { TREE = { adj: new Map(), cache: new Map(), ready: false, total: 0 }; return; }
+  // Rust 那张优先；没有就退到 Node 那张（`depsTreeWeb`）。
+  // **一次只画一张**：一个 Tauri 项目两边都有，混起来画会把两个生态的
+  // 名字串成一棵看起来通顺、其实不存在的树。
+  const use = (t && t.edges && t.edges.length) ? t : ((d && d.depsTreeWeb && d.depsTreeWeb.edges && d.depsTreeWeb.edges.length) ? d.depsTreeWeb : null);
+  TREE_SRC = use ? (use === t ? 'Rust（Cargo.lock）' : (use.source || 'Node')) : '';
+  TREE_GAP = (d && d.depsTreeWeb && d.depsTreeWeb.note) || '';
+  if (!use) { TREE = { adj: new Map(), cache: new Map(), ready: false, total: 0 }; return; }
+  const t2 = use;
   const adj = new Map();
-  t.edges.forEach((e) => {
+  t2.edges.forEach((e) => {
     if (!adj.has(e.from)) adj.set(e.from, []);
     adj.get(e.from).push(e.to);
   });
-  TREE = { adj, cache: new Map(), ready: true, total: t.total || 0 };
+  TREE = { adj, cache: new Map(), ready: true, total: t2.total || 0 };
 }
 
 /// 从某个包出发能走到多少个包（去重）。广度优先，顺带防环。
@@ -315,6 +327,14 @@ function renderRail() {
   } else {
     html += railDepHtml(detail, deps);
     html += '<div class="rail-empty">左列为清单声明，右列为实际安装版本。</div>';
+  }
+  // 下游树是谁给的（或为什么没有）——**这一行不能省**：
+  // "点开一层看下游"看起来都一样，但出自 Cargo.lock 和出自 package-lock.json
+  // 是两份完全不同的凭据；而没有树的时候，更要说明是"没有"还是"还没做"。
+  if (TREE.ready && TREE_SRC) {
+    html += '<div class="rail-empty">下游树来自 ' + esc(TREE_SRC) + '（' + TREE.total + ' 条边）。</div>';
+  } else if (TREE_GAP) {
+    html += '<div class="rt-note">传递依赖图：' + esc(TREE_GAP) + '</div>';
   }
   body.innerHTML = html;
   // 工具条与分组：就地绑事件（这一段每次重画，事件也跟着重绑）

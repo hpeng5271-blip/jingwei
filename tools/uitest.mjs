@@ -65,6 +65,15 @@ function stubTauri() {
                 { name: 'serde', want: '1', have: '1.0.229', ok: true, unknown: false, from: 'Cargo.toml' },
                 { name: 'anyhow', want: '1', have: '', ok: false, unknown: false, from: 'Cargo.toml' }],
               depsTree: { total: 3, edges: [{ from: 'serde', to: 'serde_core' }] },
+              // Node 的传递依赖图 + **来源**。桩里两样都给：
+              // Rust 那张会赢，而 Node 的 note 走"没有树时"那条路——
+              // 两条路都要能显示，所以断言也分两条。
+              depsTreeWeb: {
+                total: 2,
+                edges: [{ from: 'app', to: 'vue' }],
+                source: 'package-lock.json（lockfileVersion 3）的 packages 段',
+                note: null,
+              },
               // Node / 前端那一摊。桩里给的是**有内容的**，
               // 因为这一段的价值全在"凭据"上——空对象测不出任何东西。
               web: {
@@ -257,6 +266,27 @@ try {
   });
   check('依赖：点行展开详情（声明/实际/来源/状态）',
     st.has && st.text.includes('声明') && st.text.includes('来源'), st.text.slice(0, 60));
+
+  // 2.55 下游树的**来源**必须显示：两棵树看起来一样，凭据完全不同
+  st = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#railBody .rail-empty'));
+    const src = rows.map((r) => r.textContent.trim()).find((t) => t.includes('下游树来自'));
+    return { src: src || '' };
+  });
+  check('依赖：下游树标了来源（Rust 那张优先）',
+    st.src.includes('Cargo.lock') && st.src.includes('3 条边'), st.src);
+
+  // 另一条路：**没有树可画时要说清是"没有"还是"还没做"**。
+  // 直接喂两个形状给 treeIndex，比再造一个项目快得多，也精准得多。
+  st = await page.evaluate(() => {
+    treeIndex({ depsTreeWeb: { total: 0, edges: [], source: null, note: 'pnpm 的锁文件（pnpm-lock.yaml）格式还没做' } });
+    const gap = TREE_GAP;
+    const ready = TREE.ready;
+    treeIndex(S.data || {}); // 把状态还原回去，别影响后面的检查
+    return { gap, ready };
+  });
+  check('依赖：没有图时明说"还没做"，不画一张空图',
+    st.gap.includes('还没做') && st.ready === false, `${st.gap} / ready=${st.ready}`);
 
   // 2.6 Node / 前端那一摊：包管理器、依赖装到哪去了、版本要求写在哪。
   //     这一段是"为什么依赖显示未安装"的答案，所以断言要落到**内容**上，

@@ -23,6 +23,10 @@ pub(crate) fn inspect_payload(root: &Path) -> Value {
     let facts = probe::make_facts(root, None);
     // 传递依赖图：读取本身很便宜（一份 lock 文件），就跟着 inspect 一起回来
     let deps_tree = jingwei_engine::deps::rust_tree(root);
+    // Node 那边同理——**只做核过官方文档的那一种**（npm 的 package-lock.json）。
+    // 别的包管理器如实返回"还没做"：一张空图会被画成"这个项目没有依赖"，
+    // 那是最坏的一种撒谎。
+    let web_tree = jingwei_engine::deps::web_tree(root);
     let findings = rules::run_all(&facts, prev.as_ref());
     let (contract, contract_err) = Contract::load(root);
 
@@ -63,10 +67,19 @@ pub(crate) fn inspect_payload(root: &Path) -> Value {
         // 右侧面板要显示"这个项目声明了什么依赖、装了没装"
         "deps": facts.project.deps_status,
         "depsDetail": facts.project.deps_detail,
-        // 传递依赖图（目前只有 Rust 有可靠来源：Cargo.lock 里写着）
+        // 传递依赖图（Rust：Cargo.lock 里写着）
         "depsTree": {
             "edges": deps_tree.0.iter().map(|e| json!({"from": e.from, "to": e.to})).collect::<Vec<_>>(),
             "total": deps_tree.1,
+        },
+        // Node 的传递依赖图 + **来源**（或"为什么没有图"）。
+        // 与 Rust 那张分开给：一个 Tauri 项目两边都有，混在一起画出来的树
+        // 会把两个生态的名字串起来。
+        "depsTreeWeb": {
+            "edges": web_tree.edges.iter().map(|e| json!({"from": e.from, "to": e.to})).collect::<Vec<_>>(),
+            "total": web_tree.total,
+            "source": web_tree.source,
+            "note": web_tree.note,
         },
         "declared": facts.project.declared_deps,
         // Node / 前端那一摊：**用什么包管理器、依赖装到哪去了、版本要求写在哪**。

@@ -54,6 +54,7 @@ pub mod detect {
     pub mod envsetup;
     pub mod jvm;
     pub mod lang;
+    pub mod nodelock;
     pub mod profiles;
     pub mod probe;
     pub mod web;

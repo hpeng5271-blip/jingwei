@@ -372,6 +372,11 @@ fn landing(base: &str, joined: &str, name: &str) -> Vec<(String, String)> {
         // 名字定义在 `dir` 这个模块里（`dir` 是模块文件或目录模块）
         (format!("{dir}.rs"), name.to_string()),
         (format!("{dir}/mod.rs"), name.to_string()),
+        // **crate 根的模块文件是 `main.rs` / `lib.rs`，不叫 `mod.rs`**。
+        // 少了这两条，`use super::{c, pad}`（从 `src/cmd_clean.rs` 往 crate 根找）
+        // 这一类永远接不上——实测自己索引自己时报出 11 处，全是这个形状。
+        (format!("{dir}/main.rs"), name.to_string()),
+        (format!("{dir}/lib.rs"), name.to_string()),
         // 名字本身是 `dir` 底下的一个子模块
         (format!("{dir}/{name}.rs"), name.to_string()),
         (format!("{dir}/{name}/mod.rs"), name.to_string()),
@@ -809,6 +814,46 @@ mod tests {
             r.resolved.len(),
             1,
             "crate 名那条解释失效了：{:?}",
+            r.unmapped_imports
+        );
+    }
+
+    /// **crate 根的模块文件叫 `main.rs` / `lib.rs`，不叫 `mod.rs`**。
+    ///
+    /// 这条是图谱自己抓出来的：把 CLI 外壳按领域拆成 `cmd_*.rs` 之后，
+    /// 那些文件里写的 `use super::{c, pad, ...}` 全部报"没接上"——
+    /// 而 `super` 指的正是 crate 根，它的文件名叫 `main.rs`。
+    /// 少了这两个候选，**同一个形状的 11 处会一直挂着**。
+    ///
+    /// 这条的价值不在"11 变成 0"，而在于：**缺口是工具自己报出来的**，
+    /// 不是靠人逐个去读那些文件看出来的。
+    #[test]
+    fn crate_根的模块文件是_main_或_lib() {
+        use crate::graph::imports::ImportFact;
+        let mut all: SymbolTable = BTreeMap::new();
+        all.insert(
+            "c".to_string(),
+            vec![SymbolEntry {
+                id: "symbol:crates/cli/src/main.rs#c".to_string(),
+                class: "value".to_string(),
+            }],
+        );
+        let imports = vec![ImportFact {
+            local: "c".to_string(),
+            path: "super::c".to_string(),
+        }];
+        let refs = vec![rf("c", &["symbol:crates/cli/src/cmd_clean.rs#render_scan"])];
+        let r = resolve_file(
+            "crates/cli/src/cmd_clean.rs",
+            &refs,
+            &SymbolTable::new(),
+            &imports,
+            &all,
+        );
+        assert_eq!(
+            r.resolved.len(),
+            1,
+            "`super::c` 要能落到 crate 根的 main.rs 上：{:?}",
             r.unmapped_imports
         );
     }

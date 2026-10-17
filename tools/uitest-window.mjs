@@ -119,6 +119,16 @@ function assertExeFresh() {
   };
   walk(join(ROOT, 'src-tauri', 'src'));
   walk(join(ROOT, 'ui'));
+  // **`crates/**` 也要扫**（2026-10-17，拿真 crate 当探针时撞出来的）。
+  //
+  // 这条检查原来只看 `src-tauri/src` 与 `ui`——而 `jingwei-app` **依赖 jingwei-engine**，
+  // 在 `crates/engine/**` 里加一条规则，GUI 的行为就变了，可**exe 的时间戳没变**。
+  // 实测：`target/release/jingwei-gui.exe` 停在 11:20，而 `crates/engine/src` 改到 13:18，
+  // 这道闸照样绿——**我于是拿一个两小时前的二进制给"界面显示几条"下了结论**，
+  // 结论是错的（界面 1 条 vs CLI 2 条，差异全是旧 exe）。
+  //
+  // 教训与"交付门禁 staleness 恒真"同一条：**检查的原料集写窄了，闸就形同虚设**。
+  walk(join(ROOT, 'crates'));
   if (exeMs + 60_000 < newest) {
     problems.push(
       `exe 比源码旧 ${((newest - exeMs) / 60000).toFixed(1)} 分钟——先重新构建再测`

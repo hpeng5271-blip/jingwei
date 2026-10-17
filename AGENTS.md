@@ -247,6 +247,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   **我手工跑的不安全**。规矩：拿真项目当探针前先复制到临时目录（`guide`/`doctor`/`audit` 只读，可以随便打）。
   已清理，复查 467 个 crate 0 个被污染。SOP §S21。
 
+- **界面门禁的"exe 旧了"检查扫错了目录**（2026-10-17，拿真 crate 当探针时撞出来的）：
+  `assertExeFresh()` 只扫 `src-tauri/src` 与 `ui`——**不扫 `crates/`**。
+  而 `jingwei-app` **依赖 `jingwei-engine`**：在 `crates/engine/**` 里加一条规则，GUI 的行为就变了，
+  可 **exe 的时间戳没变**。实测：`target/release/jingwei-gui.exe` 停在 **11:20**，
+  `crates/engine/src` 改到 **13:18**，这道闸**照样绿**。
+  我于是拿一个两小时前的二进制给"界面显示几条"下了结论——结论是错的
+  （界面 `#cardNotes` 说「另有 1 条日常提示」，CLI `audit` 说 **2 条**，
+  **差异全是旧 exe**，引擎两条路本来一致：`probe::make_facts` 实测 `items=2`）。
+  修法：`walk(join(ROOT, 'crates'))` 也扫。负向验证过（把 `crates/**` 里一个文件推到 exe 之后
+  → 红在「exe 比源码旧 10.0 分钟」）。
+  **教训与"交付门禁 staleness 恒真"同一条：检查的原料集写窄了，闸就形同虚设。**
+  也再一次印证上一条——**探针不守规矩，结论就会错**。
+
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

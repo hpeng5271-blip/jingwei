@@ -1,4 +1,4 @@
-//! 这个目录是什么项目。
+﻿//! 这个目录是什么项目。
 //!
 //! 判据只看文件，不解析内容——每多花一毫秒都在打开项目的第一帧上。
 //! 知道是哪门语言，后续探测才能只做该做的：打开 Python 项目不该去 spawn java。
@@ -67,10 +67,9 @@ fn root_markers(root: &Path) -> Vec<Lang> {
                 continue;
             }
             let name = e.file_name().to_string_lossy().to_lowercase();
-            if matches!(
-                name.as_str(),
-                ".git" | "node_modules" | "target" | "build" | ".venv" | "venv" | "dist"
-            ) {
+            // 判法只有一处（`util::scan::is_not_source_dir`）。
+            // 这里早就转了小写、而 `index.rs` / `watch.rs` 没转——**同一份清单、两种判法**。
+            if crate::util::scan::is_not_source_dir(&name) {
                 continue;
             }
             n += 1;

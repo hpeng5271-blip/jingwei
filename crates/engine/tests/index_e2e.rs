@@ -6,6 +6,10 @@
 //! 用真临时目录、真 SQLite 文件（不是内存库）：内存库漏得掉 WAL、文件锁、
 //! 重复打开这些**只在真文件上才出现**的问题。
 
+// 测试里的临时目录清理失败不影响断言，也不能改变结论——显式豁免，
+// 而不是让 lint 在整个 crate 里静默失声。
+#![allow(clippy::let_underscore_must_use)]
+
 use jingwei_engine::{
     index,
     store::{Dir, Store},
@@ -50,6 +54,52 @@ fn make_tree(tag: &str, files: &[(&str, &str)]) -> PathBuf {
         std::fs::write(&p, body).expect("写文件失败");
     }
     d
+}
+
+/// **产物目录里的源码一个都不该被索引，而且大小写不敏感**（2026-10-17）。
+///
+/// ## 拿什么换的
+///
+/// 「哪些目录不当源码扫描」这份清单原来在 **三处各写一遍**
+/// （`detect/lang.rs` / `graph/index.rs` / `state/watch.rs`），而且**判法不同**：
+/// `lang.rs` 把名字 `to_lowercase()` 之后比，另外两处**直接比原名**。
+///
+/// 而 Windows 的文件系统**不区分大小写**——`Target` 与 `target` 是同一个目录。
+/// 于是**同一份清单、两种判法，结果就分叉**：
+///
+///   · `jingwei index` 对一个含 `Target/deep/x.rs` 的目录报 **2 个文件**
+///     （真源码只有 1 个）—— 大写 T 漏过去了；
+///   · `__pycache__` **压根不在** `index.rs` 那份清单里，
+///     而 `parse_python_tests.rs` 的注释写着「这条由 `index.rs` 的目录黑名单管」——
+///     **一条假注释，指着一条不存在的判据**。实测 `__pycache__/x.py` 会被索引。
+///
+/// 现在清单与判法都只有一处（`util::scan::NOT_SOURCE_DIRS` / `is_not_source_dir`），
+/// 这个测试钉住**从外面看得见的效果**：那几个目录里的源码一个都不许算。
+#[test]
+fn 产物目录里的源码一个都不该被索引() {
+    let root = make_tree(
+        "skip-dirs",
+        &[
+            ("src/app.rs", "fn main(){}"),
+            // 大写 T：Windows 上和 `target/` 是同一个目录，原来的判法漏掉了
+            ("Target/deep/x.rs", "fn a(){}"),
+            ("NODE_MODULES/pkg/y.rs", "fn b(){}"),
+            // 这个最典型：注释说"index.rs 管"，而 index.rs 里没有它
+            ("__pycache__/tricky.rs", "fn c(){}"),
+            // 我们自己的笔记目录（AGENTS.md：别把自己算进被观察的对象）
+            (".jingwei/notes.note", "x"),
+            ("Cargo.toml", "[package]\nname=\"t\"\nversion=\"0.1.0\"\n"),
+        ],
+    );
+    let mut s = open(&root);
+    let r = index::index_rust(&root, &mut s).expect("索引失败");
+    assert_eq!(
+        r.files, 1,
+        "只有 src/app.rs 是源码；Target/ NODE_MODULES/ __pycache__/ 一律不许算，实际 {}",
+        r.files
+    );
+    assert_eq!(r.symbols, 1, "只该有 main 一个符号，实际 {}", r.symbols);
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

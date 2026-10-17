@@ -54,8 +54,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->338<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
-+ 集成 <!-- fact:integration -->47<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
+单元与集成测试（<!-- fact:tests_total -->339<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
++ 集成 <!-- fact:integration -->48<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。
@@ -208,6 +208,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   修法：`doctor` 的退出码 = 有 Error **或** `guide` 说跑不起来；
   判据只有一处（`make_guide`），两个命令都问它。
   门禁：`doctor与guide对能不能跑给同一个退出码`，负向验证过。
+- **「哪些目录不当源码扫描」这份清单写了三遍，判法还不同**（2026-10-17）：
+  `detect/lang.rs` / `graph/index.rs` / `state/watch.rs` 各写一份（内容一样），
+  而 **`lang.rs` 把名字转小写再比，另外两处直接比原名**——
+  而 Windows **不区分大小写**，`Target` 与 `target` 是同一个目录。
+  实测：`jingwei index` 对一个含 `Target/deep/x.rs` 的目录报 **2 个文件**（真源码 1 个）。
+  同一个病更典型的一处：`__pycache__` **压根不在 `index.rs` 的清单里**，
+  而 `parse_python_tests.rs` 的注释写着「这条由 `index.rs` 的目录黑名单管」——
+  **一条假注释，指着一条不存在的判据**（实测 `__pycache__/x.py` 会被索引）。
+  修法：`util::scan::NOT_SOURCE_DIRS` + `is_not_source_dir()` **只有一处**（内部转小写），
+  三处调用它；顺手补上 `__pycache__` 与 `.jingwei`（后者见"别把自己算进被观察的对象"）。
+  门禁：`产物目录里的源码一个都不该被索引`（`Target/` `NODE_MODULES/` `__pycache__/` 都不许算），负向验证过。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

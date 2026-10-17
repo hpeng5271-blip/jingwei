@@ -1,4 +1,4 @@
-//! 扫盘时该跳过的目录：网络盘、联接点/软链、超长路径。
+﻿//! 扫盘时该跳过的目录：网络盘、联接点/软链、超长路径。
 //!
 //! 这三样都不罕见，而它们的**共同症状都是"卡在那里不动"**：
 //!   · 网络盘断线时一次 `read_dir` 能挂几十秒；
@@ -78,6 +78,55 @@ fn is_remote_drive(_dir: &Path) -> bool {
     false
 }
 
+// ------------------------------------------------------------------ 目录黑名单
+
+/// **"不当源码扫描"的目录**——**唯一一处**（2026-10-17）。
+///
+/// ## 为什么要有这个常量
+///
+/// 它原来是**三份几乎一样的清单**，分别写在 `detect/lang.rs`、`graph/index.rs`、
+/// `graph/watch.rs` 里。三份一样，但**判法不同**：
+///
+///   · `lang.rs` 把名字 `to_lowercase()` 之后比 —— 对；
+///   · `index.rs` / `watch.rs` **直接比原名** —— 于是 Windows 上
+///     `Target/`（大写 T）**漏过去了**，实测被当成源码索引进去
+///     （`jingwei index` 对一个含 `Target/deep/x.rs` 的目录报 **2 个文件**，
+///     而真源码只有 1 个）。
+///
+/// 而 Windows 的文件系统**不区分大小写**，所以 `Target` 和 `target`
+/// 是**同一个目录**——一份清单、两种判法，结果就分叉。
+///
+/// ## 为什么 `__pycache__` 必须在这儿
+///
+/// `graph/parse_python_tests.rs` 的注释早就写着「`__pycache__` 之类不该被当成源码，
+/// **这条由 `index.rs` 的目录黑名单管**」——而那份黑名单里**根本没有 `__pycache__`**。
+/// 一条假注释，指着一条不存在的判据（实测：`__pycache__/x.py` 会被索引）。
+///
+/// ## 为什么 `.jingwei` 也在
+///
+/// 那是**我们自己的笔记目录**。`AGENTS.md` 记过一笔：
+/// 「`.jingwei` 污染结论——我们自己的笔记成了这个项目最长的路径」。
+/// **别把自己算进被观察的对象。**
+pub(crate) const NOT_SOURCE_DIRS: &[&str] = &[
+    ".git",
+    ".jingwei",
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    "__pycache__",
+];
+
+/// 这个目录名是不是"不当源码扫描"的。
+///
+/// **判法只在这一处**：`to_lowercase()` 之后比。调用方不许自己再写一份
+/// `matches!(name, "target" | ...)`——那正是分叉的起点。
+pub(crate) fn is_not_source_dir(name: &str) -> bool {
+    let n = name.to_lowercase();
+    NOT_SOURCE_DIRS.contains(&n.as_str())
+}
 #[cfg(test)]
 mod tests {
     // 测试里的临时目录清理失败不影响断言，也不能改变结论——这里显式豁免，

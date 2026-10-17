@@ -1,4 +1,4 @@
-//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
+﻿//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
 //!
 //! 这是**第一次让图谱真的有自己的东西**——在这之前，"这个项目里有什么"每次都靠重扫；
 //! 从这一步起，它落在库里，下次可以直接查。
@@ -170,10 +170,9 @@ fn collect_rust_files(root: &Path, rep: &mut IndexReport) -> Vec<(String, PathBu
                 if crate::util::scan::should_skip(&p, root).is_some() {
                     continue;
                 }
-                if matches!(
-                    name.as_str(),
-                    "target" | "node_modules" | ".git" | "dist" | "build" | ".venv" | "venv"
-                ) {
+                // 判法只有一处（`util::scan::is_not_source_dir`，内部会转小写）——
+                // 原来这里直接比 `name.as_str()`，于是 Windows 上 `Target/` 漏过去了。
+                if crate::util::scan::is_not_source_dir(&name) {
                     continue;
                 }
                 stack.push((p, depth + 1));

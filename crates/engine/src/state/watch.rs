@@ -1,4 +1,4 @@
-//! 实时层：**让系统自己知道项目变了**。
+﻿//! 实时层：**让系统自己知道项目变了**。
 //!
 //! ## 为什么先做"轮询版"，而不是监听系统事件
 //!
@@ -135,10 +135,9 @@ fn scan_stamps(root: &Path) -> (Stamps, usize) {
                 if crate::util::scan::should_skip(&p, root).is_some() {
                     continue;
                 }
-                if matches!(
-                    name.as_str(),
-                    "target" | "node_modules" | ".git" | "dist" | "build" | ".venv" | "venv"
-                ) {
+                // 判法只有一处（`util::scan::is_not_source_dir`，内部会转小写）——
+                // 原来这里直接比 `name.as_str()`，于是 Windows 上 `Target/` 漏过去了。
+                if crate::util::scan::is_not_source_dir(&name) {
                     continue;
                 }
                 stack.push((p, depth + 1));

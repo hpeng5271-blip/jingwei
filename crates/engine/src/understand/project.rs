@@ -639,7 +639,14 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
     // **每个 Python 包都带 README**，它不证明"这是个项目"。
     // 判据必须和 `projects::looks_like_project` 对齐（标记文件或 `.git`），
     // 否则同一个问题在两个地方答案不同——那正是"两份清单各写各的"。
-    let not_a_project = s.manifests.is_empty() && !s.has_git;
+    // **有契约就不是"不像一个项目"**（2026-10-17，与 `projects::looks_like_project` 同一处修）。
+    //
+    // 判据原来只有 `manifests.is_empty() && !has_git`——而 `env.contract.json` **不在 manifests 里**
+    // （它不是语言清单）。于是 `jingwei init` 建完契约的那个目录，
+    // **体检页当场折叠**，屏幕上写「这里不像一个项目——所以下面不给项目建议」。
+    // **用户刚做对了那一步，工具反过来把这一步作废。**
+    let has_contract = root.join("env.contract.json").is_file();
+    let not_a_project = s.manifests.is_empty() && !s.has_git && !has_contract;
     if not_a_project {
         items.push(it(
             "not-a-project",

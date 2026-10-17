@@ -125,7 +125,14 @@ fn markers_in(dir: &Path) -> Vec<String> {
 /// **对语言安装目录（Python 的 `Lib/`）就是错的**——照做换来的是
 /// 一个"假项目能跑"的结论，比不判断更坏。
 pub(crate) fn looks_like_project(dir: &Path) -> bool {
-    !markers_in(dir).is_empty() || dir.join(".git").is_dir()
+    // **`env.contract.json` 也算**（2026-10-17，被界面门禁的新断言打出来的）。
+    //
+    // 那个夹具里只有 `env.contract.json` 与一个 `target/`——于是被判成"不像一个项目"，
+    // 体检页当场折叠，屏幕上写「这里不像一个项目——所以下面不给项目建议」。
+    //
+    // 可 `env.contract.json` 是**我们自己让用户建的**（`jingwei init`）。
+    // 建完之后再说"这不是项目"，等于**把用户刚做对的那一步作废**。
+    !markers_in(dir).is_empty() || dir.join(".git").is_dir() || dir.join("env.contract.json").is_file()
 }
 
 /// 从某个父目录往下找出所有项目。`depth` 是往下看几层。

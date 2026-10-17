@@ -115,7 +115,17 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
                        // `nextStep` 说的是同一件事**——不然首页让人敲 `cargo run`、
                        // 而这里的按钮跑的是另一个东西，用户就不知道该信哪个。
                        '#view-run', '#cmdRun', '#view-editor', '#edFiles',
-                       '#view-note', '#view-machine', '#view-clean',
+                       '#view-note', '#view-machine',
+                       // **机器页里"条目真的画出来了吗"**（2026-10-17 加）。
+                       //
+                       // 原来只有 `#view-machine`——也就是**只验了"这一页可见"**，
+                       // 没验里面的东西。这与账本里那条
+                       // 「界面门禁'等页面就绪'只兑现了一半」是同一个形状：
+                       // 视图在了、内容可能是空的，而门禁照样绿。
+                       //
+                       // 我新加的两条 Rust 规则（`cargo-multi-bin-no-default` /
+                       // `cargo-edition-missing`）在界面上有没有渲染，**此前没有任何东西在看**。
+                       '#probList', '#audit', '#view-clean',
                        'body', 'main', '.view.on', '.graph-wrap'];
           const snapshot = (tab) => ({{
             tab,

@@ -76,6 +76,11 @@ function makeFixture() {
     }, null, 2),
     'utf8',
   );
+  // **一个产物目录**（2026-10-17）：让 `gitignore-missing` 在夹具上**必然成立**——
+  // 否则「体检条目在界面上真的画出来了吗」这条断言没有确定的原料，
+  // 只能写成"非空就行"，那等于什么都没验。
+  mkdirSync(join(dir, 'target'), { recursive: true });
+  writeFileSync(join(dir, 'target', 'junk.bin'), 'x', 'utf8');
   if (existsSync(CLI)) {
     const r = spawnSync(CLI, ['run', '--root', dir], { stdio: 'ignore' });
     // 期望它"失败"——产物是一次非 0 退出的运行。真跑成 0 反而说明夹具不对。
@@ -411,6 +416,50 @@ async function main() {
   // （拿仓库自己测的话，「最近运行」是收起的，而"收起"与"没拉到数据"在 DOM 上一样。）
   const fixture = makeFixture();
   const containerFixture = makeContainerFixture();
+// ── 机器页：**条目真的画出来了吗**（2026-10-17 加）─────────────────────────
+  //
+  // 原来 `SEL` 里只有 `#view-machine`——只验了"这一页可见"。
+  // 而账本里那条「界面门禁'等页面就绪'只兑现了一半」就是这个形状：
+  // **视图在了、内容是空的，门禁照样绿**。
+  //
+  // 夹具这一轮加了一个 `target/`、又没有 `.gitignore`，所以
+  // `gitignore-missing` **必然成立**——断言因此有确定的原料，
+  // 不是"非空就行"（那种断言几乎什么都放过）。
+  //
+  // 判据：① 机器页的体检清单**看得见**；② 里面有**我们已经知道会有的那一条**。
+  {
+    const rep = firstPage(runWindow([fixture, '--tab', 'machine']));
+    if (!rep) {
+      problems.push('机器页：窗口没交出报告');
+    } else {
+      const audit = pick(rep, '#audit');
+      const prob = pick(rep, '#probList');
+      // **`#audit` 的尺寸这一轮暂时不断言**（2026-10-17）。
+      //
+      // 它**有内容**，但 `rect` 是 `[0,0,0,0]`——一个装了内容却零尺寸的容器，
+      // 意味着**用户在屏幕上看不见它**。这很可疑，但我这一轮查不出根因
+      // （HTML 里它是个普通 `<div id="audit">`，内容由 `renderAudit` 填）。
+      // 所以：**断言内容在**（这条能钉住），**把它记成待查的债**，不假装已解决。
+      // 已记进 `AGENTS.md` §5.2。
+      ok(
+        '机器页：#audit 里有内容（体检条目真的填进去了）',
+        !!(audit && audit.exists && (audit.text || '').trim().length > 0),
+        audit ? JSON.stringify((audit.text || '').slice(0, 60)) : '不存在',
+      );
+      // 夹具必然产出的那一条：没有 .gitignore，却有 target/
+      ok(
+        '机器页：已知会有的体检条目真的出现在 DOM 里（没有 .gitignore + 有 target/）',
+        !!(audit && /gitignore|\.gitignore/i.test(audit.text || '')),
+        audit ? JSON.stringify((audit.text || '').slice(0, 80)) : '不存在',
+      );
+      ok(
+        '机器页：#probList 在（诊断列表的容器没丢）',
+        !!(prob && prob.exists),
+        prob ? '在' : '不存在',
+      );
+    }
+  }
+
 
   const rep = firstPage(runWindow([fixture, '--tab', 'graph']));
   if (!rep) {

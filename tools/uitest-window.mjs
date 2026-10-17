@@ -459,7 +459,10 @@ async function main() {
       // 夹具必然产出的那一条：没有 .gitignore，却有 target/
       ok(
         '概览页：已知会有的体检条目真的出现在 DOM 里（没有 .gitignore + 有 target/）',
-        !!(audit && /gitignore|\.gitignore/i.test(audit.text || '')),
+        // **用 `parts`，不只读拍平的 `text`**（2026-10-17）：
+        // `text` 改成 `innerText` 之后带换行、且有 600 字上限——
+        // 只读 `text` 会被截掉，**红得跟产品无关**。
+        /gitignore/i.test((audit && (audit.text || '')) + '\n' + ((audit && audit.parts) || []).join('\n')),
         audit ? JSON.stringify((audit.text || '').slice(0, 80)) : '不存在',
       );
       ok(

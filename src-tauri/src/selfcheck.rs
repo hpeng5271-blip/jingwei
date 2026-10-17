@@ -88,7 +88,30 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
               opacity: cs.opacity,
               maxWidth: cs.maxWidth,
               rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
-              text: (el.textContent || '').trim().slice(0, 600),
+              // **用 `innerText` 而不是 `textContent`**（2026-10-17 改）。
+            //
+            // `textContent` 把排版**拍平**：`<b>卡在哪</b><span>1</span><div>1 个依赖没装</div>`
+            // 读出来是 `"卡在哪11 个依赖没装"`——**序号徽章与正文粘在一起**，
+            // 于是"1 个依赖没装"看起来像"11 个"。我因此在第 40 轮差点记下一个不存在的 bug。
+            // `innerText` 尊重布局，块级元素之间会带换行。
+            // **两个都报，别只报一个**（2026-10-17）：
+            //
+            // `textContent` **完整**（连 `<details>` 收起的内容也算），但**没有排版**——
+            // 序号徽章 `1` 与正文"1 个依赖没装"会粘成 "11 个"。
+            // `innerText` **尊重布局**（块之间带换行），但**不含被折叠的内容**——
+            // `#audit` 的条目就在 `<details>` 里，只读 `innerText` 会以为"没内容"。
+            //
+            // 所以：**判断"有没有"读 `text`，判断"怎么排的"读 `visible`。**
+            // 上一版我把 `text` 换成了 `innerText`，当场把界面门禁的一条断言弄红了——
+            // **红得跟产品无关**，又一次是我的量具。
+            text: (el.textContent || '').trim().slice(0, 2000),
+            visible: (el.innerText || el.textContent || '').trim().slice(0, 2000),
+            // **结构也给一份**：直接子元素各自的内容分开列。
+            // 需要"这是第几条 / 徽章是什么"的时候，读这个而不是拍平的 text。
+            parts: Array.from(el.children)
+              .map((c) => (c.innerText || c.textContent || '').trim())
+              .filter((x) => x.length > 0)
+              .slice(0, 20),
             }};
           }};
           // 每页都看这几个：主内容区、它的卡片、以及"有没有东西画出来"。

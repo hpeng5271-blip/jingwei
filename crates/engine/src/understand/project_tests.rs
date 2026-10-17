@@ -90,6 +90,13 @@ use super::*;
             "纯 Rust 放中文路径下实测能编能跑，不该吓人：{:?}",
             item
         );
+        // **光断言严重度是不够的**：分支没走到时也是 Info（兜底那句），
+        // 所以必须断言"说的是哪一句"——否则这条测试测不出死分支。
+        assert!(
+            item.evidence.iter().any(|e| e.contains("纯 Rust")),
+            "说明里必须点到 Rust 那一条，否则说明分支根本没走到：{:?}",
+            item.evidence
+        );
         let _ = std::fs::remove_dir_all(&d);
 
         // ② 同一个中文目录里塞一个 C 文件 → 警告

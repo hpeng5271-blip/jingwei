@@ -414,6 +414,9 @@ function makeRolesFixture() {
   // 所以这条判据的夹具只能用 Rust。
   writeFileSync(join(dir, 'src', 'util', 'mod.rs'), 'pub fn a() -> i32 { 1 }\npub fn b() -> i32 { 2 }\npub fn c() -> i32 { 3 }\n', 'utf8');
   writeFileSync(join(dir, 'src', 'main.rs'), 'mod util;\nfn main() { util::a(); util::b(); util::c(); util::a(); }\n', 'utf8');
+  // **一个没人调用的文件**（2026-10-17）：它必须显示为「还没连上」，
+  // 而不是被算进「中间层」。这是三态里最容易压扁的那一格。
+  writeFileSync(join(dir, 'src', 'orphan.rs'), 'pub fn nobody_calls_me() -> i32 { 0 }\n', 'utf8');
   const r = spawnSync(CLI, ['index'], { cwd: dir, stdio: 'ignore', timeout: 120000 });
   notes.push('  ·  角色夹具索引：' + (r.status === 0 ? '成功' : '失败（status ' + r.status + '）'));
   return dir;
@@ -434,6 +437,11 @@ function checkGraphRoles(fixture) {
     if (!txt.includes(label)) problems.push('角色检查：图例里没有「' + label + '」');
   }
   if (!/[0-9]/.test(txt)) problems.push('角色检查：图例里一个数字都没有');
+  // **一条边都没有的文件必须叫「还没连上」**，不许混进中间层。
+  // 夹具里 `src/orphan.rs` 就是这种文件——它必须出现在这一行上。
+  if (!txt.includes('还没连上')) {
+    problems.push('角色检查：图例没把"没有跨文件调用"的文件说成「还没连上」（会混进中间层）');
+  }
   // **目录级那一行也要真的量到**（2026-10-17 补）。
   // 夹具里 `src/main.rs` 与 `src/util/mod.rs` 分属两个目录，所以它必然有原料——
   // 这里把它当成**必须画出来**的判据，而不是"画了更好"。

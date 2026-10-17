@@ -137,6 +137,9 @@ var GROLE = {
   entry:      { c: '#cc7832', label: '入口' },
   foundation: { c: '#6897bb', label: '公共底层' },
   middle:     { c: '#9a8f85', label: '中间层' },
+  // **isolated 不是一种角色**：它说的是「我们读不出它跟谁有关系」。
+  // 实测本仓库 53 个「中间层」里有 17 个正是这样——把她们叫中间层就是撒谎。
+  isolated:   { c: '#5f5f5f', label: '还没连上' },
   test:       { c: '#cfc8bd', label: '测试（不参与判断）' },
   container:  { c: '#8a7f74', label: '项目' }
 };
@@ -146,7 +149,7 @@ function ghRenderRoles(roles) {
   var box = $('#ghRoles');
   if (!box) return;
   if (!roles) { box.hidden = true; return; }
-  var order = ['entry', 'foundation', 'middle', 'test'];
+  var order = ['entry', 'foundation', 'middle', 'test', 'isolated'];
   var parts = order.filter(function (k) { return (roles[k] || 0) > 0; }).map(function (k) {
     return '<span class="gr-role"><i style="background:' + GROLE[k].c + '"></i>'
       + GROLE[k].label + ' <b>' + roles[k] + '</b></span>';
@@ -245,7 +248,7 @@ function graphBuild() {
   //
   // 于是"依赖方向"不用读标签也看得出来：**箭头都是从外往里**。
   // 原来按度数分环，入口和底层混在一起，方向就抹掉了。
-  const RING = { container: 0.18, foundation: 0.5, middle: 0.78, entry: 1, test: 1.16 };
+  const RING = { container: 0.18, foundation: 0.5, middle: 0.78, entry: 1, test: 1.16, isolated: 1.12 };
   const R = 320;
   for (let i = 0; i < GS.nodes.length; i++) {
     const ring = RING[GS.nodes[i].role] || 0.78;

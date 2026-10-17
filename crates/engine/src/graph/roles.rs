@@ -58,6 +58,19 @@ fn classify(out: i64, inn: i64) -> &'static str {
     }
 }
 
+/// 文件级角色 = **三态**，不是两个互相排斥的帽子。
+///
+/// 关键在第一条：**两头都是 0 的文件不是"中间层"**，是"还没连上"。
+/// 实测本仓库 53 个"中间层"里有 17 个是这样——一条跨文件调用都没有。
+/// 叫它中间层，等于**把"我们读不出关系"说成"它确实在中间"**（三态压扁）。
+fn role_of(out: i64, inn: i64) -> &'static str {
+    if out == 0 && inn == 0 {
+        "isolated"
+    } else {
+        classify(out, inn)
+    }
+}
+
 /// 节点 → 路径、节点 → 种类。
 ///
 /// **文件节点的路径在 `id` 里**（`file:<路径>`），它的 `file` 字段是 null——
@@ -145,7 +158,7 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
         if is_test_file(f) {
             return "test";
         }
-        classify(*f_out.get(f).unwrap_or(&0), *f_in.get(f).unwrap_or(&0))
+        role_of(*f_out.get(f).unwrap_or(&0), *f_in.get(f).unwrap_or(&0))
     };
 
     let mut file_count: HashMap<&str, i64> = HashMap::new();
@@ -175,11 +188,17 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
     }
 
     // **计数按文件给**：读者关心的是"几个模块是入口"，不是几个符号。
+    //
+    // `isolated` **不是一种角色**，是"我们读不出它跟谁有关系"：
+    // 本仓库实测 53 个"中间层"里有 **17 个出度 0、入度 0**——一条跨文件调用都没有。
+    // 把它们叫"中间层"就是**把"没原料"说成"确实是中间"**，
+    // 而这个仓库为这一类错误付过太多次账（三态压扁）。
     serde_json::json!({
         "entry": file_count.get("entry").copied().unwrap_or(0),
         "foundation": file_count.get("foundation").copied().unwrap_or(0),
         "middle": file_count.get("middle").copied().unwrap_or(0),
         "test": file_count.get("test").copied().unwrap_or(0),
+        "isolated": file_count.get("isolated").copied().unwrap_or(0),
     })
 }
 
@@ -269,7 +288,12 @@ mod tests {
         ];
         let r = annotate(&mut nodes, &edges);
         assert_eq!(r["entry"], 0, "只有一个文件，没有跨文件调用：{r}");
-        assert_eq!(r["middle"], 1);
+        // **不是 middle，是 isolated**（2026-10-17 改的语义）：
+        // 同文件互调之后这个文件的出/入都是 0 —— 咱们**读不出**它跟谁有关系，
+        // 那不是"它在中间"，是"还没连上"。原来这条断言写的是 middle，
+        // 等于把"没有原料"当成一种角色。
+        assert_eq!(r["isolated"], 1, "没有跨文件调用就是「还没连上」：{r}");
+        assert_eq!(r["middle"], 0);
     }
 
     /// **包含边不算**：项目节点装着文件，那不是"入口"。
@@ -357,6 +381,32 @@ mod tests {
         })];
         let r = dir_roles(&nodes, &edges);
         assert_eq!(r["total"], 0, "同一目录内部互调不该出现任何目录：{r}");
+    }
+
+    /// **一条边都没有的文件，不是"中间层"**（2026-10-17 加）。
+    ///
+    /// 本仓库实测：53 个"中间层"里有 17 个出 0 / 入 0。
+    /// 叫它中间层，等于把"我们读不出关系"说成"它确实在中间"。
+    #[test]
+    fn 孤单的文件不是中间层() {
+        let mut nodes = vec![
+            node("file:a.rs", "file", None),
+            node("file:b.rs", "file", None),
+            node("symbol:a.rs#f", "symbol", Some("a.rs")),
+            node("symbol:b.rs#g", "symbol", Some("b.rs")),
+        ];
+        // 一条 calls 都没有：两个文件都读不出关系
+        let r = annotate(&mut nodes, &[]);
+        assert_eq!(r["isolated"], 2, "两个文件都没连上：{r}");
+        assert_eq!(r["middle"], 0, "不许把它算成中间层：{r}");
+
+        // 连上一条之后，两个文件各有方向 —— 才轮到 classify 说话
+        let edges = vec![json!({
+            "src": "symbol:a.rs#f", "dst": "symbol:b.rs#g", "kind": "calls"
+        })];
+        let r2 = annotate(&mut nodes, &edges);
+        assert_eq!(r2["isolated"], 0, "连上之后就不该再有孤立：{r2}");
+        assert_eq!(r2["middle"], 2, "出入各 1，是中间层：{r2}");
     }
 
     /// 三种角色真的分得开：出多入少 = 入口，入多出少 = 公共底层。

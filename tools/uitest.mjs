@@ -213,7 +213,8 @@ function stubTauri() {
                 truncated: false,
                 // **角色是内核算好带下来的**（store.rs::dump → graph/roles.rs）：
                 // 桩数据要照真形状给，否则界面读不到 role 只是"看起来画了"。
-                roles: { entry: 1, foundation: 1, middle: 0, test: 1 },
+                // isolated 不是角色，是「读不出它跟谁有关系」——实测本仓库 17 个文件如此
+                roles: { entry: 1, foundation: 1, middle: 0, test: 1, isolated: 2 },
                 // 目录级：照真 payload 给（只放前三名，不堆）
                 dirs: { entry: [{ dir: 'crates/cli/src', out: 48, in: 0 }], foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }], total: 2 },
                 nodes: [
@@ -629,6 +630,11 @@ try {
   );
   // **目录级那一行**：文件级之后再看一层，才叫"模块结构"。
   // 判据不是"有字"，而是**说出哪个目录是入口、哪个是公共底层**。
+  check(
+    '图谱：一条边都没有的文件说成「还没连上」，不混进中间层',
+    st.roles.includes('还没连上'),
+    st.roles,
+  );
   check(
     '图谱：目录级说出了入口与公共底层',
     st.dirs.includes('入口') && st.dirs.includes('公共底层')

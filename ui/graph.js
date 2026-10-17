@@ -174,6 +174,28 @@ function ghRenderRoles(roles) {
   box.innerHTML = parts.join('');
 }
 
+/** 一个点画多大。**颜色说角色，大小说规模**——两件事分开，别挤在一列里。
+ *
+ * - `role`：定底数（入口最大、测试与"还没连上"最小，因为它们不该抢视线）
+ * - `calls`：`out + in`，**只算跨文件 `calls`**（不含 `contains`/`defines`）
+ * - `isSym`：符号一律比同角色的文件小，否则 1520 个符号会盖住 95 个文件
+ *
+ * 为什么要有规模这一维：中间层里既有 `detect/probe.rs`（出13/入13、被 6 个目录用，
+ * 那是枢纽），也有 `detect/editors.rs`（出0/入2，局部胶水）。
+ * **只按角色给固定大小时，它们长得一模一样**——读的人看不出哪个是枢纽。
+ * 而"枢纽"不该是一个新角色（角色说的是方向，不是大小，见 `框架.md` §4.8.3），
+ * 所以它落在**大小**上。
+ *
+ * 上限定 3：再大就会盖住邻点，而这一页首先得看得清。
+ */
+function ghNodeRadius(role, isSym, calls) {
+  const base = role === 'entry' ? 6 : role === 'foundation' ? 5
+    : role === 'test' ? 2 : role === 'isolated' ? 2 : 3;
+  if (isSym) return Math.max(2, base - 2);
+  const bump = Math.min(3, Math.floor((calls || 0) / 6));
+  return base + bump;
+}
+
 /** 目录级那一行。**没有就不画**，有就只说前三名——不堆。
  *
  * 带标签（「入口」「公共底层」）不是为了好看：**没有标签的一串路径读不懂**，
@@ -235,7 +257,14 @@ function graphBuild() {
   for (const n of raw.nodes) {
     idx.set(n.id, GS.nodes.length);
     // `role` 是内核算好带下来的（见 store.rs::dump），**这里只存不算**。
-    GS.nodes.push({ id: n.id, kind: n.kind, name: n.name, role: n.role, x: 0, y: 0, vx: 0, vy: 0, deg: 0 });
+    // `out`/`in` 也带下来：那是**只算跨文件 `calls`** 的度数，
+    // 与上面那个 `deg`（连 `contains`/`defines` 一起算）不是一回事——
+    // 文件的 `deg` 主要来自"这个文件里有多少符号"，**拿它排大小会把符号多的当重要**。
+    GS.nodes.push({
+      id: n.id, kind: n.kind, name: n.name, role: n.role,
+      out: n.out || 0, in: n.in || 0,
+      x: 0, y: 0, vx: 0, vy: 0, deg: 0,
+    });
   }
   GS.edges = [];
   for (const e of raw.edges) {
@@ -322,10 +351,7 @@ function graphDraw() {
     ctx.beginPath();
     for (const n of GS.nodes) {
       if (n.role !== role) continue;
-      const isSym = n.kind === 'symbol';
-      const base = role === 'entry' ? 6 : role === 'foundation' ? 5 : role === 'test' ? 2
-        : role === 'isolated' ? 2 : 3;
-      const r = isSym ? Math.max(2, base - 2) : base;
+      const r = ghNodeRadius(role, n.kind === 'symbol', (n.out || 0) + (n.in || 0));
       ctx.moveTo(n.x + r, n.y);
       ctx.arc(n.x, n.y, r, 0, 6.283185307179586);
     }

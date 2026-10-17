@@ -219,7 +219,8 @@ function stubTauri() {
                 dirs: { entry: [{ dir: 'crates/cli/src', out: 48, in: 0 }], foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }], total: 2 },
                 nodes: [
                   { id: 'project:', kind: 'project', name: 'demo', role: 'container' },
-                  { id: 'file:src/main.rs', kind: 'file', name: 'main.rs', role: 'entry' },
+                  // out/in 是**只算跨文件 calls** 的度数（与 deg 不同，deg 含包含边）
+                { id: 'file:src/main.rs', kind: 'file', name: 'main.rs', role: 'entry', out: 3, in: 0 },
                   { id: 'symbol:src/main.rs#main', kind: 'symbol', name: 'main', role: 'entry' },
                   { id: 'symbol:src/main.rs#helper', kind: 'symbol', name: 'helper', role: 'foundation' },
                   // 测试文件：**有它，才能验「测试不参与判断」那句话真的画得出来**
@@ -637,6 +638,25 @@ try {
     '图谱：角色计数带单位（不是光一个数字）',
     st.roles.includes('个文件'),
     st.roles,
+  );
+  // **大小要说规模**（2026-10-17 加）。
+  // 颜色说角色（方向），大小说规模——两件事分开。中间层里既有枢纽（出13/入13）
+  // 也有局部胶水（出0/入2），只按角色给固定大小时它们长得一模一样。
+  const radii = await page.evaluate(() => ({
+    hub: ghNodeRadius('middle', false, 26),
+    glue: ghNodeRadius('middle', false, 2),
+    entryFile: ghNodeRadius('entry', false, 0),
+    entrySym: ghNodeRadius('entry', true, 0),
+  }));
+  check(
+    '图谱：大小要说规模（枢纽比同角色的胶水画得大）',
+    radii.hub > radii.glue,
+    JSON.stringify(radii),
+  );
+  check(
+    '图谱：符号在同角色下比文件小（否则 1520 个符号会盖住 95 个文件）',
+    radii.entrySym < radii.entryFile,
+    JSON.stringify(radii),
   );
   check(
     '图谱：每个角色都挂着判据（悬停能问「凭什么」）',

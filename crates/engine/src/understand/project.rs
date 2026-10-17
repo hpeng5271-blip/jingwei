@@ -1,4 +1,4 @@
-//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -590,7 +590,7 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
     if let Some(f) = crate::understand::container::projects_dir_item(root) {
         items.push(f);
     }
-    ignore_items(&mut items, &s, &entries);
+    ignore_items(&mut items, &s, &entries, w.truncated);
     deps_items(&mut items, &s, root, w.truncated);
     habit_items(&mut items, &s, &w);
     size_items(&mut items, &s, deep);
@@ -843,8 +843,27 @@ fn env_secret_keys(text: &str) -> Vec<String> {
 
 // ── 各类条目 ─────────────────────────────────────────────────────────
 
-fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String]) {
+/// 产物目录相关的两条结论。
+///
+/// `truncated` 是 2026-10-16 补进来的（原来没有）：扫描有**深度上限**，
+/// 而"攒下 N 个产物目录"这个 N 就是被那个上限截出来的。
+///
+/// 实测（Python 3.15 的 `Lib`）：报 **77**，真值 **90**，
+/// 而 77 恰好是 **深度 ≤4 的 `__pycache__` 数之和**——同一条截断。
+///
+/// 这条的教训比修复本身值钱：**上一轮我把 `truncated` 修好了、把 `.py` 计数改了口径，
+/// 就以为"那条缺陷修完了"**——而这条结论一个字没动，照样把"至少 77"说成"77"。
+/// **根上的缺陷修完，还要把所有消费点过一遍**；只改一个消费点，
+/// 剩下那些会安静地继续错，而且看起来像"已经修过了"。
+fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String], truncated: bool) {
     if !s.has_gitignore && !s.artifacts.is_empty() {
+        // "攒下"是完成式——截断时它就成了假话。所以**整句**换，不是往里插"至少"
+        // （插进去会变成"已经攒下 至少 77 个"——那是病句。改文案要把整句念一遍）。
+        let title_art = if truncated {
+            format!("项目里没有 .gitignore，而已经攒下至少 {} 个产物目录", s.artifacts.len())
+        } else {
+            format!("项目里没有 .gitignore，而已经攒下 {} 个产物目录", s.artifacts.len())
+        };
         let fix: String = s
             .artifacts
             .iter()
@@ -859,10 +878,7 @@ fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String]) {
                 Severity::Info
             },
             G_IGNORE,
-            format!(
-                "项目里没有 .gitignore，而已经攒下 {} 个产物目录",
-                s.artifacts.len()
-            ),
+            title_art,
             s.artifacts
                 .iter()
                 .map(|a| a.path.clone())
@@ -890,7 +906,12 @@ fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String]) {
             G_IGNORE,
             format!(
                 "有 {} 个产物目录没写进 .gitignore（{}）",
-                s.unignored.len(),
+                // 同上：截断时这个数也是"至少"（`ignored` 集合也受深度上限影响）
+                if truncated {
+                    format!("至少 {}", s.unignored.len())
+                } else {
+                    s.unignored.len().to_string()
+                },
                 s.unignored
                     .iter()
                     .take(3)
@@ -996,15 +1017,16 @@ fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String]) {
 fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: bool) {
     let has = |k: &str| s.manifests.iter().any(|m| m.kind == k);
     let py_files = *s.ext_counts.get("py").unwrap_or(&0);
-    // **截断时这个数是"至少"，不是总数**（2026-10-16）。
+    // 截断时这个数是"至少"，不是总数（2026-10-16）。
     // 它原来直接报 `py_files`——而扫描有深度上限，`1610` 是"深度≤4 的和"（真值 1677）。
     // **把"至少 N"说成"N"**，与 `AGENTS.md` §2 那条线直接冲突。
-    // 注意：**数的口径要跟着话走**——只加一句"下面的计数要读成至少"是不够的
-    // （第一版就是这么半修的，实测那条标题仍写着"有 1610 个"）。
-    let py_n = if truncated {
-        format!("至少 {py_files}")
+    // 注意：**数的口径要跟着话走**——话里那个"个"也得跟着变：
+    // 第一版写成 `{py_n} .py 文件`，输出是「有 至少 9 .py 文件」，
+    // 既没有"个"、又是"有 至少"这种叠词。**改文案的时候要把整句念一遍。**
+    let title_py = if truncated {
+        format!("至少有 {py_files} 个 .py 文件，但没有任何依赖清单")
     } else {
-        py_files.to_string()
+        format!("有 {py_files} 个 .py 文件，但没有任何依赖清单")
     };
     let py_locks: Vec<&String> = s
         .lockfiles
@@ -1024,7 +1046,7 @@ fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: b
             "py-manifest-missing",
             Severity::Info,
             G_DEPS,
-            format!("{py_n} .py 文件，但没有任何依赖清单"),
+            title_py,
             vec!["找不到 pyproject.toml / requirements.txt / Pipfile / setup.py".into()],
             vec!["Get-ChildItem -Recurse -Filter *.py | Measure-Object".into()],
             "如果只用了标准库，或者在写单文件脚本，那确实不需要清单。",

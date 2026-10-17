@@ -1,4 +1,4 @@
-//! `project.rs` 的测试。
+﻿//! `project.rs` 的测试。
 //!
 //! **为什么单独一个文件**：`project.rs` 早就超了 1000 行上限、登记在案（只许降不许升）。
 //! 测试是最大的一块（三百多行），而且它**不参与编译产物**——把它搬出来，
@@ -331,6 +331,81 @@ use super::*;
         );
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(&shallow);
+    }
+
+    /// **每一个把计数写进标题的地方都要跟着截断改口径**（2026-10-16）。
+    ///
+    /// ## 这条是拿什么换的
+    ///
+    /// 修"深度截断"那一轮，我把 `truncated` 修好了、把 `.py` 计数改了，
+    /// **就以为那条缺陷修完了**。可同一个洞里还有**第二个消费点**：
+    /// 「项目里没有 .gitignore，而已经攒下 N 个产物目录」——
+    /// 实测 `Lib` 报 **77**，真值 **90**，而 77 正好是"深度≤4 的 `__pycache__` 之和"。
+    ///
+    /// **根上的缺陷修完，还要把所有消费点过一遍。** 只改一个消费点，
+    /// 剩下那些会安静地继续错，而且看起来像"已经修过了"——那比没修更坏。
+    ///
+    /// ## 还要守住"改文案别把句子改坏"
+    ///
+    /// 第一版我写的是 `{py_n} .py 文件`，输出成了
+    /// 「有 **至少 9 .py** 文件」——既丢了量词、又是"有 至少"这种叠词。
+    /// 所以这里连**句子读得通**也一起钉：量词与"至少"不能叠着出现。
+    #[test]
+    fn 每个计数都要跟着截断改口径而且话要说得通() {
+        let d = scratch("trunc-all");
+        // 造一棵深过 MAX_DEPTH 的树：既有 .py、又有产物目录。
+        //
+        // ⚠️ **深树不能藏在产物目录里**（第一版就是那么干的，测试因此空跑）：
+        // 产物目录（`__pycache__`/`target`/`node_modules`）是**不往里走**的，
+        // 所以藏在里面的东西永远走不到，`truncated` 也就不会置位。
+        // 这条本身是对的判据（别钻进 target 里数文件），
+        // 错的是我的夹具——**测试要造"真的会被走到"的形状**。
+        std::fs::create_dir_all(d.join("proj").join("__pycache__")).unwrap();
+        // 深树：**要做到"有一个深度 5 的目录"**才触发截断。
+        //
+        // 这条是拿四次失败换来的，值得写清：
+        //   `walk()` 的深度判据落在**目录**上（`depth > MAX_DEPTH` 时 return），
+        //   所以"文件在深度 5"不算截断（目录最深才到 4）——必须有个**目录**在深度 5。
+        // 而且深支路上**也要有产物目录**：`truncated` 只由"走到深度 5 的目录"置位，
+        // 而产物是在**走的过程中**记的。深支路若一个产物都没有，就会得到
+        // "truncated=true 但产物只有 1 个（来自另一支）"——那条断言照样测不到。
+        let deep = d.join("src").join("a").join("b").join("c").join("d").join("e");
+        std::fs::create_dir_all(&deep).unwrap();
+        // 深支路上的产物：放在深度 3（走得到），这样 truncated 与产物数同时成立
+        std::fs::create_dir_all(d.join("src").join("a").join("__pycache__")).unwrap();
+        std::fs::write(deep.join("x.py"), "").unwrap();
+        std::fs::write(d.join("top.py"), "").unwrap();
+
+        let s = scan(&d);
+        assert!(has(&s, "scan-truncated"), "走不完必须说");
+
+        // ① 产物目录那条也要改口径
+        let art = s
+            .items
+            .iter()
+            .find(|i| i.id == "gitignore-missing")
+            .expect("有产物目录却没有 .gitignore，该出这一条（夹具得造到能走到的深度）");
+        assert!(
+            art.title.contains("至少"),
+            "截断时产物目录数必须报「至少」，实际：{}",
+            art.title
+        );
+        assert!(!art.title.contains("攒下 至少"), "病句：{}", art.title);
+
+        // ③ `.py` 那条：有量词、且"至少"不叠在"有"后面
+        if let Some(it) = s.items.iter().find(|i| i.id == "py-manifest-missing") {
+            assert!(
+                it.title.contains("个 .py 文件"),
+                "要带量词，实际：{}",
+                it.title
+            );
+            assert!(
+                !it.title.contains("有 至少"),
+                "病句（'有 至少'），实际：{}",
+                it.title
+            );
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

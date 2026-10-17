@@ -54,8 +54,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->337<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
-+ 集成 <!-- fact:integration -->46<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
+单元与集成测试（<!-- fact:tests_total -->338<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
++ 集成 <!-- fact:integration -->47<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。
@@ -199,6 +199,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   修法：文字优先用 `g.what_to_do`；`not_a_project` 排到 `next_step` 的最前一支；
   非命令的 nextStep 不再缀"（跑一次就知道）"。
   门禁：`不是项目时json与文字说同一件事`（三条断言），负向验证过。
+- **`doctor` 对"跑不起来的项目"退 0**（2026-10-17，第一次拿 Node / Java 真项目跑）：
+  `guide` 说 ✗ 跑不起来退 1，`doctor` 同一项目退 **0**——
+  而 `使用说明.md` 写的是「命令跑成了才是 `0`……或那次检查没通过，都会给非 `0`」。
+  根因：`doctor` 的退出码只看"有没有 Error 级结论"，而「依赖没装」是 **warn**
+  （那条规则的 boundary 自己写着"刚克隆下来这是正常状态"——**它是对的**）。
+  **两个命令回答的是两个问题，答案都对，错的是退出码**——脚本只看退出码。
+  修法：`doctor` 的退出码 = 有 Error **或** `guide` 说跑不起来；
+  判据只有一处（`make_guide`），两个命令都问它。
+  门禁：`doctor与guide对能不能跑给同一个退出码`，负向验证过。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

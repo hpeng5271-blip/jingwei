@@ -259,6 +259,66 @@ fn guide的退出码分三档() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// **`doctor` 与 `guide` 对"能不能跑"必须给同一个退出码**（2026-10-17）。
+///
+/// ## 拿什么换的
+///
+/// 拿两个**从没测过的真项目**跑（工具声称支持 Node / Java，而我此前只测过 Python 与 Rust）：
+///
+/// | 目标 | `guide` | `doctor` |
+/// |---|---|---|
+/// | 真 Node 项目（依赖没装） | ✗ 跑不起来 · 退 **1** | 退 **0** |
+/// | Java 项目（机器没 JDK） | ✗ 跑不起来 · 退 **1** | 退 **0** |
+///
+/// 而 `使用说明.md` 写的是「**退出码是准的**：命令跑成了才是 `0`……
+/// 或那次检查没通过，都会给非 `0`」。
+/// **一个跑不起来的项目，`doctor` 退 0 就是"检查通过了"——那是假话。**
+///
+/// ## 为什么不是把规则的 severity 调高
+///
+/// `web-deps-not-installed` 本身是对的：它的 boundary 写着
+/// 「刚克隆下来、或者刚清过缓存时，这是正常状态」。改成 `Error` 会让"刚 clone"
+/// 变成"出错了"，那是另一种误报。
+///
+/// 两个命令回答**两个不同的问题**，答案都对；**错的是退出码**——
+/// 脚本只看退出码，不看你的措辞。
+#[test]
+fn doctor与guide对能不能跑给同一个退出码() {
+    let d = empty_dir("node-no-deps");
+    // 一个"声明了依赖但没装"的最小 Node 项目：guide 会说"跑不起来"，
+    // 而 doctor 的 finding 只是 warn。两个退出码必须一致。
+    std::fs::write(
+        d.join("package.json"),
+        r#"{"name":"x","version":"1.0.0","dependencies":{"express":"^4.19.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(d.join("index.js"), "require('express');").unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    let g = run(&["guide", "--root", &p]);
+    let doc = run(&["doctor", "--root", &p]);
+
+    assert_eq!(
+        code(&g),
+        code(&doc),
+        "同一个项目，两个命令的退出码不一样：guide={} doctor={}。\
+         脚本只看退出码，它没法定两个都信。\n guide 输出：{}\n doctor 输出：{}",
+        code(&g),
+        code(&doc),
+        stdout(&g),
+        stdout(&doc),
+    );
+    // 而且这个码该是 1（跑不起来），不是 0
+    assert_eq!(
+        code(&g),
+        1,
+        "声明了依赖却没装，`guide` 该说跑不起来（1），实际 {}\n{}",
+        code(&g),
+        stdout(&g)
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// 夹具的路径必须真的是我们造的那个（**先确认夹具本身没搭错**）。
 #[test]
 fn 夹具目录是可用的() {

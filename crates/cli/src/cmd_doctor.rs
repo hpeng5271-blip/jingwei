@@ -1,4 +1,4 @@
-//! 诊断与体检那一摊：`doctor` / `audit` / `fix` / `whatschanged`。
+﻿//! 诊断与体检那一摊：`doctor` / `audit` / `fix` / `whatschanged`。
 //!
 //! 它们回答的是同一个问题族：**这个项目现在有什么毛病、哪一条能代你修掉、
 //! 从上次看过算起变了什么**。所以放一个文件里；拆开会让"体检"这件事
@@ -54,7 +54,7 @@ pub(crate) fn cmd_doctor(root: &Path, json: bool, want_check: bool) -> i32 {
             }
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
-        return has_error(&findings);
+        return exit_code(&facts, &findings);
     }
 
     println!();
@@ -182,19 +182,57 @@ pub(crate) fn cmd_doctor(root: &Path, json: bool, want_check: bool) -> i32 {
         "  {} 先处理错误，再看警告；提示不用管。",
         c(DIM, "顺序")
     );
-    if e > 0 {
-        1
-    } else {
-        0
-    }
+    // 有错误、**或者 `guide` 说跑不起来** —— 都算"检查没通过"。
+    // 原来这里只看 `e > 0`（错误级结论的个数），于是"依赖没装"这种
+    // 被定成 warn 的情况会让 `doctor` 退 0，而 `guide` 退 1。
+    let _ = e;
+    exit_code(&facts, &findings)
 }
 
-pub(crate) fn has_error(findings: &[rules::Finding]) -> i32 {
+/// **`doctor` 的退出码要跟 `guide` 用同一个判断**（2026-10-17）。
+///
+/// ## 抓到的现象
+///
+/// 拿两个**从没测过的真项目**跑（真 Node 项目 / 机器上没 JDK 的 Java 项目）：
+///
+/// | 目标 | `guide` | `doctor` |
+/// |---|---|---|
+/// | Node（依赖没装） | ✗ 跑不起来 · 退 **1** | 退 **0** |
+/// | Java（机器没 JDK） | ✗ 跑不起来 · 退 **1** | 退 **0** |
+///
+/// 而 `使用说明.md` 写的是「**退出码是准的**：命令跑成了才是 `0`……
+/// 或那次检查没通过，都会给非 `0`」。
+/// **一个跑不起来的项目，`doctor` 退 0 就是"检查通过了"——那是假话。**
+///
+/// ## 为什么不是"把那条规则的 severity 调高"
+///
+/// `web-deps-not-installed` 本身**是对的**：它的 boundary 写着
+/// 「刚克隆下来、或者刚清过缓存时，这是正常状态」——**刚 clone 的仓库不是有毛病**。
+/// 改成 `Error` 会让"刚 clone"变成"出错了"，那是另一种误报。
+///
+/// 两个命令回答的是**两个不同的问题**：
+///   `doctor` = "这个项目有什么毛病"（刚 clone 没装依赖 → 不算毛病）
+///   `guide`  = "现在能不能跑"（没装依赖 → 不能）
+/// 两个答案都对。**错的是退出码**——脚本只看退出码，不看你的措辞。
+///
+/// ## 所以：一个判断，两个出口
+///
+/// `doctor` 的退出码 = 有 Error **或者** `guide` 说跑不起来。
+/// 判据只有一处（`guide::make_guide`），两个命令都问它——
+/// **"两份清单各写各的，必然漂移"这条账，就是拿这种办法还的。**
+pub(crate) fn exit_code(
+    facts: &jingwei_engine::facts::Facts,
+    findings: &[rules::Finding],
+) -> i32 {
     if findings.iter().any(|f| f.severity == Severity::Error) {
-        1
-    } else {
-        0
+        return 1;
     }
+    // 没有 Error，但"能不能跑"的答案是不能——**那也是没通过**
+    let g = jingwei_engine::understand::guide::make_guide(facts, &[]);
+    if matches!(g.ready, jingwei_engine::Verdict::No) {
+        return 1;
+    }
+    0
 }
 
 // ------------------------------------------------------------------ audit

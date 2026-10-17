@@ -1,4 +1,4 @@
-﻿//! `project.rs` 的测试。
+//! `project.rs` 的测试。
 //!
 //! **为什么单独一个文件**：`project.rs` 早就超了 1000 行上限、登记在案（只许降不许升）。
 //! 测试是最大的一块（三百多行），而且它**不参与编译产物**——把它搬出来，
@@ -106,7 +106,10 @@ use super::*;
     }
 
     #[test]
-    fn unignored_artifacts_are_named() {        let d = scratch("basic");
+    fn unignored_artifacts_are_named() {
+        let d = scratch("basic");
+        // 真项目有标记文件——夹具要照真东西写
+        std::fs::write(d.join("package.json"), "{}").unwrap();
         std::fs::create_dir_all(d.join("node_modules").join("x")).unwrap();
         std::fs::write(d.join("node_modules").join("x").join("a.js"), "1").unwrap();
         std::fs::create_dir_all(d.join("__pycache__")).unwrap();
@@ -142,6 +145,7 @@ use super::*;
     #[test]
     fn without_gitignore_we_do_not_report_missing_entries() {
         let d = scratch("nogitignore");
+        std::fs::write(d.join("Cargo.toml"), "").unwrap();
         std::fs::create_dir_all(d.join("target")).unwrap();
         std::fs::write(d.join("target").join("a.class"), "1").unwrap();
         let s = scan(&d);
@@ -292,6 +296,10 @@ use super::*;
         // 造一棵**深过 MAX_DEPTH** 的树：`a/b/c/d/e/` 里放一个 .py
         // （相对深度 5，`MAX_DEPTH = 4` 走不到）
         let d = scratch("trunc");
+        // 真项目有标记文件——夹具要照真东西写（否则"不是项目"那道闸会挡住它）。
+        // **用 package.json 而不是 pyproject.toml**：后者会让 `py-manifest-missing`
+        // 消失（那门正是"有清单"的判据），而这条测试要测的就是那条结论。
+        std::fs::write(d.join("package.json"), "{}").unwrap();
         std::fs::write(d.join("top.py"), "").unwrap();
         let deep = d.join("a").join("b").join("c").join("d").join("e");
         std::fs::create_dir_all(&deep).unwrap();
@@ -375,6 +383,9 @@ use super::*;
         std::fs::create_dir_all(d.join("src").join("a").join("__pycache__")).unwrap();
         std::fs::write(deep.join("x.py"), "").unwrap();
         std::fs::write(d.join("top.py"), "").unwrap();
+        // 真项目有标记文件——夹具要照真东西写（否则"不是项目"那道闸会挡住它）。
+        // 用 package.json：`pyproject.toml` 会让 `py-manifest-missing` 消失。
+        std::fs::write(d.join("package.json"), "{}").unwrap();
 
         let s = scan(&d);
         assert!(has(&s, "scan-truncated"), "走不完必须说");
@@ -408,9 +419,65 @@ use super::*;
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// **不是项目就别给项目建议**（2026-10-16）。
+    ///
+    /// ## 拿什么换的
+    ///
+    /// 把 5 个**别人写的** Python 库（`site-packages` 里的
+    /// markdown_it / mdurl / pip / pygments / rich）当样本逐条核结论时发现：
+    /// 每个库都收到同一套训话——
+    ///   「项目里没有 .gitignore，而已经攒下 8 个产物目录」
+    ///   「有 66 个 .py 文件，但没有任何依赖清单」
+    /// 可它们是**库**：清单在上一层的 `*.dist-info` 里。**字面没错，对象错了。**
+    ///
+    /// ## 三组断言分开钉
+    ///
+    ///   ① 没有标记也没 `.git` → 出一条 `not-a-project`；
+    ///   ② **不给项目建议**（不许同时出 `py-manifest-missing` / `gitignore-missing`）——
+    ///      "说了但照样给"等于没做到；
+    ///   ③ **README 不算标记**：第一版我把 `has_readme` 写进了判据，实测
+    ///      `pip` 目录里有 `README.md` 就逃过去了——而**每个 Python 包都带 README**。
+    #[test]
+    fn 不是项目就别给项目建议() {
+        // ① 一个只有 .py 的空目录：没有标记、没有 .git
+        let d = scratch("nap");
+        std::fs::write(d.join("x.py"), "").unwrap();
+        let s = scan(&d);
+        assert!(has(&s, "not-a-project"), "该说'这里不像项目'");
+        assert!(
+            !has(&s, "py-manifest-missing"),
+            "不是项目就不许给'你没有依赖清单'——那是按项目口径写的"
+        );
+        assert!(!has(&s, "gitignore-missing"), "同上，产物那条也不许给");
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ② 有 README 但没标记：README 不算数（这就是 pip 逃过去的坑）
+        let d2 = scratch("nap-readme");
+        std::fs::write(d2.join("x.py"), "").unwrap();
+        std::fs::write(d2.join("README.md"), "# 一个库\n").unwrap();
+        let s2 = scan(&d2);
+        assert!(
+            has(&s2, "not-a-project"),
+            "README 不证明它是项目——每个 Python 包都带一个"
+        );
+        let _ = std::fs::remove_dir_all(&d2);
+
+        // ③ 有标记文件 → 正常给建议（不误伤）
+        let d3 = scratch("nap-real");
+        std::fs::write(d3.join("x.py"), "").unwrap();
+        std::fs::write(d3.join("pyproject.toml"), "[project]\nname='x'\n").unwrap();
+        let s3 = scan(&d3);
+        assert!(
+            !has(&s3, "not-a-project"),
+            "有 pyproject.toml 就是项目，不许说不是"
+        );
+        let _ = std::fs::remove_dir_all(&d3);
+    }
+
     #[test]
     fn deep_scan_measures_artifact_size_and_quick_scan_does_not() {
         let d = scratch("size");
+        std::fs::write(d.join("package.json"), "{}").unwrap();
         let nm = d.join("node_modules").join("pkg");
         std::fs::create_dir_all(&nm).unwrap();
         std::fs::write(nm.join("big.js"), "x".repeat(200_000)).unwrap();
@@ -426,6 +493,8 @@ use super::*;
     #[test]
     fn nested_git_is_noticed() {
         let d = scratch("nested");
+        // 真项目有标记文件——夹具要照真东西写（否则"不是项目"那道闸会挡住它）
+        std::fs::write(d.join("package.json"), "{}").unwrap();
         std::fs::create_dir_all(d.join("vendor").join("lib").join(".git")).unwrap();
         std::fs::write(d.join("vendor").join("lib").join("a.txt"), "1").unwrap();
         let s = scan(&d);

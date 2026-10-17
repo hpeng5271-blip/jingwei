@@ -558,6 +558,9 @@ mod tests {
     #[test]
     fn fixing_gitignore_reads_as_a_resolved_risk() {
         let d = scratch("fixed");
+        // 真项目有标记文件——夹具要照真东西写（否则"不是项目"那道闸会挡住
+        // `gitignore-missing`，而这条测试要测的正是它）
+        std::fs::write(d.join("package.json"), "{}").unwrap();
         std::fs::create_dir_all(d.join("node_modules")).unwrap();
         take(&d).unwrap();
         std::fs::write(d.join(".gitignore"), "node_modules/\n").unwrap();

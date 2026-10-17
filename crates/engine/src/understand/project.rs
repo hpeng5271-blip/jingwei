@@ -590,10 +590,69 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
     if let Some(f) = crate::understand::container::projects_dir_item(root) {
         items.push(f);
     }
-    ignore_items(&mut items, &s, &entries, w.truncated);
-    deps_items(&mut items, &s, root, w.truncated);
-    habit_items(&mut items, &s, &w);
-    size_items(&mut items, &s, deep);
+
+    // **"这压根不是一个项目"——那就不给项目建议**（2026-10-16 加）。
+    //
+    // ## 拿什么换的
+    //
+    // 拿 5 个**别人写的** Python 库（`site-packages` 里的
+    // `markdown_it` / `mdurl` / `pip` / `pygments` / `rich`）当样本，
+    // 逐条核 29 条结论时发现的：每个库都收到同一套训话——
+    //   「项目里没有 .gitignore，而已经攒下 8 个产物目录」
+    //   「有 66 个 .py 文件，但没有任何依赖清单」
+    // 可它们是**库**，不是项目：清单在上一层的 `*.dist-info` 里，
+    // `.gitignore` 该由打包它的人决定。**这些话字面没错，对象错了。**
+    //
+    // ## 跟上一轮那条的关系
+    //
+    // `guide` 上一轮已经会说了：「这里不像一个项目……
+    // 所以「能不能跑」这类问题对它不适用」。而 **`doctor` 完全没跟上**——
+    // **同一个事实，两个出口说的不一样**（AGENTS.md 记过：两份清单各写各的必然漂移）。
+    //
+    // ## 为什么是"不给"而不是"加一条"
+    //
+    // 加一条"这不是项目"再照样给 4 条项目建议，等于**说了但没做到**。
+    // 那些建议本来就按"一个项目"的口径写，对象错了就该**整批不给**。
+    // ## 判据：**标记文件或 .git**，README 不算
+    //
+    // 第一版我把 `!s.has_readme` 也写进了条件，实测立刻露馅：
+    // `pip` 目录里有个 `README.md`，于是它**逃过了**这条闸，照样收到
+    // 「项目里没有 .gitignore，而已经攒下 44 个产物目录」——
+    // 而那是个装好的库，不是项目。
+    //
+    // **每个 Python 包都带 README**，它不证明"这是个项目"。
+    // 判据必须和 `projects::looks_like_project` 对齐（标记文件或 `.git`），
+    // 否则同一个问题在两个地方答案不同——那正是"两份清单各写各的"。
+    let not_a_project = s.manifests.is_empty() && !s.has_git;
+    if not_a_project {
+        items.push(it(
+            "not-a-project",
+            Severity::Info,
+            G_IGNORE,
+            "这里不像一个项目——所以下面不给项目建议".to_string(),
+            vec![
+                "没有任何项目标记（pyproject.toml / requirements.txt / setup.py / \
+                 package.json / Cargo.toml / pom.xml / go.mod / Makefile 都没有）"
+                    .to_string(),
+                "也没有 .git（README 不算：每个 Python 包都带一个）".to_string(),
+                "它可能是一个库、一个发布目录、或者你自己的笔记目录".to_string(),
+            ],
+            vec![
+                "Get-ChildItem pyproject.toml,requirements.txt,setup.py,package.json,Cargo.toml \
+                 -ErrorAction SilentlyContinue"
+                    .to_string(),
+            ],
+            "你本来就不打算把它当一个项目来管，那这些建议对你没有意义。".to_string(),
+            "想看某个项目的真实状态：在项目列表里点它那一行；\
+             或者把根指到真正含标记文件的那一层。"
+                .to_string(),
+        ));
+    } else {
+        ignore_items(&mut items, &s, &entries, w.truncated);
+        deps_items(&mut items, &s, root, w.truncated);
+        habit_items(&mut items, &s, &w);
+        size_items(&mut items, &s, deep);
+    }
     // **"我没走完"这件事，不管 `--deep` 都要说**（2026-10-16）。
     //
     // 原来它长在 `size_items` 里，而 `size_items` 只在深扫时才产出体积项——

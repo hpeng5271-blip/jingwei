@@ -692,6 +692,25 @@ fn r_contract(x: &Facts) -> Vec<Finding> {
         )];
     }
     if p.contract.is_none() {
+        // **"这不是一个项目"时，别提契约**（2026-10-16）。
+        //
+        // 拿 5 个别人写的 Python 库（`site-packages` 里的 pip / pygments / rich …）
+        // 核结论时发现的：它们都没有契约，于是都收到
+        // 「**这个项目**还没有环境契约」——可它们不是项目，是装好的库。
+        //
+        // 这是同一条事实的**第三个出口**（前两个：`guide` 的 `whatToDo`、
+        // `project::scan` 的 `not-a-project`）。三个出口各判各的就会各说各的，
+        // 现在三处用**同一个判据**：`manifests` 空且没有 `.git`。
+        //
+        // 不写成 `hygiene.is_none()`：**体检没跑过 ≠ 它不是项目**。
+        // 只有"真的看过、且确认没有标记"时才沉默。
+        let looked_like_not_a_project = p
+            .hygiene
+            .as_ref()
+            .is_some_and(|h| h.manifests.is_empty() && !h.has_git);
+        if looked_like_not_a_project {
+            return vec![];
+        }
         return vec![f(
             "contract-missing",
             Severity::Info,

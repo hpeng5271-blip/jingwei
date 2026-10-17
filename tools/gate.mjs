@@ -1,4 +1,4 @@
-﻿// 门禁里那些"没法靠编译器守"的规矩，用这个脚本守。
+// 门禁里那些"没法靠编译器守"的规矩，用这个脚本守。
 //
 // 为什么不写成文档里的一句话：规矩写在文档里没人执行就等于没有（§13 迭代规矩）。
 // 这里只放五件能自动判定的，其余留给 clippy 和测试。
@@ -358,6 +358,14 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **自检巡查的选择器必须真有对应元素**（2026-10-17 加）。
+// 它守的是一种"看起来在守、其实在量空气"的失效：元素改名后，
+// 自检照报 `exists: false`，而界面门禁不逐条断言 `exists` 就会静默通过。
+{
+  const r = checkSelfcheckSels('.');
+  for (const p of r.problems) problems.push(p);
+  if (r.checked) console.log('  · 自检选择器：' + r.checked + ' 个，界面上都有对应元素');
+}
 
 if (problems.length) {
   console.log('门禁未通过：');
@@ -365,3 +373,67 @@ if (problems.length) {
   process.exit(1);
 }
 console.log('门禁通过：版本号三处一致，源文件行数在限内，文档数字与 tools/facts.json 一致，文档声明与枚举一致，页面清单与说明书一致，文档链接都点得开');
+
+/// **自检的 SEL 里每一个选择器，界面上都得真有那个东西**（2026-10-17 加）。
+///
+/// 为什么需要：`selfcheck.rs` 用一串选择器去真窗口里量元素，
+/// **但某个元素改名或删掉之后，量出来只是 `exists: false` 的一条记录**——
+/// 界面门禁只要不逐条断言 `exists`，它就会**静默通过**。
+///
+/// 这个仓库栽过同型的账：债表里写着"自检 SEL 在巡查 `ghDeps`/…"，
+/// 而那些元素**在 `ui/` 里根本不存在**——巡查了一年的空气。
+///
+/// 判据：`#id` → `index.html` 里必须有 `id="…"`；
+/// `.cls`（可带多个点）→ 每个 class 在 html 或 css 里出现过。
+export function checkSelfcheckSels(root) {
+  const problems = [];
+  let checked = 0;
+  let src;
+  try {
+    src = readFileSync(join(root, 'src-tauri/src/selfcheck.rs'), 'utf8');
+  } catch {
+    return { problems, checked };
+  }
+  const start = src.indexOf('const SEL = [');
+  if (start < 0) {
+    return { problems: ['selfcheck.rs 里找不到 SEL 定义——判据失效，不许当成"没什么可查"而通过'], checked };
+  }
+  const end = src.indexOf('];', start);
+  const NL = String.fromCharCode(10);
+  const block = src
+    .slice(start, end)
+    .split(NL)
+    .map((line) => line.replace(/\/\/.*$/, '')) // 去掉行尾注释，免得把注释里的字当成选择器
+    .join(NL);
+  const sels = [...block.matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  if (!sels.length) {
+    return { problems: ['SEL 里一个选择器都没解析出来——判据失效'], checked };
+  }
+
+  const html = readFileSync(join(root, 'ui/index.html'), 'utf8');
+  let css = '';
+  try {
+    css = readFileSync(join(root, 'ui/style.css'), 'utf8');
+  } catch {
+    css = '';
+  }
+  for (const sel of sels) {
+    checked++;
+    if (sel.startsWith('#')) {
+      const id = sel.slice(1);
+      if (!html.includes('id="' + id + '"')) {
+        problems.push('SEL 指向 ' + sel + '，但 index.html 里没有这个 id');
+      }
+    } else if (sel.startsWith('.')) {
+      for (const cls of sel.slice(1).split('.')) {
+        if (!html.includes(cls) && !css.includes(cls)) {
+          problems.push('SEL 指向 ' + sel + '，但 html 与 css 里都没有 ' + cls + ' 这个 class');
+        }
+      }
+    } else if (!html.includes('<' + sel)) {
+      // 裸标签名（body / main 这类）：查 <tag 在不在
+      problems.push('SEL 指向 <' + sel + '>，但 index.html 里没有这个标签');
+    }
+  }
+  return { problems, checked };
+}

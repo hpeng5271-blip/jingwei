@@ -356,6 +356,20 @@ fn decide_unknown_why(
 /// `serde` `clap` `rand` —— `guide` 全说「补上就能判断」，退 2。
 /// **它们都是库**，`cargo run` 对它们没有意义。让用户"补上"是误导。
 ///
+/// ## 判据：**有库身份就是库**，bin 是附属的
+///
+/// 第一版只看 `src/lib.rs` → 拿 466 个真 crate 抽样时漏了 **20 个**
+/// （它们用 `[lib] path = "src/language.rs"`，没有 `src/lib.rs`）。
+///
+/// 第二版加了 `[lib]`/`[[bin]]`，但**把 bin 当成"这是应用"** → 又错了：
+/// 全量跑 466 个之后，11 个 `their_gap` 里有 **10 个其实是库**——
+/// `clap` / `dotenvy` / `phf_generator` / `alloc-no-stdlib` / `brotli` …
+/// 它们**同时有 `[lib]` 和 `[[bin]]`**（那个 bin 是 demo / 生成器 / 示例）。
+/// 只有 `cargo-watch` 是真的应用（没有 `[lib]`，`[[bin]]` 就是它自己）。
+///
+/// 所以现在：**有 `[lib]`（或 `src/lib.rs`）就是库**——
+/// 它对外发布的是库，那个 bin 是附属品，不是这个目录的主体。
+///
 /// ## 只做 Rust，不假装通用
 ///
 /// Node 的库与应用都能 `npm start`（区别在 `package.json` 的 `bin`/`main`），
@@ -371,9 +385,10 @@ fn is_library(facts: &Facts) -> bool {
         return false;
     }
     let root = std::path::Path::new(&facts.project.root);
-    let has_lib = root.join("src").join("lib.rs").is_file();
-    let has_main = root.join("src").join("main.rs").is_file();
-    has_lib && !has_main
+    let toml = std::fs::read_to_string(root.join("Cargo.toml")).unwrap_or_default();
+    // `[lib]` 段落（`[[bin]]` 是另一段，`starts_with("[lib]")` 不会误伤它）
+    let has_lib_decl = toml.lines().any(|l| l.trim_start().starts_with("[lib]"));
+    root.join("src").join("lib.rs").is_file() || has_lib_decl
 }
 
 /// 项目类型说成人话。**复合项目要有复合的说法**，不能只报第一门语言
@@ -533,6 +548,100 @@ mod tests {
     use super::*;
     use crate::detect::lang::Lang;
     use crate::facts::{DepDetail, Facts, ProjectFacts, PythonFacts, ToolFact};
+
+    /// **"是不是库"的判据要认 `Cargo.toml` 的 `[lib]`，不能只看 `src/lib.rs`**（2026-10-17）。
+    ///
+    /// ## 拿什么换的（全量跑 466 个真 crate 换的）
+    ///
+    /// 第一版只看 `src/lib.rs` → **漏了 20 个**：它们用
+    /// `[lib] path = "src/language.rs"` 把库入口放在别处
+    /// （`tree-sitter-language-0.1.9`、`fnv`、`cargo_toml`、`jiff-tzdb` …）。
+    ///
+    /// 第二版加了 `[lib]`/`[[bin]]`，但**把 bin 当成"这是应用"** → 又错了：
+    /// 11 个 `their_gap` 里有 **10 个其实是库**（`clap` / `dotenvy` /
+    /// `phf_generator` / `alloc-no-stdlib` / `brotli` …）——它们**同时有 `[lib]` 和
+    /// `[[bin]]`**，那个 bin 是 demo / 生成器。
+    ///
+    /// 第三版（现在）：**有库身份就是库**。全量 466 个跑出来
+    /// 465 个"不适用"，唯一剩的 `their_gap` 是 `cargo-watch`——**它真的是命令行应用**。
+    #[test]
+    fn 认库要看_cargo_toml_的_lib_声明() {
+        let mk = |tag: &str, files: &[(&str, &str)]| -> std::path::PathBuf {
+            let d = std::env::temp_dir().join(format!("jw-lib-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            for (rel, body) in files {
+                let p = d.join(rel);
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
+                }
+                std::fs::write(&p, body).unwrap();
+            }
+            d
+        };
+        let guide_of = |root: &std::path::Path| {
+            let mut f = facts_with(Lang::Rust, vec![], None);
+            f.project.root = root.to_string_lossy().to_string();
+            // **工具链要给上**：不然 `check_toolchain` 会给一条"没有 Rust 工具链"的挡路，
+            // `ready` 变成 `No`，`decide_unknown_why` **在第一步就返回 `Unclear`**——
+            // 那样这个测试根本没测到"是不是库"（我第一版就是这样，红得莫名其妙）。
+            // 注意 `check_toolchain` 对 Rust 查的是 **`rustc`**，不是 `cargo`。
+            f.toolchain.insert(
+                "rustc".into(),
+                ToolFact {
+                    ok: true,
+                    path: Some("rustc".into()),
+                    version: Some("1.0".into()),
+                },
+            );
+            make_guide(&f, &[])
+        };
+
+        // ① `[lib] path = ...`，**没有** src/lib.rs —— 第一版就是漏了这种
+        let a = mk(
+            "custom-path",
+            &[
+                ("Cargo.toml", "[package]\nname=\"a\"\n\n[lib]\npath = \"src/language.rs\"\n"),
+                ("src/language.rs", "pub fn f() {}"),
+            ],
+        );
+        assert_eq!(
+            guide_of(&a).unknown_why,
+            Unknown::NotApplicable,
+            "有 `[lib] path=` 就是库——没有 src/lib.rs 也一样，实际 {:?}（root={:?}）", guide_of(&a).unknown_why, a
+        );
+        let _ = std::fs::remove_dir_all(&a);
+
+        // ② `[lib]` + `[[bin]]` 都有（clap 那种）—— **仍然是库**
+        let b = mk(
+            "lib-and-bin",
+            &[
+                ("Cargo.toml", "[package]\nname=\"b\"\n\n[lib]\nname=\"b\"\n\n[[bin]]\nname=\"b\"\n"),
+                ("src/lib.rs", "pub fn f() {}"),
+                ("src/bin/demo.rs", "fn main() {}"),
+            ],
+        );
+        assert_eq!(
+            guide_of(&b).unknown_why,
+            Unknown::NotApplicable,
+            "有库身份就是库——那个 bin 是附属的（实测 clap/dotenvy 都是这种形状）"
+        );
+        let _ = std::fs::remove_dir_all(&b);
+
+        // ③ 只有 `[[bin]]`、没有 `[lib]` —— 那是**真应用**（cargo-watch 那种）
+        let c = mk(
+            "bin-only",
+            &[
+                ("Cargo.toml", "[package]\nname=\"c\"\n\n[[bin]]\nname=\"c\"\n"),
+                ("src/main.rs", "fn main() {}"),
+            ],
+        );
+        assert_ne!(
+            guide_of(&c).unknown_why,
+            Unknown::NotApplicable,
+            "没有库身份、有 bin —— 那是应用，别把它说成库"
+        );
+        let _ = std::fs::remove_dir_all(&c);
+    }
 
     fn facts_with(lang: Lang, deps: Vec<DepDetail>, contract: Option<Contract>) -> Facts {
         Facts {

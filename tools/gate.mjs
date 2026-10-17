@@ -358,6 +358,13 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **颜色表里有的角色，画序里必须也有**（见 checkGraphRolePaint 的注释）。
+{
+  const r = checkGraphRolePaint(".");
+  for (const p of r.problems) problems.push(p);
+  // **只在真没问题时才打这一行**：明明红了还打「都在画序里」是谎报。
+  if (r.checked && !r.problems.length) console.log("  · 图谱角色：" + r.checked + " 个都在画序里");
+}
 // **工作方法.md 得在，而且不许空谈**（见 checkWorkMethodDoc 的注释）。
 {
   const r = checkWorkMethodDoc('.');
@@ -485,6 +492,56 @@ export function checkWorkMethodDoc(root) {
     const nBuShiYong = (skillPart.match(/不适用/g) || []).length;
     if (nBuShiYong < 3) {
       problems.push('§六/§七 里「不适用」只出现 ' + nBuShiYong + ' 次——每条判据都该写明适用域');
+    }
+  }
+  return { problems, checked };
+}
+
+/// **颜色表里有的角色，画序里必须也有**（2026-10-17 加）。
+///
+/// ## 它守的是哪一次事故
+///
+/// 上一轮给图谱页加 `isolated`（「还没连上」）时，颜色表、图例、环形半径都加了，
+/// **唯独忘了画布上那行 `for (const role of [...])` 的数组**。后果：
+///
+/// - 图例说「还没连上 17 个文件」
+/// - 画布上**一个都找不到**
+/// - 兜底那一段也救不了：它对"有角色的节点"直接 `continue`
+///
+/// 而且**没有任何门禁会红**——图例文本对、节点数对、界面门禁全绿。
+/// 这种"加了名字但没接上线"的失效，**只能靠静态一致性检查抓**。
+///
+/// 判据：`GROLE` 的每个键，都必须出现在画序数组里。
+/// 不查顺序（顺序是设计判断），只查**有没有被画**。
+export function checkGraphRolePaint(root) {
+  const problems = [];
+  let checked = 0;
+  const file = join(root, "ui", "graph.js");
+  if (!existsSync(file)) return { problems: ["ui/graph.js 不见了"], checked };
+  const src = readFileSync(file, "utf8");
+
+  // GROLE 表：形如 `  entry:      { c: "#cc7832", ... }`
+  const block = src.match(/var GROLE = \{([\s\S]*?)\n\};/);
+  if (!block) {
+    return { problems: ["ui/graph.js 里找不到 GROLE 表——判据失效，不许当成没什么可查而通过"], checked };
+  }
+  const keys = [];
+  for (const m of block[1].matchAll(/^\s{2}([a-z_]+):\s*\{/gm)) keys.push(m[1]);
+  if (!keys.length) return { problems: ["GROLE 里一个角色都没解析出来"], checked };
+
+  // 画序数组：`for (const role of [...])`
+  const order = src.match(/for \(const role of \[([^\]]*)\]\)/);
+  if (!order) {
+    return { problems: ["ui/graph.js 里找不到按角色绘制的那行循环——判据失效"], checked };
+  }
+  const painted = order[1].split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+
+  for (const k of keys) {
+    checked++;
+    if (!painted.includes(k)) {
+      problems.push(
+        "ui/graph.js：角色「" + k + "」在颜色表里，但画序数组里没有——它不会被画出来",
+      );
     }
   }
   return { problems, checked };

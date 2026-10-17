@@ -308,9 +308,14 @@ function graphDraw() {
     ctx.stroke();
   }
   // **按角色上色**：这是这一页新读出来的东西（§4.8）。
-  // 画序也是信息：测试先画（垫底），入口最后画（压在最上面）——
+  // 画序也是信息：测试与"还没连上"先画（垫底），入口最后画（压在最上面）——
   // 谁都不该盖住入口。
-  for (const role of ['test', 'middle', 'foundation', 'entry', 'container']) {
+  //
+  // **`isolated` 必须在这张表里**（2026-10-17 修的 bug）：上一轮只把它加进了
+  // 颜色表 / 图例 / 环形半径，没加进这张表——于是那 17 个文件**一个都没被画出来**。
+  // 图例说「还没连上 17 个文件」，画布上却一个都找不到。
+  // 兜底那一段也救不了它们：那里 `if (n.role ...) continue` 会跳过所有有角色的节点。
+  for (const role of ['test', 'isolated', 'middle', 'foundation', 'entry', 'container']) {
     const paint = GROLE[role];
     if (!paint) continue;
     ctx.fillStyle = paint.c;
@@ -318,7 +323,8 @@ function graphDraw() {
     for (const n of GS.nodes) {
       if (n.role !== role) continue;
       const isSym = n.kind === 'symbol';
-      const base = role === 'entry' ? 6 : role === 'foundation' ? 5 : role === 'test' ? 2 : 3;
+      const base = role === 'entry' ? 6 : role === 'foundation' ? 5 : role === 'test' ? 2
+        : role === 'isolated' ? 2 : 3;
       const r = isSym ? Math.max(2, base - 2) : base;
       ctx.moveTo(n.x + r, n.y);
       ctx.arc(n.x, n.y, r, 0, 6.283185307179586);

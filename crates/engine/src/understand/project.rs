@@ -1,4 +1,4 @@
-//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -231,7 +231,23 @@ const LOCKFILES: &[&str] = &[
 ];
 
 /// 清单文件名 -> 归类。用文件名判语言，不猜内容。
-fn manifest_kind(name: &str) -> Option<&'static str> {
+/// **"这个文件名算不算项目标记"——唯一判据**（2026-10-17）。
+///
+/// ## 为什么把它提成 `pub(crate)`
+///
+/// 原来"什么算项目标记"有**两份**：
+///   · 这一份（`manifest_kind`，认 18 种，含 `settings.gradle.kts`、
+///     `requirements-dev.txt`、`.fsproj`、`.sln`）；
+///   · `projects::markers_in` 那份（`MARKERS` 常量 + 特判 `.csproj`/`.sln`/`.fsproj`，
+///     **没有** `settings.gradle.kts`，也**没有** `requirements-dev.txt`）。
+///
+/// 后果（实测）：一个只含 `settings.gradle.kts` 的目录——
+///   `doctor` 找到清单 `settings.gradle.kts(gradle)`；
+///   而 `guide` 说「**这里不像一个项目（没有任何项目标记文件）**」。
+/// **"没有任何标记文件"是假话**——工具自己刚找到了一个。
+///
+/// 所以现在只有这一份，`projects::markers_in` 与 `container.rs` 都问它。
+pub(crate) fn manifest_kind(name: &str) -> Option<&'static str> {
     let n = name.to_lowercase();
     let r = match n.as_str() {
         "pyproject.toml" | "setup.py" | "pipfile" => "python",

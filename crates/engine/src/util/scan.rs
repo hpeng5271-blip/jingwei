@@ -1,4 +1,4 @@
-﻿//! 扫盘时该跳过的目录：网络盘、联接点/软链、超长路径。
+//! 扫盘时该跳过的目录：网络盘、联接点/软链、超长路径。
 //!
 //! 这三样都不罕见，而它们的**共同症状都是"卡在那里不动"**：
 //!   · 网络盘断线时一次 `read_dir` 能挂几十秒；
@@ -108,14 +108,25 @@ fn is_remote_drive(_dir: &Path) -> bool {
 /// 「`.jingwei` 污染结论——我们自己的笔记成了这个项目最长的路径」。
 /// **别把自己算进被观察的对象。**
 pub(crate) const NOT_SOURCE_DIRS: &[&str] = &[
+    // 版本控制 / 工具自己的目录
     ".git",
     ".jingwei",
+    ".drydock",  // 改名前用过的名字，盘上可能还有
+    ".pylaunch", // 同上
+    // 编辑器配置（永远不是源码）
+    ".idea",
+    ".vscode",
+    // 依赖与产物
     "node_modules",
     "target",
     "build",
+    "out",
     "dist",
+    // 虚拟环境（Python 各家约定）
     ".venv",
     "venv",
+    "env",
+    // Python 字节码缓存
     "__pycache__",
 ];
 

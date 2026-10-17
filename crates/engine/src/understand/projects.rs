@@ -1,4 +1,4 @@
-//! 项目生命周期里「还没进去」的那一段：发现项目、读懂它、替它起草契约。
+﻿//! 项目生命周期里「还没进去」的那一段：发现项目、读懂它、替它起草契约。
 //!
 //! 新手最需要被省掉的一步就是「先写一份配置」。所以这里反着来：
 //! 先扫，再猜，猜出来的每一条都说清是从哪儿看出来的，最后交给人改。
@@ -9,48 +9,47 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 文件名就是判据：出现这些，这个目录就算一个项目根。
-///
-/// **这是唯一一份标记表**（`pub(crate)` 是为了让 `project.rs` 的"容器目录"判据复用它）——
-/// 两处各写一份标记表，迟早会出现"这个目录算不算项目"两种答案。
-pub(crate) const MARKERS: &[&str] = &[
-    "package.json",
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "settings.gradle",
-    "requirements.txt",
-    "pyproject.toml",
-    "setup.py",
-    "pipfile",
-    "cargo.toml",
-    "go.mod",
-    "cmakelists.txt",
-    "makefile",
-    "composer.json",
-    "gemfile",
-];
+// 文件名就是判据：出现这些，这个目录就算一个项目根。
+//
+// **判据已经不在这个文件里了**（2026-10-17）。
+//
+// 这里原来有个 `MARKERS` 常量，它自己的注释写着
+// 「**这是唯一一份标记表**……两处各写一份标记表，迟早会出现
+// '这个目录算不算项目' 两种答案」——
+// **它预言了那个 bug，却没阻止它**：`project.rs` 的 `manifest_kind` 是第二份，
+// 两份还不一样（`manifest_kind` 认 `settings.gradle.kts` / `requirements-dev.txt` /
+// `.fsproj` / `.sln`，这份不认）。
+// 后果实测：只含 `settings.gradle.kts` 的目录，`doctor` 找到清单，
+// `guide` 却说「**没有任何项目标记文件**」。
+//
+// **教训：注释说"只有一份"不等于只有一份——只有一处实现才算。**
+// 现在判据只有 `project::manifest_kind`，本文件与 `container.rs` 都问它。
 
-/// 扫的时候不往里走。它们要么是别人的东西，要么是产物。
-const SKIP: &[&str] = &[
-    "node_modules",
-    "target",
-    ".git",
-    ".idea",
-    ".vscode",
-    ".jingwei",
-    ".drydock",
-    ".pylaunch",
-    "dist",
-    "build",
-    "out",
-    ".venv",
-    "venv",
-    "env",
-    "__pycache__",
-    ".gradle",
-    ".m2",
-    "vendor",
+/// 扫目录树找项目时**不往里走**。
+///
+/// ## 这条判据拆成了两样（2026-10-17）
+///
+/// 原来这儿是一个大 `SKIP` 常量，里面**混着两件不同的事**：
+///   · 产物 / 编辑器 / 工具目录（`node_modules` `target` `.idea` …）——
+///     那是"什么不算源码"，判据在 **`util::scan::NOT_SOURCE_DIRS`**，**只有一处**；
+///   · **机器系统目录**（`Windows` `Program Files` `AppData` …）——
+///     那是"扫盘时哪儿根本不用去"，与"源码"无关。
+///
+/// 混在一起的时候，两张清单各写一遍、内容还不同（这一份多 `.gradle`/`.m2`/`vendor`，
+/// 而 `index.rs` 那份没有）——**同一个病**。所以现在只在**这个函数**里合流：
+/// 产物那半问 `NOT_SOURCE_DIRS`，系统那半问 `SYSTEM_DIRS`。
+fn skip_dir(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+    if crate::util::scan::is_not_source_dir(name) {
+        return true;
+    }
+    SYSTEM_DIRS.contains(&name.to_lowercase().as_str())
+}
+
+/// 机器级的系统目录：扫盘找项目时进去既慢又没意义。
+const SYSTEM_DIRS: &[&str] = &[
     "appdata",
     "windows",
     "program files",
@@ -103,12 +102,13 @@ fn markers_in(dir: &Path) -> Vec<String> {
             continue;
         }
         let name = e.file_name().to_string_lossy().to_string();
-        let lower = name.to_lowercase();
-        if MARKERS.contains(&lower.as_str())
-            || lower.ends_with(".csproj")
-            || lower.ends_with(".sln")
-            || lower.ends_with(".fsproj")
-        {
+        // **"什么算项目标记"只有一处判据**（`project::manifest_kind`）。
+        //
+        // 原来这里是另一份（`MARKERS` 常量 + 特判 `.csproj`/`.sln`/`.fsproj`），
+        // 它**没有** `settings.gradle.kts`、也没有 `requirements-dev.txt`——
+        // 而 `manifest_kind` 有。后果（实测）：只含 `settings.gradle.kts` 的目录，
+        // `doctor` 找到清单，`guide` 却说「没有任何项目标记文件」。
+        if crate::understand::project::manifest_kind(&name).is_some() {
             out.push(name);
         }
     }
@@ -164,7 +164,7 @@ fn walk_from(root: &Path, dir: &Path, level: usize, max: usize, now: u64, out: &
             continue;
         }
         let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || SKIP.contains(&name.to_lowercase().as_str()) {
+        if skip_dir(&name) {
             continue;
         }
         let child = e.path();
@@ -442,6 +442,64 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// **"什么算项目标记"只许有一份判据**（2026-10-17）。
+    ///
+    /// ## 拿什么换的
+    ///
+    /// 原来有两份：`projects::MARKERS` 常量，和 `project::manifest_kind`。
+    /// 两份不一样——`manifest_kind` 认 `settings.gradle.kts`、`requirements-dev.txt`、
+    /// `.fsproj`、`.sln`，`MARKERS` 都不认。
+    ///
+    /// 后果（实测）：一个**只含 `settings.gradle.kts`** 的目录——
+    ///   `doctor` 找到清单 `settings.gradle.kts(gradle)`；
+    ///   `guide` 说「**这里不像一个项目（没有任何项目标记文件）**」。
+    /// **"没有任何标记文件"是假话**——工具自己刚找到了一个。
+    ///
+    /// 这个测试直接钉住那句话：**`manifest_kind` 认得的，`looks_like_project` 也必须认**。
+    /// 谁要是再把清单拆成两份，这里会红。
+    #[test]
+    fn 认得出的清单都算项目() {
+        // 尽量把 `manifest_kind` 的每一条分支都覆盖到
+        let names = [
+            "package.json",
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts", // ← 原来漏的就是它
+            "requirements.txt",
+            "requirements-dev.txt", // ← 也漏
+            "requirements-test.txt",
+            "pyproject.toml",
+            "setup.py",
+            "Pipfile",
+            "Cargo.toml",
+            "go.mod",
+            "CMakeLists.txt",
+            "Makefile",
+            "composer.json",
+            "Gemfile",
+            "App.csproj",
+            "App.fsproj", // ← 也漏
+            "App.sln",    // ← 也漏
+        ];
+        for (i, name) in names.iter().enumerate() {
+            assert!(
+                crate::understand::project::manifest_kind(name).is_some(),
+                "{name} 应该被认成项目清单"
+            );
+            // 单独一个文件、别的什么都没有
+            let d = scratch(&format!("marker{i}"));
+            std::fs::write(d.join(name), "x").unwrap();
+            assert!(
+                looks_like_project(&d),
+                "`manifest_kind` 认 {name}，而 `looks_like_project` 不认——\
+                 两份判据分叉了。这正是「没有任何项目标记文件」那句假话的来源。"
+            );
+            let _ = std::fs::remove_dir_all(&d);
+        }
     }
 
     #[test]

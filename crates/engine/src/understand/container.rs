@@ -42,17 +42,21 @@ pub(crate) fn child_projects(root: &Path) -> Vec<String> {
             continue;
         }
         let name = e.file_name().to_string_lossy().to_string();
-        // 产物目录与工具自己的目录不算项目
-        if matches!(name.as_str(), "node_modules" | "target" | ".git" | ".jingwei") {
+        // 产物目录与工具自己的目录不算项目——**判据只有一处**（`util::scan`）。
+        if crate::util::scan::is_not_source_dir(&name) {
             continue;
         }
         let dir = e.path();
         let Ok(inner) = std::fs::read_dir(&dir) else {
             continue;
         };
+        // **"什么算项目标记"只有一处判据**（`project::manifest_kind`）。
+        // 原来这里直接查 `MARKERS` 常量，于是漏了 `.csproj` / `.sln` / `.fsproj`、
+        // `settings.gradle.kts`、`requirements-dev.txt`——
+        // **一个装着 .NET 项目的父目录认不出自己是「容器目录」**。
         let has_marker = inner.flatten().any(|f| {
-            let n = f.file_name().to_string_lossy().to_lowercase();
-            crate::understand::projects::MARKERS.contains(&n.as_str())
+            let n = f.file_name().to_string_lossy().to_string();
+            crate::understand::project::manifest_kind(&n).is_some()
         });
         if has_marker {
             out.push(name);

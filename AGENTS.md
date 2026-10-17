@@ -54,7 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->339<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
+单元与集成测试（<!-- fact:tests_total -->340<!-- /fact --> 条：engine <!-- fact:engine_unit -->274<!-- /fact -->
 + 集成 <!-- fact:integration -->48<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
@@ -219,6 +219,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   修法：`util::scan::NOT_SOURCE_DIRS` + `is_not_source_dir()` **只有一处**（内部转小写），
   三处调用它；顺手补上 `__pycache__` 与 `.jingwei`（后者见"别把自己算进被观察的对象"）。
   门禁：`产物目录里的源码一个都不该被索引`（`Target/` `NODE_MODULES/` `__pycache__/` 都不许算），负向验证过。
+- **"什么算项目标记"有两份判据，两份还不一样**（2026-10-17）：
+  `projects::MARKERS` 常量 与 `project::manifest_kind`。
+  后者认 `settings.gradle.kts` / `requirements-dev.txt` / `requirements-test.txt` /
+  `.fsproj` / `.sln`，前者都不认。
+  实测：一个**只含 `settings.gradle.kts`** 的目录——`doctor` 找到清单
+  `settings.gradle.kts(gradle)`，而 `guide` 说「**这里不像一个项目（没有任何项目标记文件）**」。
+  **"没有任何标记文件"是假话**——工具自己刚找到了一个。
+  **最讽刺的一点**：`MARKERS` 自己的注释写着「**这是唯一一份标记表**……
+  两处各写一份标记表，迟早会出现'这个目录算不算项目'两种答案」——
+  **它预言了这个 bug，却没阻止它。注释说"只有一份"不等于只有一份，只有一处实现才算。**
+  修法：判据只有 `manifest_kind`（提成 `pub(crate)`），`markers_in` 与 `container.rs` 都问它；
+  顺手把 `container.rs` 漏掉的 `.csproj`/`.sln`/`.fsproj` 也接上
+  （**一个装着 .NET 项目的父目录原来认不出自己是"容器目录"**）。
+  门禁：`认得出的清单都算项目`（21 个文件名逐个对：`manifest_kind` 认，`looks_like_project` 必须也认），负向验证过。
+- **"哪些目录不往里走"原来是第四份清单**（2026-10-17，与上面同一天）：
+  `projects.rs` 的 `SKIP` 常量混着**两件不同的事**——产物/编辑器目录 + **机器系统目录**
+  （`Windows`/`Program Files`/`AppData`），而且比 `index.rs` 那份多
+  `.gradle`/`.m2`/`vendor`。现在拆成 `skip_dir()`：产物那半问 `NOT_SOURCE_DIRS`，
+  系统那半问 `SYSTEM_DIRS`，**只在这个函数里合流**。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

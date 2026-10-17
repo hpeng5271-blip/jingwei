@@ -282,7 +282,39 @@ function checkCrateTable() {
   }
 }
 
+/**
+ * **入口文件不许无限长**（2026-10-17 加）。
+ *
+ * `AGENTS.md` 自己写着「超过 120 行就该删内容」，而它长到过 **705 行**、
+ * 被 DSH 的指令预算截断过一次（尾部静默丢失）。写完那句话之后**没人执行**——
+ * 因为门禁里没有任何东西盯着 `.md` 的体积。
+ *
+ * **这条判据真正买的是"每轮成本"**：`AGENTS.md` 是唯一每轮都被注入上下文的文件，
+ * 它的体积不是文风问题，是**每一轮都要付一次的钱**。
+ *
+ * 边界（别把这条判据做过头）：
+ *   - 只管**入口**（`AGENTS.md`）。`设计.md` / `复审记录.md` 那些**材料本来就长**，
+ *     给它们设上限只会逼着把有用的话删掉——**那比长更糟**。
+ *   - 120 是**目标**，这里守的是**上限**：到了就必须往下搬（搬到 `事故账本.md`）。
+ */
+function checkEntryDocSize() {
+  const CEILING = 300;
+  const f = join(ROOT, 'AGENTS.md');
+  if (!existsSync(f)) { problems.push('没有 AGENTS.md'); return; }
+  const n = readFileSync(f, 'utf8').split(/\r?\n/).length;
+  if (n > CEILING) {
+    problems.push(
+      `AGENTS.md 有 ${n} 行，超过上限 ${CEILING}——`
+      + '它是唯一每轮都被注入上下文的文件，长出来的部分要搬到 事故账本.md（状态史）'
+      + '或 框架.md / SOP.md（方法论）',
+    );
+  } else {
+    console.log(`  · 入口文件体积：AGENTS.md ${n} 行（上限 ${CEILING}，目标 120）`);
+  }
+}
+
 function checkDocClaims() {
+
   const r = checkDocs(ROOT);
   for (const p of r.problems) problems.push(p);
   const st = selftestDocs();
@@ -324,6 +356,7 @@ checkMotives();
 checkDocFacts();
 checkDocClaims();
 checkCrateTable();
+checkEntryDocSize();
 checkPageList();
 
 if (problems.length) {

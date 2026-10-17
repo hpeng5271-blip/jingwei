@@ -1,4 +1,4 @@
-//! `project.rs` 的测试。
+﻿//! `project.rs` 的测试。
 //!
 //! **为什么单独一个文件**：`project.rs` 早就超了 1000 行上限、登记在案（只许降不许升）。
 //! 测试是最大的一块（三百多行），而且它**不参与编译产物**——把它搬出来，
@@ -23,6 +23,41 @@ use super::*;
         s.items.iter().any(|i| i.id == id)
     }
 
+    /// **没写 `edition` 就是 2015 语义**——不是风格问题，是编译行为不同。
+    ///
+    /// ## 校准（466 个真 crate）
+    ///
+    /// 命中 **48 个（10%）**，其中 43 个是 0.x/1.x 老 crate，只有 6 个声明了 MSRV——
+    /// 所以**绝大多数就是"很老"**，不是刻意兼容。报 `Info`：对被接手的人有信息量。
+    ///
+    /// 这个测试钉两头：**没写 → 报；写了 → 不报**。
+    #[test]
+    fn 没写edition就是2015要指出来() {
+        let d = scratch("no-edition");
+        std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("src/lib.rs"), "pub fn f(){}").unwrap();
+        assert!(
+            has(&scan(&d), "cargo-edition-missing"),
+            "没写 edition 时 cargo 按 2015 编译（`array.into_iter()` 拿引用、\
+             裸 trait object 合法），照现代教程改会编译不过——这条要报"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+
+        let d = scratch("has-edition");
+        std::fs::write(
+            d.join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("src/lib.rs"), "pub fn f(){}").unwrap();
+        assert!(
+            !has(&scan(&d), "cargo-edition-missing"),
+            "写了 edition 就不该报"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
     /// **多 bin 且没有 `src/main.rs` 且没写 `default-run` → `cargo run` 会报错**。
     ///
     /// ## 拿什么换的（全量跑 466 个 registry crate 换的）

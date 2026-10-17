@@ -56,4 +56,26 @@ pub(crate) fn cargo_toml_has(root: &Path, key: &str) -> bool {
         .map(|t| t.lines().any(|l| l.trim_start().starts_with(key)))
         .unwrap_or(false)
 }
-
+/// `Cargo.toml` **没有** `edition` 声明吗（没写就是 2015）。
+///
+/// ## 为什么值得单独一条
+///
+/// 2015 与现在的 edition 之间有几个**语义**差别，不是风格问题：
+///   · `array.into_iter()` 在 2015 里拿到的是**引用**，2021 里是**值**；
+///   · 裸 trait object（`Box<Trait>`）在 2015 里合法（只警告），2021 里必须写 `dyn`；
+///   · `?` 在 `main` 里的用法、闭包捕获规则也都变了。
+///
+/// 所以一个没写 `edition` 的 crate，**照着现代教程改代码会编译不过**，
+/// 而报错信息不会告诉你是 edition 的问题。
+///
+/// ## 校准（466 个真 crate）
+///
+/// **48 个命中（10%）**，其中 43 个是 0.x/1.x 的老 crate，
+/// 只有 **6 个**声明了 `rust-version`（MSRV）——也就是说**绝大多数就是"很老"**，
+/// 不是"为了兼容刻意留在 2015"。所以报 `Info` 合适：**对被接手的人有信息量**，
+/// 对作者本人只是复述。边界那栏写清了"要支持 1.30 以前就只能留在 2015"。
+pub(crate) fn edition_missing(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("Cargo.toml"))
+        .map(|t| !t.lines().any(|l| l.trim_start().starts_with("edition")))
+        .unwrap_or(false)
+}

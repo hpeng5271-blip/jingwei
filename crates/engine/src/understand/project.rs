@@ -1,4 +1,4 @@
-//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -1433,6 +1433,18 @@ fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: b
             // 写了之后 `cargo run` 就知道跑哪个。
             "你一直用 `cargo run --bin <名字>` 时，这条对你没有意义。",
             "在 Cargo.toml 的 `[package]` 里加一行 `default-run = \"<主那个的名字>\"`",
+        ));
+    }
+    if has("rust") && crate::understand::rustbins::edition_missing(root) {
+        out.push(it(
+            "cargo-edition-missing",
+            Severity::Info,
+            G_HABIT,
+            "Cargo.toml 没写 edition，按 2015 处理",
+            vec!["Cargo.toml 里没有 `edition = \"...\"`，cargo 会按 2015 语义编译".into()],
+            vec!["Select-String -Path Cargo.toml -Pattern 'edition'".into()],
+            "要支持很老的 Rust（1.30 以前）时只能留在 2015，那时别管这条。",
+            "在 [package] 里加 `edition = \"2021\"`，然后 cargo build 看有没有报错",
         ));
     }
     if has("go") && !root.join("go.sum").exists() {

@@ -57,7 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 单元与集成测试（<!-- fact:tests_total -->335<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
 + 集成 <!-- fact:integration -->44<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
-外壳测试 <!-- fact:shell_tests -->47<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
+外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**
@@ -174,6 +174,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   **口径不同**，用户第一反应是"这工具差了 90 倍"。
   现在：`where X` → `(Get-Command X -All).Source`；文件数排除同样的产物目录（248 vs 224）。
   门禁：`自查命令不许用_cmd_专有写法`（`include_str!` 扫源码，负向验证过）。
+- **同一个屏幕上两张卡说法相反**（2026-10-16，拿真项目跑出来的）：
+  概览页 `#guideCard` 写「✗ 现在跑不起来 · 2 个依赖没装」，
+  正下方 `#cardNotes` 写「要处理 **没有挡路的问题**」。
+  根因：那行是 `if (d.error || d.warn)`，而 payload 把计数放在 **`d.counts.error`** 里
+  → `d.error` 永远 `undefined` → **那句"没有"永远出现**。
+  它从 `cbb5e18`（前端拆七个脚本那次）就在，**十几轮、47 条外壳测试全绿，没人发现**——
+  因为那些测试验的是树、编辑器、图谱，**没人盯这两张卡是否自洽**。
+  修法不是改成 `d.counts.error`，而是**直接用要显示的那个数组**（`todo.length`）：
+  数字与"有没有"这句话**必须同一个来源**。门禁：外壳测试两条断言，负向验证过。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

@@ -299,6 +299,35 @@ try {
   check('打开项目：全局选中生效', !!st.root && st.root.replace(/\\/g, '/') === 'D:/projects/demo', st.root);
   check('结构树渲染出文件节点', st.tree >= 2, `${st.tree} 个节点`);
 
+  // 1.5 **两张卡必须说同一件事**（2026-10-16 加）。
+  //
+  //   这是拿真项目跑出来的：`#guideCard` 写「✗ 现在跑不起来 · 2 个依赖没装」，
+  //   而同一屏的 `#cardNotes` 写「要处理 **没有挡路的问题**」——
+  //   因为它读的是 `d.error`，而 payload 把计数放在 `d.counts.error` 里，
+  //   于是那句"没有"**永远**会出现。
+  //
+  //   这个 bug 从 `cbb5e18`（前端拆七个脚本那次）就在了，
+  //   **47 条外壳测试全绿都没抓到**——因为它们在验别处（树、编辑器、图谱）。
+  //   **一个确定的"没有"而事实是"有"，是最不该错的那种错。**
+  //
+  //   桩里 `counts: { error: 1, warn: 1 }` 且两条 finding 各一条：
+  //   所以小字**必须**报出数来，**不许**说"没有挡路的问题"。
+  st = await page.evaluate(() => ({
+    notes: (document.getElementById('cardNotes') || {}).textContent || '',
+    head: (document.querySelector('#statusCard h2') || {}).textContent || '',
+    guide: (document.getElementById('guideCard') || {}).textContent || '',
+  }));
+  check(
+    '概览：有挡路的时候，小字**不许**说「没有挡路的问题」',
+    !st.notes.includes('没有挡路的问题'),
+    st.notes.slice(0, 120),
+  );
+  check(
+    '概览：小字的件数与实际 findings 对得上（桩里是 2 件）',
+    st.notes.includes('2 件'),
+    st.notes.slice(0, 120),
+  );
+
   // 2. 编辑器：打开文件（编码/换行要跟着来）
   await page.evaluate(() => { switchTab('editor'); const f = document.querySelector('#edFiles .ed-node.file'); if (f) f.click(); });
   await page.waitForTimeout(900);

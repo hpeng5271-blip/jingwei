@@ -216,7 +216,18 @@ function stubTauri() {
                 // isolated 不是角色，是「读不出它跟谁有关系」——实测本仓库 17 个文件如此
                 roles: { entry: 1, foundation: 1, middle: 0, test: 1, isolated: 2 },
                 // 目录级：照真 payload 给（只放前三名，不堆）
-                dirs: { entry: [{ dir: 'crates/cli/src', out: 48, in: 0 }], foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }], total: 2 },
+                // 入口目录一律给 4 个：只画前三名，界面必须说出「共 4 个」
+                dirs: {
+                  entry: [
+                    { dir: 'crates/cli/src', out: 48, in: 0 },
+                    { dir: 'src-tauri/src', out: 24, in: 0 },
+                    { dir: 'crates/engine/src/launch', out: 12, in: 2 },
+                  ],
+                  foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }],
+                  entryTotal: 4,
+                  foundationTotal: 1,
+                  total: 5,
+                },
                 nodes: [
                   { id: 'project:', kind: 'project', name: 'demo', role: 'container' },
                   // out/in 是**只算跨文件 calls** 的度数（与 deg 不同，deg 含包含边）
@@ -671,6 +682,13 @@ try {
     '图谱：一条边都没有的文件说成「还没连上」，不混进中间层',
     st.roles.includes('还没连上'),
     st.roles,
+  );
+  // **截断不许静默**（2026-10-17 加）：入口目录一共 4 个、只画前三名，
+  // 界面必须说出「共 4 个」——否则读的人以为入口就这三个。
+  check(
+    '图谱：目录级被截断时要说出来（共 N 个）',
+    st.dirs.includes('共 4 个'),
+    st.dirs,
   );
   check(
     '图谱：目录级说出了入口与公共底层',

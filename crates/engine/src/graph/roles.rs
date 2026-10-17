@@ -259,9 +259,15 @@ pub fn dir_roles(nodes: &[Value], edges: &[Value]) -> Value {
             .map(|(d, o, i)| serde_json::json!({ "dir": d, "out": o, "in": i }))
             .collect::<Vec<_>>())
     };
+    // **截断必须说出来**（2026-10-17 修的）：本仓库实测入口目录有 4 个，
+    // 而这里只放前三名——`total` 是"全部目录"的个数，
+    // 读的人**推不出"入口还有第 4 个没显示"**。那又是把"没显示"当成"没有"。
+    // 所以每一层各给一个"一共几个"，让界面能说"共 4 个，显示前 3"。
     serde_json::json!({
         "entry": pick(&entry),
         "foundation": pick(&found),
+        "entryTotal": entry.len(),
+        "foundationTotal": found.len(),
         "total": all.len(),
     })
 }
@@ -363,6 +369,40 @@ mod tests {
         assert_eq!(r["foundation"][0]["dir"], "util", "util 是公共底层：{r}");
         assert_eq!(r["foundation"][0]["in"], 4);
         let _ = &mut nodes;
+    }
+
+    /// **目录级只显示前三名，但必须说出"一共几个"**（2026-10-17 加）。
+    ///
+    /// 本仓库实测：入口目录有 4 个，界面上只画了 3 个——
+    /// 而 `total` 是"所有目录"的个数，读的人推不出"入口还剩一个没显示"。
+    /// 那又是把"没显示"当成"没有"。
+    #[test]
+    fn 目录级截断要说出来() {
+        // 四个"只出不入"的目录 + 一个共同汇聚点，这样前四个都算入口。
+        //
+        // **第一版写错了**：让 4 个目录互相调用，于是每个是 出3/入3 —— 都是中间层，
+        // `entryTotal` 是 0，断言当场红。夹具的形状要**照判据设计**，不能随手造。
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        nodes.push(node("file:sink/x.rs", "file", None));
+        nodes.push(node("symbol:sink/x.rs#g", "symbol", Some("sink/x.rs")));
+        for k in 0..4 {
+            let d = format!("d{k}");
+            nodes.push(node(&format!("file:{d}/a.rs"), "file", None));
+            nodes.push(node(&format!("symbol:{d}/a.rs#f"), "symbol", Some(&format!("{d}/a.rs"))));
+            // 每个 d{k}/a.rs 往 sink 调 3 次：自己出 3、入 0 → 入口
+            for _ in 0..3 {
+                edges.push(json!({
+                    "src": format!("symbol:{d}/a.rs#f"),
+                    "dst": "symbol:sink/x.rs#g",
+                    "kind": "calls"
+                }));
+            }
+        }
+        let r = dir_roles(&nodes, &edges);
+        let shown = r["entry"].as_array().map(|a| a.len()).unwrap_or(0);
+        assert_eq!(shown, 3, "只显示前三名：{r}");
+        assert_eq!(r["entryTotal"], 4, "但要说出「一共 4 个」：{r}");
     }
 
     /// **同一个目录内部互调不算**：它不说明模块之间谁在用谁。

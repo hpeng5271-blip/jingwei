@@ -205,16 +205,20 @@ function ghRenderDirs(dirs) {
   if (!box) return;
   if (!dirs || !dirs.total) { box.hidden = true; return; }
   var groups = [];
-  var mk = function (label, color, list, tail) {
+  var mk = function (label, color, list, tail, total) {
     if (!list || !list.length) return;
     var items = list.map(function (d) {
       return esc(d.dir) + ' <b>' + (tail === 'out' ? d.out : d.in) + '</b>' + (tail === 'out' ? '→' : '←');
     });
+    // **截断不许静默**（2026-10-17 修的）：本仓库入口目录有 4 个，这里只放前三名。
+    // 不说出来，读的人会以为"入口就这三个"，而 `total` 是**所有**目录的个数，
+    // 根本推不出"这一层还剩一个没显示"。
+    var tail2 = (total && total > list.length) ? ' <span class="gr-more">（共 ' + total + ' 个）</span>' : '';
     groups.push('<span class="gr-role"><i style="background:' + color + '"></i>'
-      + label + ' ' + items.join(' · ') + '</span>');
+      + label + ' ' + items.join(' · ') + tail2 + '</span>');
   };
-  mk('入口', GROLE.entry.c, dirs.entry, 'out');
-  mk('公共底层', GROLE.foundation.c, dirs.foundation, 'in');
+  mk('入口', GROLE.entry.c, dirs.entry, 'out', dirs.entryTotal);
+  mk('公共底层', GROLE.foundation.c, dirs.foundation, 'in', dirs.foundationTotal);
   if (!groups.length) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = groups.join('');

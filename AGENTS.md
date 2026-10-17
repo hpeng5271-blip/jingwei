@@ -238,6 +238,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   （`Windows`/`Program Files`/`AppData`），而且比 `index.rs` 那份多
   `.gradle`/`.m2`/`vendor`。现在拆成 `skip_dir()`：产物那半问 `NOT_SOURCE_DIRS`，
   系统那半问 `SYSTEM_DIRS`，**只在这个函数里合流**。
+- **`--report` 探针会改动目标目录**（2026-10-17，我拿真 crate 当探针时发现的）：
+  `jingwei-gui.exe <目录> --report <路径>` 为了让界面门禁能自报 DOM，会**真的点过页签和按钮**；
+  而「运行」页的设计就是**自动补契约 + 跑一次**。于是拿 `brotli-9.0.0` 当目标跑一次之后，
+  那个 crate 里多出了 `env.contract.json` 和 `.jingwei/`（含 graph.db、两条笔记）。
+  **这不是 bug，是设计**——但**探针因此有副作用**。
+  **要分清谁安全**：第 8 道门禁 `uitest-window.mjs` **安全**（它自己造 `tmpdir/jw-ui-fixture-<pid>`）；
+  **我手工跑的不安全**。规矩：拿真项目当探针前先复制到临时目录（`guide`/`doctor`/`audit` 只读，可以随便打）。
+  已清理，复查 467 个 crate 0 个被污染。SOP §S21。
+
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

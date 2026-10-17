@@ -581,6 +581,19 @@ try {
       edges: document.getElementById('ghEdges').textContent,
       sub: document.getElementById('ghSub').textContent,
       roles: document.getElementById('ghRoles').textContent,
+      // 各角色的平均半径：验"入口外圈、底层核心"这条判据
+      ring: (function () {
+        const acc = {};
+        for (const n of GS.nodes) {
+          const r = Math.sqrt(n.x * n.x + n.y * n.y);
+          (acc[n.role] = acc[n.role] || []).push(r);
+        }
+        const avg = {};
+        for (const k of Object.keys(acc)) {
+          avg[k] = acc[k].reduce(function (s, x) { return s + x; }, 0) / acc[k].length;
+        }
+        return avg;
+      })(),
       rolesHidden: document.getElementById('ghRoles').hidden,
       painted,
     };
@@ -610,6 +623,22 @@ try {
     '图谱：说明测试不参与判断',
     st.roles.includes('测试'),
     st.roles,
+  );
+  // **铺开要按角色**，不能按度数：入口在外圈、公共底层在核心，
+  // 于是"依赖方向"不用读标签也看得出来。按度数铺会把入口和底层混在一起，
+  // 方向就抹掉了——那正是 `框架.md` §4.8 说的错。
+  // 判据用**序关系**，不写死半径（写了就成了"记着数字"，改布局就红得没道理）：
+  //   入口 > 中间层 > 公共底层，且 测试 > 入口（测试垫在最外）。
+  // 桩数据里可能没有某一层，所以缺的跳过——**但那不能变成"随便都过"**：
+  // 入口与公共底层必须都在，这是这条判据的核心。
+  check(
+    '图谱：入口铺在外圈、公共底层在核心',
+    typeof st.ring.entry === 'number'
+      && typeof st.ring.foundation === 'number'
+      && st.ring.entry > st.ring.foundation
+      && (st.ring.middle === undefined || (st.ring.entry > st.ring.middle && st.ring.middle > st.ring.foundation))
+      && (st.ring.test === undefined || st.ring.test > st.ring.entry),
+    JSON.stringify(st.ring),
   );
 
   // 6b. 最近运行：M5 那条链的出口。

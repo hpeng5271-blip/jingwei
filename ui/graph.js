@@ -204,16 +204,29 @@ function graphBuild() {
   for (const e of raw.edges) {
     const a = idx.get(e.src), b = idx.get(e.dst);
     if (a === undefined || b === undefined) continue;
-    GS.edges.push({ a: a, b: b });
+    // **边要带种类**：`calls` 是"谁在用谁"，`contains`/`defines` 只是包含。
+    // 两者画一样重，读的人就会把"装着"当成"用着"——这正是 §4.8 说的那个混淆。
+    GS.edges.push({ a: a, b: b, kind: e.kind });
     GS.nodes[a].deg++; GS.nodes[b].deg++;
   }
-  // 按度数分环铺开：连得多的靠里，叶子在外圈
+  // **按角色分环铺开**——这是这一页最省字的一件事：
+  //
+  //   入口（出多入少）    → 外圈
+  //   中间层              → 中圈
+  //   公共底层（入多出少）→ 核心
+  //   测试                → 最外（垫底，不参与判断）
+  //   项目节点            → 正中（它是容器）
+  //
+  // 于是"依赖方向"不用读标签也看得出来：**箭头都是从外往里**。
+  // 原来按度数分环，入口和底层混在一起，方向就抹掉了。
+  const RING = { container: 0.18, foundation: 0.5, middle: 0.78, entry: 1, test: 1.16 };
   const R = 320;
   for (let i = 0; i < GS.nodes.length; i++) {
-    const ring = GS.nodes[i].deg > 8 ? 0.3 : (GS.nodes[i].deg > 2 ? 0.62 : 1);
+    const ring = RING[GS.nodes[i].role] || 0.78;
     const a = i * 2.399963;
-    GS.nodes[i].x = Math.cos(a) * R * ring * Math.sqrt((i + 1) / Math.max(1, GS.nodes.length));
-    GS.nodes[i].y = Math.sin(a) * R * ring * Math.sqrt((i + 1) / Math.max(1, GS.nodes.length));
+    const r = R * ring * Math.sqrt((i + 1) / Math.max(1, GS.nodes.length));
+    GS.nodes[i].x = Math.cos(a) * r;
+    GS.nodes[i].y = Math.sin(a) * r;
   }
   graphDraw();
 }
@@ -235,16 +248,28 @@ function graphDraw() {
   ctx.save();
   ctx.translate(W / 2 + GS.view.x, H / 2 + GS.view.y);
   ctx.scale(GS.view.k, GS.view.k);
-  // 边：一次 path 画完（这是 canvas 比 DOM 快的根本原因）
-  ctx.strokeStyle = 'rgba(120,110,100,.18)';
+  // 边：**分两组画，两组的分量不同**。
+  //
+  //   `calls`（谁在用谁）→ 深一点、实一点：这是这一页要说的事
+  //   包含边（contains/defines）→ 很淡：它们是**结构**，不是**使用**
+  //
+  // 两组画成一样重，图上最"热闹"的会是包含关系，而读的人会把它当成依赖。
+  // 仍然一次 path 画完一组（canvas 比 DOM 快的根本原因）。
   ctx.lineWidth = 1 / GS.view.k;
-  ctx.beginPath();
-  for (const e of GS.edges) {
-    const a = GS.nodes[e.a], b = GS.nodes[e.b];
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+  for (const group of [
+    { kinds: ['contains', 'defines'], stroke: 'rgba(120,110,100,.10)' },
+    { kinds: ['calls'], stroke: 'rgba(90,80,70,.42)' },
+  ]) {
+    ctx.strokeStyle = group.stroke;
+    ctx.beginPath();
+    for (const e of GS.edges) {
+      if (!group.kinds.includes(e.kind)) continue;
+      const a = GS.nodes[e.a], b = GS.nodes[e.b];
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
   // **按角色上色**：这是这一页新读出来的东西（§4.8）。
   // 画序也是信息：测试先画（垫底），入口最后画（压在最上面）——
   // 谁都不该盖住入口。

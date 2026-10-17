@@ -386,7 +386,7 @@ fn import_candidates(path: &str, rel: &str) -> Vec<(String, String)> {
     // (a) 基准 + 子路径
     out.extend(landing(&base, &joined, &name));
     // (b) 裸路径的第二种解释：第一段其实是 **crate 名**，剩下的才是 crate 内的路径
-    //     （`use jingwei_engine::graph::index::index_rust`——那个 crate 就是我们自己，
+    //     （`use jingwei_engine::graph::index::index_source`——那个 crate 就是我们自己，
     //     只是 `use` 里写的是 crate 名而不是 `crate`）。
     //     **crate 名那一节要丢掉**：它是"哪个 crate"，不是"crate 里哪个目录"。
     if !from_crate_root && !rest.is_empty() {
@@ -890,22 +890,22 @@ mod tests {
         );
         assert_eq!(r.resolved.len(), 1, "子模块那条解释失效了");
 
-        // ② crate 名：`examples/export_graph.rs` 里的 `jingwei_engine::graph::index::index_rust`
+        // ② crate 名：`examples/export_graph.rs` 里的 `jingwei_engine::graph::index::index_source`
         let mut b: SymbolTable = BTreeMap::new();
         b.insert(
-            "index_rust".to_string(),
+            "index_source".to_string(),
             vec![SymbolEntry {
-                id: "symbol:crates/engine/src/graph/index.rs#index_rust".to_string(),
+                id: "symbol:crates/engine/src/graph/index.rs#index_source".to_string(),
                 class: "value".to_string(),
             }],
         );
         let r = resolve_file(
             "crates/engine/examples/export_graph.rs",
-            &[rf("index_rust", &["symbol:crates/engine/examples/export_graph.rs#main"])],
+            &[rf("index_source", &["symbol:crates/engine/examples/export_graph.rs#main"])],
             &SymbolTable::new(),
             &[ImportFact {
-                local: "index_rust".to_string(),
-                path: "jingwei_engine::graph::index::index_rust".to_string(),
+                local: "index_source".to_string(),
+                path: "jingwei_engine::graph::index::index_source".to_string(),
             }],
             &b,
         );

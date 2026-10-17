@@ -92,7 +92,7 @@ fn 产物目录里的源码一个都不该被索引() {
         ],
     );
     let mut s = open(&root);
-    let r = index::index_rust(&root, &mut s).expect("索引失败");
+    let r = index::index_source(&root, &mut s).expect("索引失败");
     assert_eq!(
         r.files, 1,
         "只有 src/app.rs 是源码；Target/ NODE_MODULES/ __pycache__/ 一律不许算，实际 {}",
@@ -106,7 +106,7 @@ fn 产物目录里的源码一个都不该被索引() {
 fn 一个目录索引完图谱里就有了东西() {
     let root = make_project("basic");
     let mut s = open(&root);
-    let r = index::index_rust(&root, &mut s).expect("索引失败");
+    let r = index::index_source(&root, &mut s).expect("索引失败");
 
     assert_eq!(r.files, 2, "两个 .rs 文件");
     assert!(r.symbols >= 4, "至少 a/S/m/broken 四个符号，实际 {}", r.symbols);
@@ -133,9 +133,9 @@ fn 一个目录索引完图谱里就有了东西() {
 fn 索引两遍图谱不会变大() {
     let root = make_project("idem");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("第一次失败");
+    index::index_source(&root, &mut s).expect("第一次失败");
     let first = s.counts().expect("数不过来");
-    index::index_rust(&root, &mut s).expect("第二次失败");
+    index::index_source(&root, &mut s).expect("第二次失败");
     let second = s.counts().expect("数不过来");
     assert_eq!(first, second, "重跑不该涨库");
 }
@@ -157,14 +157,14 @@ fn 扫到的数与处理了的数是两个数() {
     let root = make_project("scanned-vs-files");
     let mut s = open(&root);
 
-    let first = index::index_rust(&root, &mut s).expect("第一次失败");
+    let first = index::index_source(&root, &mut s).expect("第一次失败");
     assert!(first.scanned > 0, "空库第一遍必须扫到东西");
     assert_eq!(
         first.files, first.scanned,
         "空库第一遍：扫到的都该被处理"
     );
 
-    let second = index::index_rust(&root, &mut s).expect("第二次失败");
+    let second = index::index_source(&root, &mut s).expect("第二次失败");
     assert_eq!(
         second.scanned, first.scanned,
         "第二遍扫到的数不该变——变了说明收集不稳定"
@@ -185,7 +185,7 @@ fn 扫到的数与处理了的数是两个数() {
 fn impl_里的方法带容器路径() {
     let root = make_project("container");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("索引失败");
+    index::index_source(&root, &mut s).expect("索引失败");
     assert!(
         s.node("symbol:src/lib.rs#S::m").expect("读失败").is_some(),
         "impl 里的方法必须是 S::m，不是光秃秃的 m"
@@ -201,7 +201,7 @@ fn impl_里的方法带容器路径() {
 fn 一个文件坏掉不影响别的文件() {
     let root = make_project("resilient");
     let mut s = open(&root);
-    let r = index::index_rust(&root, &mut s).expect("索引不该因为一个坏文件就整次失败");
+    let r = index::index_source(&root, &mut s).expect("索引不该因为一个坏文件就整次失败");
     assert_eq!(r.files, 2, "两个文件都进去了");
     assert_eq!(r.incomplete, 1, "但坏的那个被标出来了");
     assert!(
@@ -219,8 +219,8 @@ fn 一个文件坏掉不影响别的文件() {
 fn 没改东西时第二遍全部跳过() {
     let root = make_project("nochange");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("第一遍失败");
-    let r = index::index_rust(&root, &mut s).expect("第二遍失败");
+    index::index_source(&root, &mut s).expect("第一遍失败");
+    let r = index::index_source(&root, &mut s).expect("第二遍失败");
     assert_eq!(r.files, 0, "没有文件该被重解析");
     assert_eq!(r.skipped_unchanged, 2, "两个文件都该被一级检测拦下");
     assert_eq!(r.edges_expired, 0, "没重解析就不该动关系");
@@ -232,12 +232,12 @@ fn 没改东西时第二遍全部跳过() {
 fn 只改了修改时间的不重解析() {
     let root = make_project("touch");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("第一遍失败");
+    index::index_source(&root, &mut s).expect("第一遍失败");
     let f = root.join("src/lib.rs");
     let same = std::fs::read_to_string(&f).expect("读失败");
     std::thread::sleep(std::time::Duration::from_millis(30));
     std::fs::write(&f, same).expect("写失败"); // 内容一样，只更新了 mtime
-    let r = index::index_rust(&root, &mut s).expect("第二遍失败");
+    let r = index::index_source(&root, &mut s).expect("第二遍失败");
     assert_eq!(r.files, 0, "内容没变，不该重解析");
     assert_eq!(r.skipped_same_content, 1, "二级检测该拦住它");
 }
@@ -247,9 +247,9 @@ fn 只改了修改时间的不重解析() {
 fn 删掉的文件从图谱里撤掉() {
     let root = make_project("remove");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("第一遍失败");
+    index::index_source(&root, &mut s).expect("第一遍失败");
     std::fs::remove_file(root.join("src/bad.rs")).expect("删失败");
-    let r = index::index_rust(&root, &mut s).expect("第二遍失败");
+    let r = index::index_source(&root, &mut s).expect("第二遍失败");
     assert_eq!(r.removed, 1);
     assert!(s.node("file:src/bad.rs").expect("读失败").is_none());
     assert!(
@@ -271,7 +271,7 @@ fn 删掉的文件从图谱里撤掉() {
 fn 改名之后旧符号不留痕() {
     let root = make_project("rename");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("第一遍失败");
+    index::index_source(&root, &mut s).expect("第一遍失败");
     assert!(s.node("symbol:src/lib.rs#a").expect("读失败").is_some());
 
     std::thread::sleep(std::time::Duration::from_millis(30));
@@ -280,7 +280,7 @@ fn 改名之后旧符号不留痕() {
         "pub fn b() {}\nstruct S;\nimpl S { fn m(&self) {} }\n",
     )
     .expect("写失败");
-    let r = index::index_rust(&root, &mut s).expect("第二遍失败");
+    let r = index::index_source(&root, &mut s).expect("第二遍失败");
     assert_eq!(r.files, 1, "只有改了的那个文件被重解析");
     assert!(s.node("symbol:src/lib.rs#b").expect("读失败").is_some(), "新符号在");
     assert!(
@@ -296,7 +296,7 @@ fn 改名之后旧符号不留痕() {
 fn 一次运行在图谱里留下痕迹() {
     let root = make_project("run");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("索引失败");
+    index::index_source(&root, &mut s).expect("索引失败");
 
     let r = index::record_run(
         &mut s,
@@ -334,7 +334,7 @@ fn 一次运行在图谱里留下痕迹() {
 fn 指向未索引文件的诊断会被如实报出来() {
     let root = make_project("unknown_target");
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("索引失败");
+    index::index_source(&root, &mut s).expect("索引失败");
 
     let r = index::record_run(
         &mut s,
@@ -379,7 +379,7 @@ fn 闭包被调用时连成边() {
         )],
     );
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("索引失败");
+    index::index_source(&root, &mut s).expect("索引失败");
 
     assert!(
         s.node("symbol:src/a.rs#outer::inner").expect("读失败").is_some(),
@@ -413,7 +413,7 @@ fn pub_use_把跨文件的调用连起来() {
         ],
     );
     let mut s = open(&root);
-    index::index_rust(&root, &mut s).expect("索引失败");
+    index::index_source(&root, &mut s).expect("索引失败");
 
     assert_eq!(
         s.neighbors("symbol:src/probe.rs#probe", EdgeKind::Calls, Dir::Out)

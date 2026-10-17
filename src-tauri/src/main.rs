@@ -225,7 +225,7 @@ fn watch_start(
             // 有变化：增量索引。失败也要说话——**静默的实时层比没有还糟**：
             // 界面上的数字会一直停在旧值，而用户以为那是新的。
             let msg = match jingwei_engine::graph::store::Store::open(&graph_db(Path::new(&root2)))
-                .and_then(|mut s| jingwei_engine::graph::index::index_rust(Path::new(&root2), &mut s))
+                .and_then(|mut s| jingwei_engine::graph::index::index_source(Path::new(&root2), &mut s))
             {
                 Ok(rep) => json!({
                     "ok": true,

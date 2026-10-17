@@ -40,7 +40,7 @@ pub(crate) fn graph_index(root: String) -> Result<Value, String> {
     let t0 = std::time::Instant::now();
     let mut store = jingwei_engine::graph::store::Store::open(&graph_db(&p))
         .map_err(|e| format!("打开图谱库失败：{e}"))?;
-    let rep = jingwei_engine::graph::index::index_rust(&p, &mut store)
+    let rep = jingwei_engine::graph::index::index_source(&p, &mut store)
         .map_err(|e| format!("索引失败：{e}"))?;
     // **形状由 `IndexReport::to_json()` 给**（2026-10-16）——与 `jingwei index --json` 同源。
     // 原来这里与 `cmd_graph.rs` 各拼一份，而它们已经漂了（字段缺一个、

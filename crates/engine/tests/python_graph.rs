@@ -70,14 +70,16 @@ fn index(root: &Path) -> (jingwei_engine::graph::index::IndexReport, PathBuf) {
         std::fs::create_dir_all(d).unwrap();
     }
     let mut store = Store::open(&db).expect("建图谱库");
-    let rep = jingwei_engine::graph::index::index_rust(root, &mut store).expect("索引该成功");
+    let rep = jingwei_engine::graph::index::index_source(root, &mut store).expect("索引该成功");
     (rep, db)
 }
 
-/// **`index_rust` 这个名字现在是骗人的**——它收 `.rs` 和 `.py` 两种。
-/// 这条测试不改名，只把事实钉下来：函数名留着（改名要动 5 处调用点，
-/// 那是另一件事），但**行为必须是两门语言都收**。
-/// 名字与行为不符这件事本身记在 `AGENTS.md` §5 的账上。
+/// 这个入口**收 `.rs` 和 `.py` 两种**。
+///
+/// 2026-10-17 从 `index_rust` 改名成 `index_source`——旧名字骗人（它收两门语言）。
+/// **顺带纠正一个估计**：债表里写着"改名要动 5 处调用点"，**实际是 38 处、9 个文件**。
+/// 估"改动太大/太小"之前先数一遍——这条与"加一支要碰 32 处 `matches!` 实际 3 处"是同一个毛病，
+/// 只是方向相反。
 #[test]
 fn 索引器收python文件不只是rust() {
     let d = scratch("files");

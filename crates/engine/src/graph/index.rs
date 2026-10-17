@@ -362,7 +362,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 ///
 /// 三级（变更日志 / watcher）不在这里：那是外壳的事，它把改动事件喂进来，
 /// 这里只管"给我一个目录，我把图谱对齐"。
-pub fn index_rust(
+pub fn index_source(
     root: &Path,
     store: &mut crate::graph::store::Store,
 ) -> Result<IndexReport> {

@@ -25,7 +25,7 @@
 //! 真数据的形状（长 id、大量 `contains`/`defines` 边、少数节点连接度高）
 //! 决定了布局和渲染的真实难度。
 
-use jingwei_engine::{graph::index::index_rust, graph::store::Store};
+use jingwei_engine::{graph::index::index_source, graph::store::Store};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -58,7 +58,7 @@ fn main() {
         }
     };
     let t0 = std::time::Instant::now();
-    let rep = match index_rust(root_path, &mut store) {
+    let rep = match index_source(root_path, &mut store) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("索引失败：{e}");

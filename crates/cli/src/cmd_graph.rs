@@ -29,7 +29,7 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
     let run_id = rest.get(1).map(|s| s.as_str());
 
     // `jingwei index` 是**同一个内核入口**的另一条外壳（界面「索引一次」走 `graph_index`，
-    // 两边都调 `graph::index::index_rust`）。
+    // 两边都调 `graph::index::index_source`）。
     //
     // ## 为什么补这一条（2026-10-16；当初"故意没做"的理由已经不成立）
     //
@@ -351,7 +351,7 @@ fn civil_from_days(z: i64) -> (i64, i64) {
 
 /// `jingwei index` —— **把项目带到"图谱可用"的状态**。
 ///
-/// 与界面「索引一次」**同一个内核入口**（`graph::index::index_rust`），
+/// 与界面「索引一次」**同一个内核入口**（`graph::index::index_source`），
 /// 所以两条路的结果必然一致——这正是"一个内核、两份外壳"该有的样子。
 ///
 /// 报的东西分三层，因为它们说的是**完全不同的三件事**：
@@ -376,7 +376,7 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             return 1;
         }
     };
-    let rep = match jingwei_engine::graph::index::index_rust(root, &mut store) {
+    let rep = match jingwei_engine::graph::index::index_source(root, &mut store) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("索引失败：{e}");

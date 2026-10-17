@@ -330,7 +330,7 @@ fn run() -> i32 {
         "init" => cmd_init(&root, json),
         "graph" => cmd_graph(&root, json, &rest),
         // **`jingwei index` = 把项目带到"图谱可用"的状态。**
-        // 与界面「索引一次」同一个内核入口（`graph::index::index_rust`）。
+        // 与界面「索引一次」同一个内核入口（`graph::index::index_source`）。
         //
         // 为什么它必须存在：**要人开窗手点的操作，就等于不能被执行**。
         // 原来 `graph index` 是"故意没做"的（理由是"两处实现迟早不一致"），

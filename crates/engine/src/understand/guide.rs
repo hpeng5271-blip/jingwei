@@ -1,4 +1,4 @@
-//! **项目指南**：一句话回答「这个项目现在能不能跑起来、卡在哪、下一步敲什么」。
+﻿//! **项目指南**：一句话回答「这个项目现在能不能跑起来、卡在哪、下一步敲什么」。
 //!
 //! ## 为什么要有它
 //!
@@ -334,7 +334,7 @@ fn check_toolchain(facts: &Facts, lang: Lang, blockers: &mut Vec<Blocker>) {
                         .to_string(),
                     fix: "去 https://rustup.rs 装，装完**重开一个终端**（它改的是 PATH）"
                         .to_string(),
-                    verify: "where cargo".to_string(),
+                    verify: "(Get-Command cargo -All).Source".to_string(),
                 });
             }
         }

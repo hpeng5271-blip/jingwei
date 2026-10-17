@@ -54,7 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->332<!-- /fact --> 条：engine <!-- fact:engine_unit -->270<!-- /fact -->
+单元与集成测试（<!-- fact:tests_total -->335<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
 + 集成 <!-- fact:integration -->44<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->47<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
@@ -165,6 +165,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 - **`check_facts` 的逐份判据写在注释里没实现** → `总稿.md` 0 个标记、整份逃过数字校验。
 - **界面门禁"等页面就绪"只兑现了一半**：图谱页那条在，"其它页看主卡真的画出来"代码里没有
   → 概览页读到 `""`，而产品是对的。**判据在抢跑，症状长得像产品坏了。**
+- **`无自查不报错` 这条铁律，有一半的自查命令是坏的**（2026-10-16，拿 57 条结论逐条核时发现）：
+  `rules.rs` 与 `guide.rs` 里 **14 处 `where XXX`**（`where java` / `where python` / `where cargo` …）——
+  而 **`where` 在 PowerShell 里是 `Where-Object` 的别名**，跑 `where python` 会**静默返回空**（不报错）。
+  用户照着自查看到一片空白，而结论说的是"你有两个 python，只是终端里敲的不是同一个"。
+  **一条让人怀疑结论的自查，比没有自查更坏**——而这条铁律正是靠这些命令兑现的。
+  另外 `scan-truncated` 的自查数出 20228（含 `target`/`node_modules`），工具扫的是 224——
+  **口径不同**，用户第一反应是"这工具差了 90 倍"。
+  现在：`where X` → `(Get-Command X -All).Source`；文件数排除同样的产物目录（248 vs 224）。
+  门禁：`自查命令不许用_cmd_专有写法`（`include_str!` 扫源码，负向验证过）。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

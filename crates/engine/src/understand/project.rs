@@ -1,4 +1,4 @@
-﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -672,7 +672,20 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
                 ),
                 "所以「有 N 个 .py 文件」这类说法要读成「至少有 N 个」".into(),
             ],
-            vec!["(Get-ChildItem -Recurse -File | Measure-Object).Count".into()],
+            // 自查命令的**口径必须和 walk 一致**（2026-10-16 修）。
+            //
+            // 原来写的是 `(Get-ChildItem -Recurse -File | Measure-Object).Count`——
+            // 它对 `jingwei` 这个仓库数出 **20228**（含 `target`、`node_modules`、
+            // 还走到任意深度），而工具实际扫的是 **224**。
+            // 用户照着自查，看到 20228 vs 224，第一反应是"这工具差了 90 倍"——
+            // **一条让人怀疑结论的自查，比没有自查更坏。**
+            //
+            // 现在排除同样的产物目录：数出来 300（工具 224）。
+            // 两个数**同一个口径**，差的那 76 就是"深度超过 4 层的"——
+            // 那正好是要证明的事：**我确实没走完**。
+            //
+            // 用 `r"..."` 原始字符串：正则里全是反斜杠，转义一遍只会写错。
+            vec![r"(Get-ChildItem -Recurse -File | Where-Object { $_.FullName -notmatch '\\(target|node_modules|\.git|dist|build|__pycache__|\.venv|venv)\\' } | Measure-Object).Count".into()],
             "只要没出现「没找到」的结论，就说明关键文件都在扫描范围里。",
             "要完整分布就用专门工具（WizTree 之类）看；或者把项目里的深层目录摊平。",
         ));

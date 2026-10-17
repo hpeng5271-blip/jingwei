@@ -258,7 +258,7 @@ use super::*;
                 Severity::Error,
                 "这个有据可查",
                 vec!["证据".into()],
-                vec!["where python".into()],
+                vec!["(Get-Command python -All).Source".into()],
                 "",
                 "照做",
                 vec![],
@@ -270,7 +270,7 @@ use super::*;
                     Severity::Error,
                     "来源不权威",
                     vec!["证据".into()],
-                    vec!["where python".into()],
+                    vec!["(Get-Command python -All).Source".into()],
                     "",
                     "照做",
                     vec![],
@@ -285,7 +285,7 @@ use super::*;
                     Severity::Error,
                     "这是估的",
                     vec!["证据".into()],
-                    vec!["where python".into()],
+                    vec!["(Get-Command python -All).Source".into()],
                     "",
                     "照做",
                     vec![],
@@ -322,4 +322,52 @@ use super::*;
             }
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **自查命令必须是 PowerShell 写的**（2026-10-16）。
+    ///
+    /// ## 拿什么换的
+    ///
+    /// 把每条结论的 `verify` **真跑一遍**时发现：`rules.rs` 与 `guide.rs` 里
+    /// 有 **14 处 `where XXX`**（`where java` / `where python` / `where cargo` …）。
+    ///
+    /// 而 **`where` 在 PowerShell 里是 `Where-Object` 的别名**——
+    /// 跑 `where python` 会**静默返回空**（不报错）。用户照着自查，
+    /// 看到一片空白，而结论说的是"你有两个 python，只是终端里敲的不是同一个"。
+    ///
+    /// **一条让人怀疑结论的自查，比没有自查更坏。**
+    /// 而"无自查不报错"这条铁律**恰恰是靠这些命令兑现的**——命令坏了，这条线就是空的。
+    ///
+    /// ## 为什么扫源码而不是跑命令
+    ///
+    /// 跑命令要真环境（有没有装 java 都会影响结果），而且慢。
+    /// 这里要守的是**写法**：不许出现 cmd.exe 专有的动词。
+    /// `include_str!` 是编译期内联，零成本。
+    ///
+    /// **已知会漏的**：如果哪天有人在别处再生成一个 `where`，这条抓不到——
+    /// 那时补进来即可。**一条窄的判据比一条放行一切的判据好。**
+    #[test]
+    fn 自查命令不许用_cmd_专有写法() {
+        // cmd.exe 有、而 PowerShell 里**含义完全不同**的动词。
+        // `dir`/`type`/`copy`/`del` 在 PowerShell 里都有等价别名、能用，所以不列。
+        // **只列"静默给出错误答案"的那种**——它们最危险。
+        const CMD_ONLY: &[&str] = &["where ", "findstr ", "xcopy ", "fc "];
+
+        for (name, src) in [
+            ("rules.rs", include_str!("rules.rs")),
+            ("guide.rs", include_str!("guide.rs")),
+        ] {
+            for bad in CMD_ONLY {
+                // 只看"命令位"：`vec!["where ` 或 `verify: "where `
+                let a = format!("vec![\"{bad}");
+                let b = format!("verify: \"{bad}");
+                assert!(
+                    !src.contains(&a) && !src.contains(&b),
+                    "{name} 里还有 cmd.exe 专有写法 `{bad}`——\
+                     在 PowerShell 里它是别的意思（`where` 是 Where-Object），\
+                     会**静默返回空**。改成 PowerShell 原生写法，\
+                     例如 `(Get-Command XXX -All).Source`。"
+                );
+            }
+        }
     }

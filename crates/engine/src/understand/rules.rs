@@ -1,4 +1,4 @@
-use crate::facts::Facts;
+﻿use crate::facts::Facts;
 use crate::state::snapshot;
 
 /// Java：撞得最多的三件事——只有 JRE、JAVA_HOME 指歪、装了多个 JDK 却用错版本。
@@ -13,7 +13,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
             Severity::Error,
             "这是个 Java 项目，但机器上没有 java",
             vec!["PATH 和常见安装位置里都没找到 java.exe".into()],
-            vec!["where java".into(), "java -version".into()],
+            vec!["(Get-Command java -All).Source".into(), "java -version".into()],
             "只在真的没装 Java 时出现",
             "装一个 JDK（不是 JRE）：Adoptium Temurin 或 Oracle 都行，装完重新体检",
             vec![],
@@ -27,7 +27,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
                 "找到 {} 个 java.exe，但没有一个旁边有 javac.exe",
                 j.jdks.len()
             )],
-            vec!["where javac".into()],
+            vec!["(Get-Command javac -All).Source".into()],
             "只运行别人打好的 jar 时，JRE 确实够用",
             "装完整 JDK，并让 JAVA_HOME 指向它——Maven/Gradle 认的是 JAVA_HOME，不是 PATH",
             vec![],
@@ -88,7 +88,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
                     format!("PATH 上第一个：{}", used.java),
                     format!("JAVA_HOME 指向：{}", home_java.display()),
                 ],
-                vec!["where java".into(), "java -version".into()],
+                vec!["(Get-Command java -All).Source".into(), "java -version".into()],
                 "两者主版本相同时不用管",
                 "把 JAVA_HOME 的 bin 放到 PATH 前面，或者统一成同一个 JDK",
                 vec![],
@@ -168,7 +168,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
             Severity::Error,
             "这是个 C/C++ 项目，但机器上没有任何编译器",
             vec!["gcc / g++ / clang / cl 都没找到".into()],
-            vec!["where gcc".into(), "where cl".into()],
+            vec!["(Get-Command gcc -All).Source".into(), "(Get-Command cl -All).Source".into()],
             "只用别人编译好的可执行文件时不需要编译器",
             "最简单是装 MSYS2 或 WinLibs 的 MinGW-w64，装完把 bin 加进 PATH",
             vec![],
@@ -193,7 +193,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
                     .iter()
                     .map(|c| format!("{}（{}）{}", c.id, c.family, c.exe))
                     .collect(),
-                vec!["where gcc".into(), "where cl".into()],
+                vec!["(Get-Command gcc -All).Source".into(), "(Get-Command cl -All).Source".into()],
                 "只用一个构建系统、且它固定用哪一家时，不算问题",
                 "同一个项目里只用一家：三家的目标文件格式和运行库互不通用，混用会报一堆看不懂的链接错误",
                 vec![],
@@ -206,7 +206,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
             Severity::Error,
             "项目用 CMake 组织，但机器上没有 cmake",
             vec!["项目根有 CMakeLists.txt，PATH 里没有 cmake.exe".into()],
-            vec!["where cmake".into()],
+            vec!["(Get-Command cmake -All).Source".into()],
             "只用 Makefile 直接编、不碰 CMake 时不会遇到",
             "装 CMake（官网的 Windows 安装包会顺手配好 PATH）",
             vec![],
@@ -217,7 +217,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
             Severity::Warn,
             "项目里有 Makefile，但机器上没有 make",
             vec!["PATH 里没有 make.exe，也没有 cmake / ninja 可以代劳".into()],
-            vec!["where make".into()],
+            vec!["(Get-Command make -All).Source".into()],
             "Windows 上本来就不带 make，只有装了 MSYS2/MinGW 才有",
             "装 MSYS2 或在 VS 开发者命令行里用 nmake",
             vec![],
@@ -247,7 +247,7 @@ fn r_rust(x: &Facts) -> Vec<Finding> {
             "这是个 Rust 项目，但机器上没有 Rust 工具链",
             // 事实那栏说清"我们查的是哪个可执行文件"——不然用户没法反驳我们。
             vec!["在 PATH 里找 rustc.exe：没找到".into()],
-            vec!["where rustc".into(), "where cargo".into()],
+            vec!["(Get-Command rustc -All).Source".into(), "(Get-Command cargo -All).Source".into()],
             // 成立的区间：只看 rustc 在不在 PATH 上。
             // 用 rustup 装但没进 PATH、或者只装了 cargo 没装 rustc，这里都会报——
             // 而那两种情况确实跑不起来，所以不算误报。
@@ -272,7 +272,7 @@ fn r_web(x: &Facts) -> Vec<Finding> {
             Severity::Error,
             "这是个前端项目，但机器上没有 Node.js",
             vec!["PATH 里没找到 node.exe / npm.cmd".into()],
-            vec!["where node".into(), "where npm".into()],
+            vec!["(Get-Command node -All).Source".into(), "(Get-Command npm -All).Source".into()],
             "只在真的没装 Node 时出现",
             "装 Node.js LTS，装完新开终端",
             vec![],
@@ -670,7 +670,7 @@ fn r_python_missing(x: &Facts) -> Vec<Finding> {
         Severity::Error,
         "没找到可用的 Python 解释器",
         vec!["在 PATH、项目 venv、常见安装位置里都没找到 python.exe".into()],
-        vec!["where python".into(), "python -V".into()],
+        vec!["(Get-Command python -All).Source".into(), "python -V".into()],
         "只在没装 Python 或 PATH 没配好时出现",
         "装一个（推荐 uv：uv python install 3.12），装完重新体检",
         vec!["换目录跑解决不了".into()],
@@ -999,7 +999,7 @@ fn r_path_alias(x: &Facts) -> Vec<Finding> {
             format!("PATH 找到的第一个 python：{}", on_path),
             format!("工具实际用的解释器：{}", x.python.exe),
         ],
-        vec!["where python".into(), "python -c \"import sys; print(sys.executable)\"".into()],
+        vec!["(Get-Command python -All).Source".into(), "python -c \"import sys; print(sys.executable)\"".into()],
         "这是 Windows 应用商店/安装管理器的转发机制，不算坏；但两边的包是两套",
         "在终端里干活时，把这个项目的虚拟环境激活，或者用工具的 run",
         vec!["工具永远用真解释器的绝对路径，所以不受 PATH 影响".into()],

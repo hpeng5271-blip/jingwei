@@ -325,6 +325,44 @@ function checkSweep(fixture) {
       if (sub && /正在读取/.test(sub.text || '')) {
         problems.push('页签巡查：图谱页的状态卡停在初始文案（数据没拉）');
       }
+      // ④ **三种角色真的画出来了**（`框架.md` §4.8）。
+      //    判据不是"有个元素"，而是"那一行里三种角色都点了名、都带数字"——
+      //    否则它可能是一个空的框，看起来在守，其实什么都没说。
+      //
+      //    **但它是三态的**：夹具是个新目录、**还没建过图谱**——那时候
+      //    没有角色可画，图例就必须藏着。把"没数据"当成"没画出来"是
+      //    拿三态当二态用（这一条第一版就是这么错的，门禁当场红）。
+      const roles = (r.items || []).find((i) => i.sel === '#ghRoles');
+      const noGraph = /还没建过图谱/.test((sub && sub.text) || '');
+      if (noGraph) {
+        if (roles && roles.exists && !roles.hidden && roles.rect[2] > 0) {
+          problems.push('页签巡查：还没建过图谱，角色图例却画出来了（那是无中生有）');
+        }
+      } else if (!roles || !roles.exists || roles.hidden || !roles.rect[2]) {
+        problems.push('页签巡查：图谱页角色图例 #ghRoles 没画出来');
+      } else {
+        const rt = roles.text || '';
+        // **两种合法的说法**，别的都不算：
+        //   ① 三种角色都点了名、都带数字（这个项目有跨文件的调用）；
+        //   ② 明说"读不出角色"并且说清为什么（还没有跨文件调用）。
+        // 一个空框或一句"暂无"都不合格——前者看不出坏没坏，后者什么也没说。
+        if (rt.includes('读不出角色')) {
+          if (!/跨文件/.test(rt)) {
+            problems.push('页签巡查：说读不出角色，却没说是为什么');
+          }
+        } else {
+          for (const label of ['入口', '公共底层', '中间层']) {
+            if (!rt.includes(label)) problems.push(`页签巡查：角色图例里没有「${label}」`);
+          }
+          if (!/\d/.test(rt)) {
+            problems.push('页签巡查：角色图例里一个数字都没有（那只是标签，没在说规模）');
+          }
+          // **测试文件不许混进"入口"里**：它们调用一切，出度天然最高。
+          if (!rt.includes('测试')) {
+            problems.push('页签巡查：角色图例没说明「测试不参与判断」——读的人会把测试当成入口');
+          }
+        }
+      }
     }
   }
   // 只有**这一遍真的一条问题都没出**才报 ok。

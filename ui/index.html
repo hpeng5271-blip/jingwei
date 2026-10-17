@@ -396,6 +396,12 @@
       <div class="graph-hud" id="graphHud">
         <div class="gh-row"><b id="ghNodes">—</b> 节点 · <b id="ghEdges">—</b> 边</div>
         <div class="gh-sub" id="ghSub">正在读取…</div>
+        <!-- **一张图要读得出三种角色**（`框架.md` §4.8）。
+             入口 = 出多入少；公共底层 = 入多出少；中间层 = 其余。
+             测试文件**不参与这个判断**（它们调用一切，出度天然最高，
+             会给真入口戴错帽子）——这一行要把它说清，不能混在一起算。
+             判据（界面门禁在守）：这一行真的有数字，四种角色都点了名。 -->
+        <div class="gh-roles" id="ghRoles" hidden></div>
         <div class="gh-btns">
           <button class="btn ghost sm" id="ghIndex">索引一次</button>
           <button class="btn ghost sm" id="ghLive">跟着变</button>

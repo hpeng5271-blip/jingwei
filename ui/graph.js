@@ -115,12 +115,61 @@ function ghWireRuns() {
   ghLoadRuns();
 }
 
+/* ═══ 三种角色（`框架.md` §4.8）═══════════════════════════════════════════
+ *
+ * ## 为什么不是一个"重要性"数字
+ *
+ * 入口（`main.rs` 这类）出多入少，公共底层（`util`／`facts`）入多出少。
+ * 它们的度数可能差不多——**混成一个数字就把方向抹掉了**，
+ * 读图的人会以为"连得多"就是"重要"，然后去找一个什么都不产出的中间层。
+ *
+ * ## 角色是内核算的，这里只上色
+ *
+ * 判据（只算 `calls`、聚到文件、跨文件才算、测试文件除外）在
+ * `graph/store.rs::dump` 里，界面**不做推断**——这一页只负责让人**看见**。
+ *
+ * ## 为什么测试要单独一个颜色
+ *
+ * 测试文件调用一切，出度天然最高。如果不把它们摘出来，
+ * 图上最"热闹"的会是 `*_tests.rs`，而它们什么都不产出。
+ */
+var GROLE = {
+  entry:      { c: '#cc7832', label: '入口' },
+  foundation: { c: '#6897bb', label: '公共底层' },
+  middle:     { c: '#9a8f85', label: '中间层' },
+  test:       { c: '#cfc8bd', label: '测试（不参与判断）' },
+  container:  { c: '#8a7f74', label: '项目' }
+};
+
+/** 把角色计数画成一行。**没数据就藏起来**；有数据但一个角色都没有，要**明说**。 */
+function ghRenderRoles(roles) {
+  var box = $('#ghRoles');
+  if (!box) return;
+  if (!roles) { box.hidden = true; return; }
+  var order = ['entry', 'foundation', 'middle', 'test'];
+  var parts = order.filter(function (k) { return (roles[k] || 0) > 0; }).map(function (k) {
+    return '<span class="gr-role"><i style="background:' + GROLE[k].c + '"></i>'
+      + GROLE[k].label + ' <b>' + roles[k] + '</b></span>';
+  });
+  if (!parts.length) {
+    // **"读不出角色"和"没有角色"是两件事**：一个空框会让人以为是坏的。
+    // 这一页的规矩同三态——说不出话的时候要说清"为什么说不出"。
+    box.hidden = false;
+    box.innerHTML = '<span class="gr-role">这个项目还没有跨文件的调用——'
+      + '读不出角色（不是没有模块，是它们之间还没连上）</span>';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = parts.join('');
+}
+
 async function graphLoad(drawIt) {
   if (!S.root) return;
   const st = unpack(await invoke('graph_stats', { root: S.root }));
   if (st.state !== 'yes') {
     $('#ghNodes').textContent = '—';
     $('#ghEdges').textContent = '—';
+    ghRenderRoles(null);
     // **如实说**：没建过图谱 ≠ 建了但为空。这两句话不一样。
     $('#ghSub').textContent = st.state === 'no' ? '还没建过图谱（点「索引一次」）' : (st.reason || '读不到');
     return;
@@ -135,6 +184,7 @@ async function graphLoad(drawIt) {
   }
   GS.data = dp.data;
   graphBuild();
+  ghRenderRoles(dp.data.roles);
   // 截断要写在界面上——画不全时得能区分"只有这么多"和"被截了"
   $('#ghSub').textContent = dp.data.truncated
     ? '共 ' + dp.data.total_nodes + ' 节点，画了前 ' + dp.data.nodes.length + ' 个（已截断）'
@@ -147,7 +197,8 @@ function graphBuild() {
   GS.nodes = [];
   for (const n of raw.nodes) {
     idx.set(n.id, GS.nodes.length);
-    GS.nodes.push({ id: n.id, kind: n.kind, name: n.name, x: 0, y: 0, vx: 0, vy: 0, deg: 0 });
+    // `role` 是内核算好带下来的（见 store.rs::dump），**这里只存不算**。
+    GS.nodes.push({ id: n.id, kind: n.kind, name: n.name, role: n.role, x: 0, y: 0, vx: 0, vy: 0, deg: 0 });
   }
   GS.edges = [];
   for (const e of raw.edges) {
@@ -194,16 +245,37 @@ function graphDraw() {
     ctx.lineTo(b.x, b.y);
   }
   ctx.stroke();
-  for (const k of ['symbol', 'file', 'project']) {
-    ctx.fillStyle = GCOLOR[k] || '#888';
+  // **按角色上色**：这是这一页新读出来的东西（§4.8）。
+  // 画序也是信息：测试先画（垫底），入口最后画（压在最上面）——
+  // 谁都不该盖住入口。
+  for (const role of ['test', 'middle', 'foundation', 'entry', 'container']) {
+    const paint = GROLE[role];
+    if (!paint) continue;
+    ctx.fillStyle = paint.c;
     ctx.beginPath();
     for (const n of GS.nodes) {
-      if (n.kind !== k) continue;
-      const r = n.deg > 12 ? (k === 'symbol' ? 4 : 9) : (k === 'symbol' ? 2 : 5);
+      if (n.role !== role) continue;
+      const isSym = n.kind === 'symbol';
+      const base = role === 'entry' ? 6 : role === 'foundation' ? 5 : role === 'test' ? 2 : 3;
+      const r = isSym ? Math.max(2, base - 2) : base;
       ctx.moveTo(n.x + r, n.y);
       ctx.arc(n.x, n.y, r, 0, 6.283185307179586);
     }
     ctx.fill();
+  }
+  // 没有角色的节点（理论上不该有）用原来的按种类上色兜底，**别让它们消失**。
+  if (GS.nodes.some(function (n) { return !n.role; })) {
+    for (const k of ['symbol', 'file', 'project']) {
+      ctx.fillStyle = GCOLOR[k] || '#888';
+      ctx.beginPath();
+      for (const n of GS.nodes) {
+        if (n.role || n.kind !== k) continue;
+        const r = n.deg > 12 ? (k === 'symbol' ? 4 : 9) : (k === 'symbol' ? 2 : 5);
+        ctx.moveTo(n.x + r, n.y);
+        ctx.arc(n.x, n.y, r, 0, 6.283185307179586);
+      }
+      ctx.fill();
+    }
   }
   ctx.restore();
 }

@@ -89,6 +89,9 @@ pub mod graph {
     pub mod parse_python;
     pub mod query;
     pub mod resolve;
+    /// 图谱的三种角色（框架.md §4.8）。从 `store::dump` 里拆出来，
+    /// 因为那个文件已经一千行、而这段判据是一块独立的"读懂图"的逻辑。
+    pub mod roles;
     pub mod store;
 }
 

@@ -211,11 +211,16 @@ function stubTauri() {
                 total_nodes: 4,
                 total_edges: 3,
                 truncated: false,
+                // **角色是内核算好带下来的**（store.rs::dump → graph/roles.rs）：
+                // 桩数据要照真形状给，否则界面读不到 role 只是"看起来画了"。
+                roles: { entry: 1, foundation: 1, middle: 0, test: 1 },
                 nodes: [
-                  { id: 'project:', kind: 'project', name: 'demo' },
-                  { id: 'file:src/main.rs', kind: 'file', name: 'main.rs' },
-                  { id: 'symbol:src/main.rs#main', kind: 'symbol', name: 'main' },
-                  { id: 'symbol:src/main.rs#helper', kind: 'symbol', name: 'helper' },
+                  { id: 'project:', kind: 'project', name: 'demo', role: 'container' },
+                  { id: 'file:src/main.rs', kind: 'file', name: 'main.rs', role: 'entry' },
+                  { id: 'symbol:src/main.rs#main', kind: 'symbol', name: 'main', role: 'entry' },
+                  { id: 'symbol:src/main.rs#helper', kind: 'symbol', name: 'helper', role: 'foundation' },
+                  // 测试文件：**有它，才能验「测试不参与判断」那句话真的画得出来**
+                  { id: 'file:src/main_tests.rs', kind: 'file', name: 'main_tests.rs', role: 'test' },
                 ],
                 edges: [
                   { src: 'project:', dst: 'file:src/main.rs', kind: 'contains' },
@@ -575,6 +580,8 @@ try {
       nodes: document.getElementById('ghNodes').textContent,
       edges: document.getElementById('ghEdges').textContent,
       sub: document.getElementById('ghSub').textContent,
+      roles: document.getElementById('ghRoles').textContent,
+      rolesHidden: document.getElementById('ghRoles').hidden,
       painted,
     };
   });
@@ -587,6 +594,22 @@ try {
     '图谱：画布上真的画了东西',
     st.painted > 20,
     '中心区域非背景像素 ' + st.painted + ' 个',
+  );
+
+  // **一张图要读得出三种角色**（框架.md §4.8）。
+  // 判据不是"那行有字"，而是**三种角色都点了名、都带数**——
+  // 只有标签没有数，读的人不知道有几层；只有数没有名字，等于没解释。
+  check(
+    '图谱：三种角色都点了名、都带数',
+    !st.rolesHidden
+      && st.roles.includes('入口') && st.roles.includes('公共底层') && /\d/.test(st.roles),
+    JSON.stringify({ hidden: st.rolesHidden, text: st.roles }),
+  );
+  // **测试文件不参与判断这件事要写在脸上**：读的人会把最热闹的当成入口。
+  check(
+    '图谱：说明测试不参与判断',
+    st.roles.includes('测试'),
+    st.roles,
   );
 
   // 6b. 最近运行：M5 那条链的出口。

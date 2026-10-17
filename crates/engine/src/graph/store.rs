@@ -253,9 +253,13 @@ impl Store {
             .query_row("SELECT count(*) FROM live_edges", [], |r| r.get(0))
             .context("数关系失败")?;
 
+        // 三种角色：判据与实现都在 `graph/roles.rs`（那里注释写清了为什么
+        // 只算 `calls`、为什么要聚到文件、为什么测试文件不参与）。
+        let roles = super::roles::annotate(&mut nodes, &edges);
         Ok(serde_json::json!({
             "nodes": nodes,
             "edges": edges,
+            "roles": roles,
             "total_nodes": total_nodes,
             "total_edges": total_edges,
             "truncated": (nodes.len() as i64) < total_nodes || (edges.len() as i64) < total_edges,

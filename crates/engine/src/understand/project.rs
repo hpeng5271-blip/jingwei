@@ -1171,7 +1171,7 @@ fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: b
     for r in &reqs {
         if let Some(t) = read_text(&root.join(&r.path)) {
             let (total, pinned) = requirements_stats(&t);
-            if total >= 3 && pinned * 2 < total {
+            if total >= 2 && pinned * 2 < total {
                 out.push(it(
                     "py-unpinned",
                     Severity::Info,

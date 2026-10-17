@@ -686,3 +686,35 @@ use super::*;
         assert!(!has(&s, "docker-no-ignore"));
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    /// **2 条不钉版本的依赖也要提**（2026-10-17 把阈值从 3 降到 2）。
+    ///
+    /// 为什么降：两条 `>=` 依赖，明天就可能装出不同东西——那就是不可复现。
+    /// 原来 `total >= 3` 把这种情况整个放过了。
+    ///
+    /// **保留"过半"判据**：2 条里只 1 条不钉，不算问题（那可能是刻意的）。
+    #[test]
+    fn 两条依赖都不钉版本也要提() {
+        let d = scratch("thr-2of2");
+        std::fs::write(d.join("requirements.txt"), "a>=1\nb>=2\n").unwrap();
+        std::fs::write(d.join("main.py"), "x=1\n").unwrap();
+        let s = crate::project::scan(&d);
+        assert!(
+            s.items.iter().any(|i| i.id == "py-unpinned"),
+            "2 条全不钉版本该报：{:?}",
+            s.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+        );
+    }
+
+    /// 反过来：2 条里只 1 条不钉，**不算问题**。
+    #[test]
+    fn 两条依赖只一条不钉就不报() {
+        let d = scratch("thr-1of2");
+        std::fs::write(d.join("requirements.txt"), "a==1.0\nb>=2\n").unwrap();
+        std::fs::write(d.join("main.py"), "x=1\n").unwrap();
+        let s = crate::project::scan(&d);
+        assert!(
+            !s.items.iter().any(|i| i.id == "py-unpinned"),
+            "2 条里只 1 条不钉不该报",
+        );
+    }

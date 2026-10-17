@@ -20,14 +20,32 @@
 // 它抓不到"承诺了不存在的界面"那类语义问题——**那类只能靠人读**（第 22 轮就是这么发现的）。
 // 这条检查的作用是保证"文档里的链接不会烂"，仅此而已，注释里也不冒充更多。
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = join(HERE, '..');
 
-/// 扫哪几份文档的链接。`使用说明.md` 也会打包进发行版，所以它也算。
-const DOCS = ['README.md', 'AGENTS.md', '使用说明.md', '总稿.md', '演示脚本.md'];
+/// 扫哪几份文档的链接。
+///
+/// **自动发现根目录所有 `.md`，不写死清单**（2026-10-17 改）。
+/// 原来是一个 5 项常量，而根目录有 11 份——**清单写死必然漂移**，
+/// 这个仓库为此付过好几次账（跳过目录清单写了三遍、项目标记判据写了两份）。
+/// 多一份文档就多一份覆盖，不需要谁记得改这里。
+///
+/// 上一轮我改过一次、失败了：拼接脚本没替换到 import 行，
+/// `readdirSync` 不在作用域 → 抛异常 → 走进 `catch` 退回 `['README.md']`，
+/// 门禁报「只读到 1 份文档……判据失效」。**先看 import 再改，是那一轮的教训。**
+const DOCS = (() => {
+  try {
+    const all = readdirSync(ROOT_DIR).filter((f) => f.endsWith('.md')).sort();
+    // 至少要有一份，否则说明根目录读错了——让判据自己报"失效"，别静默通过
+    return all.length > 0 ? all : ['README.md'];
+  } catch {
+    return ['README.md'];
+  }
+})();
 
 export function checkDocLinks(root, docs = DOCS) {
   const problems = [];

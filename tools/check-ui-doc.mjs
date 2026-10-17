@@ -90,6 +90,25 @@ export function tabsFromDoc(md) {
   return { names, declared };
 }
 
+// README 那一份也查（2026-10-17 加）。
+//
+// **为什么**：README 写着「界面上的六个页面」并列了六个，**漏了图谱页**——
+// 而它是仓库门面、也是最能说明"这是什么工具"的那一页。门禁当时没抓到，
+// 因为它只核对《使用说明.md》。**覆盖面是"按文档逐个加的"，这本身是个洞。**
+//
+// README 那一节不是表格，是行内加粗：`**概览**（…）· **运行**（…）`。
+// 判据与说明书那半边一样：**标题声明的页数 = 代码页数**，且**每页都被点到**。
+export function tabsFromReadme(md) {
+  const m = md.match(/^##\s*界面上的\s*([零一二三四五六七八九十\d]+)\s*个页面[^\n]*\n([\s\S]*?)(?=^##\s|\Z)/m);
+  if (!m) return null;
+  const cn = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  const w = m[1];
+  const declared = /^\d+$/.test(w) ? Number(w) : (cn[w] ?? null);
+  const names = [];
+  for (const mm of m[2].matchAll(/\*\*([^*\n+]{1,20})\*\*/g)) names.push(mm[1].trim());
+  return { names, declared };
+}
+
 /// 跑一遍判据，返回 `{ problems, pages }`。**不自己打印、不自己退出**——
 /// 这样 `gate.mjs` 才能把它和其它工程门禁合在一起报（与 `check-docs` 同一个接口形状）。
 export function checkUiDoc(root = ROOT) {
@@ -149,6 +168,29 @@ export function checkUiDoc(root = ROOT) {
       );
     }
   }
+  // ④ README 那一份（同一套判据：页数对得上、每页都点到）
+  const readmePath = join(root, "README.md");
+  if (!existsSync(readmePath)) {
+    problems.push("README.md 不见了——判据失效");
+  } else {
+    const rd = tabsFromReadme(readFileSync(readmePath, "utf8"));
+    if (!rd) {
+      problems.push("读不出 README 里「界面上的 N 个页面」那一节——判据失效，不许当成没什么可查而通过");
+    } else {
+      if (rd.declared === null) {
+        problems.push("README 的标题里读不出页数（形如「界面上的七个页面」）——判据失效");
+      } else if (rd.declared !== tabs.length) {
+        problems.push(`README 标题写「${rd.declared} 个页面」，而代码里有 ${tabs.length} 页`);
+      }
+      for (const k of tabs) {
+        const lbl = labels[k];
+        if (lbl && !rd.names.includes(lbl)) {
+          problems.push(`界面上有「${lbl}」这一页，而 README 的页面那段一个字都没提——门面里没有它`);
+        }
+      }
+    }
+  }
+
   return { problems, pages: tabs.length };
 }
 

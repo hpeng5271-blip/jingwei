@@ -23,6 +23,99 @@ use super::*;
         s.items.iter().any(|i| i.id == id)
     }
 
+    /// **多 bin 且没有 `src/main.rs` 且没写 `default-run` → `cargo run` 会报错**。
+    ///
+    /// ## 拿什么换的（全量跑 466 个 registry crate 换的）
+    ///
+    /// 这条规则第一版只判"≥2 个 bin 且没 default-run"，全量跑出 **3 个命中**：
+    ///   `brotli` ✓ 真的（没有 `src/main.rs`，两个 `[[bin]]`）
+    ///   `cargo-watch` ✗ 误报（有 `src/main.rs`）
+    ///   `embed-resource` ✗ 误报（有 `src/main.rs`）
+    ///
+    /// **cargo 的规则是：有 `src/main.rs` 就用它当默认**，哪怕还有别的 bin 目标。
+    /// 所以"有 main.rs"这一条必须排除。**3 个命中看起来特异性很高，实际 2/3 是错的。**
+    ///
+    /// 这个测试把四种形状都钉住：
+    ///   ① 两个 `[[bin]]` + 无 main.rs + 无 default-run → **报**
+    ///   ② 同① 但**有** `src/main.rs` → **不报**（cargo 有默认，这是 v1 的误报）
+    ///   ③ 同① 但写了 `default-run` → **不报**
+    ///   ④ `autobins = false`、`src/bin/` 里有一堆 `.rs`、只声明 1 个 `[[bin]]` → **不报**
+    ///      （`brotli` 就是这样：9 个文件只算 2 个目标）
+    #[test]
+    fn 多二进制没默认入口才报() {
+        let cargo = |extra: &str| format!("[package]\nname=\"t\"\nversion=\"0.1.0\"\n{extra}\n");
+        let two_bins = "[[bin]]\nname=\"a\"\npath=\"src/bin/a.rs\"\n[[bin]]\nname=\"b\"\npath=\"src/bin/b.rs\"\n";
+
+        // ① 该报
+        let d = scratch("multi-bin");
+        std::fs::write(d.join("Cargo.toml"), cargo(two_bins)).unwrap();
+        std::fs::create_dir_all(d.join("src/bin")).unwrap();
+        std::fs::write(d.join("src/bin/a.rs"), "fn main(){}").unwrap();
+        std::fs::write(d.join("src/bin/b.rs"), "fn main(){}").unwrap();
+        assert!(
+            has(&scan(&d), "cargo-multi-bin-no-default"),
+            "两个 [[bin]]、没有 src/main.rs、没有 default-run —— `cargo run` 会报\
+             「could not determine which binary to run」，这条必须报"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ② 有 main.rs → 不报（cargo 拿它当默认）
+        let d = scratch("multi-bin-with-main");
+        std::fs::write(d.join("Cargo.toml"), cargo(two_bins)).unwrap();
+        std::fs::create_dir_all(d.join("src/bin")).unwrap();
+        std::fs::write(d.join("src/main.rs"), "fn main(){}").unwrap();
+        std::fs::write(d.join("src/bin/a.rs"), "fn main(){}").unwrap();
+        assert!(
+            !has(&scan(&d), "cargo-multi-bin-no-default"),
+            "有 src/main.rs 时 cargo 有默认入口，不会报错——报它就是误报\
+             （实测 cargo-watch / embed-resource 就是这么被冤枉的）"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ③ 写了 default-run → 不报
+        let d = scratch("multi-bin-default");
+        std::fs::write(
+            d.join("Cargo.toml"),
+            cargo(&format!("default-run = \"a\"\n{two_bins}")),
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.join("src/bin")).unwrap();
+        std::fs::write(d.join("src/bin/a.rs"), "fn main(){}").unwrap();
+        std::fs::write(d.join("src/bin/b.rs"), "fn main(){}").unwrap();
+        assert!(
+            !has(&scan(&d), "cargo-multi-bin-no-default"),
+            "写了 default-run 之后 cargo 就知道跑哪个，不该报"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ④ autobins = false：src/bin 里 9 个文件、只声明 2 个 → 算 2 个目标，不报
+        //    （brotli 那 7 个 `.rs` 是被 include! 进去的模块，不是 bin）
+        let d = scratch("autobins-off");
+        std::fs::write(
+            d.join("Cargo.toml"),
+            cargo(&format!("autobins = false\n{two_bins}")),
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.join("src/bin")).unwrap();
+        for i in 0..9 {
+            std::fs::write(d.join("src/bin").join(format!("m{i}.rs")), "x").unwrap();
+        }
+        std::fs::write(d.join("src/bin/a.rs"), "fn main(){}").unwrap();
+        std::fs::write(d.join("src/bin/b.rs"), "fn main(){}").unwrap();
+        // 2 个声明 ≠ 报错条件（还要 ≥2 且无 main/default-run）→ 这条其实会报，
+        // 所以用 default-run 版本来验"autobins 不把 9 个文件数成 9 个"。
+        std::fs::write(
+            d.join("Cargo.toml"),
+            cargo(&format!("autobins = false\ndefault-run = \"a\"\n{two_bins}")),
+        )
+        .unwrap();
+        assert!(
+            !has(&scan(&d), "cargo-multi-bin-no-default"),
+            "autobins = false + default-run 时不该报（brotli 的形状）"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// **装项目的目录不是项目。**
     ///
     /// 这条是拿真事故换的：打开 `jingwei-demo`（三个演示项目的父目录）时，

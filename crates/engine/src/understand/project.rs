@@ -1,4 +1,4 @@
-﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -1367,19 +1367,72 @@ fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: b
     }
 
     // ── Rust / Go / C++ ──
-    if has("rust") && root.join("src").join("main.rs").exists() && !root.join("Cargo.lock").exists() {
+    //
+    // **"这是个能跑的程序"不只是 `src/main.rs`**（2026-10-17 改，全量跑 466 个
+    // registry crate 之后才看清）：cargo 的 bin 目标有三种来源——
+    //   · `src/main.rs`（默认 bin）
+    //   · `[[bin]]` 声明（`path` 可以指到任何地方，比如 `brotli` 指 `src/bin/brotli.rs`）
+    //   · `src/bin/*.rs`（目录约定，一个文件一个 bin）
+    // 原来只认第一种，于是**只有 `[[bin]]` 的 crate 全漏了**。
+    //
+    // 实测（466 个真 crate）：**有 bin 的 11 个全都提交了 Cargo.lock**，
+    // 而 90 个纯库没有——**正好符合 cargo 的规范**（库不提交 lock，应用要提交）。
+    // 所以判据方向是对的，只是"怎么算应用"窄了。
+    let bin_targets = crate::understand::rustbins::rust_bin_targets(root);
+    if has("rust") && bin_targets >= 1 && !root.join("Cargo.lock").exists() {
         out.push(it(
             "cargo-lock-missing",
             Severity::Info,
             G_DEPS,
             "可执行程序没有 Cargo.lock",
             vec![
-                "src/main.rs 说明这是个能跑的程序，而程序应该提交 Cargo.lock".into(),
+                format!(
+                    "这个 crate 有 {bin_targets} 个二进制目标（src/main.rs / [[bin]] / src/bin/），\
+                     而程序应该提交 Cargo.lock"
+                ),
                 "不提交的话，别人 cargo build 出来的依赖版本和你不一样".into(),
             ],
             vec!["Test-Path Cargo.lock".into()],
             "纯库（只有 src/lib.rs）按惯例不提交 Cargo.lock，那时别管这条。",
             "跑一次 cargo build，然后提交生成的 Cargo.lock。",
+        ));
+    }
+    // **多个二进制、又没有 `src/main.rs`、又没写 `default-run`**：`cargo run` 会**直接报错**。
+    //
+    // ## 三个条件缺一不可（2026-10-17，第一版漏了中间那条，误报 2 个）
+    //
+    // cargo 的规则是：**有 `src/main.rs` 就用它当默认**，哪怕还有别的 bin 目标。
+    // 只有"**没有 main.rs** 且 ≥2 个 bin 且没写 default-run"时 `cargo run` 才真的报
+    // 「could not determine which binary to run. Use the `--bin` option」。
+    //
+    // 第一版只判"≥2 个 bin 且没 default-run"，全量 466 个真 crate 跑出 **3 个命中**，
+    // 其中 **2 个是误报**（`cargo-watch` / `embed-resource` 都有 `src/main.rs`）。
+    // **只有 `brotli-9.0.0` 是真的**（没有 `src/main.rs`，两个 `[[bin]]`）。
+    //
+    // 教训：**规则写完必须拿真数据全量跑一遍、看命中名单**——
+    // "3 个命中"看起来特异性很高，实际 2/3 是错的。
+    if has("rust")
+        && bin_targets >= 2
+        && !root.join("src").join("main.rs").exists()
+        && !crate::understand::rustbins::cargo_toml_has(root, "default-run")
+    {
+        out.push(it(
+            "cargo-multi-bin-no-default",
+            Severity::Info,
+            G_HABIT,
+            format!("有 {bin_targets} 个二进制目标，但没有 default-run"),
+            vec![format!(
+                "src/main.rs / [[bin]] / src/bin/ 加起来有 {bin_targets} 个二进制，\
+                 而 Cargo.toml 里没有 `default-run`"
+            )],
+            vec![
+                "Select-String -Path Cargo.toml -Pattern 'default-run'".into(),
+                "cargo run".into(),
+            ],
+            // 成立的区间：确实有多个 bin、且没写 `default-run`。
+            // 写了之后 `cargo run` 就知道跑哪个。
+            "你一直用 `cargo run --bin <名字>` 时，这条对你没有意义。",
+            "在 Cargo.toml 的 `[package]` 里加一行 `default-run = \"<主那个的名字>\"`",
         ));
     }
     if has("go") && !root.join("go.sum").exists() {

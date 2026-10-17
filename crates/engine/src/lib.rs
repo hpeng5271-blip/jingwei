@@ -1,4 +1,4 @@
-//! jingwei 引擎：全部逻辑在这里，不依赖任何 GUI。
+﻿//! jingwei 引擎：全部逻辑在这里，不依赖任何 GUI。
 //!
 //! 对外唯一接口是 JSON（facts / findings / plan），所以壳（CLI / Tauri）可以随便换。
 //!
@@ -73,6 +73,8 @@ pub mod understand {
     pub mod project;
     pub mod projects;
     pub mod rules;
+    /// **cargo 的二进制目标数与 Cargo.toml 键**——见那个文件的头。
+    pub mod rustbins;
 }
 
 /// L4 · 图谱：存与查。`store` 是库、`parse` 是解析、`imports` 是 `use` 的字符串展开、

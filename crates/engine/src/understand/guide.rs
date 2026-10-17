@@ -229,7 +229,19 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
         unknown_why.what_to_do()
     };
 
-    let next_step = if !blockers.is_empty() {
+    // **"不是一个项目"要排在所有分支之前**（2026-10-17）。
+    //
+    // 这一条是"同一个洞的第二个消费点"：上一段把 headline 与 `whatToDo` 修成了
+    // 「这个问题对它不适用」，而**下一步还在说「补一份契约」**——
+    // 同一个屏幕上，头说"不适用"、尾说"你去补"，仍然是自相矛盾。
+    //
+    // 判据：`not_a_project` 一旦成立，**后面每一条"该做什么"都是错的**，
+    // 因为它们全都按"这是一个项目"的口径写。所以它必须最先分流。
+    let next_step = if not_a_project {
+        // 不是一个项目：**不要让他去补任何东西**。
+        "不用做什么——这里不是一个项目（想管它这个目录，就把根指到真正含标记文件的那一层）"
+            .to_string()
+    } else if !blockers.is_empty() {
         let b = &blockers[0];
         if b.fix.is_empty() {
             b.verify.clone()

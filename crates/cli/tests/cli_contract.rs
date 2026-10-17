@@ -266,3 +266,95 @@ fn 夹具目录是可用的() {
     assert!(d.is_dir());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **目录不存在时，三个出口必须说同一件事、给同一个退出码**（2026-10-17）。
+///
+/// ## 拿什么换的
+///
+/// 拿边界输入跑出来的：对一个**拼错的路径**——
+///   `guide`  → 「补上就能判断」（退出码 **2**）
+///   `doctor` → 「问题 共 3 条（0 错误）……」 → **退出码 0**！
+///   `audit`  → 又是另一种（退出码 2）
+///
+/// **`doctor` 退出 0 是最坏的**：脚本靠退出码决定要不要拦下来，
+/// 而它对一个不存在的目录说"一切正常"。
+///
+/// ## 为什么是 `1` 而不是 `2`
+///
+/// `介绍.md` 的约定：**`1` = 跑不起来（他的问题）**、`2` = 查不了（我们的问题）。
+/// 路径拼错是**他的问题**——不是我们读不到。所以 `1`，
+/// **不需要发明第四种退出码**。
+///
+/// 三个断言分开钉：同一个码 / 那个码是 1 / 输出里说"不存在"。
+#[test]
+fn 目录不存在时三个出口说同一件事() {
+    let d = empty_dir("missing-probe");
+    let ghost = d.join("no-such-dir");
+    assert!(!ghost.exists());
+
+    for cmd in ["guide", "doctor", "audit"] {
+        let o = run(&[cmd, "--root", ghost.to_str().unwrap()]);
+        let c = code(&o);
+        let out = format!("{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+        assert_eq!(
+            c, 1,
+            "{cmd} 对不存在的目录该退 1（他的问题），实际 {c}——\
+             出口不一致，脚本就没法决定要不要拦下来。输出：{out}"
+        );
+        assert!(
+            out.contains("不存在"),
+            "{cmd} 要说清「这个目录不存在」，实际输出：{out}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **"不是一个项目"时，`--json` 与文字输出必须说同一件事**（2026-10-17）。
+///
+/// ## 拿什么换的
+///
+/// 上一轮给 `guide` 加了 `what_to_do`（引擎知道场合时自己给一句话），
+/// 而 `cmd_guide` 的文字渲染**直接读 `unknown_why.what_to_do()`，把那个字段绕过去了**：
+/// `--json` 说「这里不像一个项目」，文字还在说「缺一样你这边的东西 / 补上就能判断」。
+///
+/// 而且 `nextStep` 也跟着错：头说"不适用"、尾说"你去补一份契约"——**同一屏自相矛盾**。
+#[test]
+fn 不是项目时json与文字说同一件事() {
+    let d = empty_dir("not-a-project");
+    std::fs::write(d.join("x.py"), "").unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    let j = run(&["guide", "--root", &p, "--json"]);
+    let jv: serde_json::Value =
+        serde_json::from_str(&stdout(&j)).expect("guide --json 该是合法 JSON");
+    let json_says = jv["ready"]["whatToDo"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let json_next = jv["nextStep"].as_str().unwrap_or_default().to_string();
+
+    let t = run(&["guide", "--root", &p]);
+    let text = stdout(&t);
+
+    assert!(
+        json_says.contains("不像一个项目"),
+        "json 该说出'不像一个项目'（引擎的表态），实际：{json_says}"
+    );
+    // ① 文字里要有**同一句话**——不许各说各的
+    assert!(
+        text.contains("不像一个项目"),
+        "文字输出里没有那句'不像一个项目'：{text}"
+    );
+    // ② 不许再说"缺一样你这边的东西"（那是"你少给了什么"的口径，对象不对）
+    assert!(
+        !text.contains("缺一样你这边的东西"),
+        "既然不是项目，就不许说'你缺东西'——那是按项目口径写的：{text}"
+    );
+    // ③ 下一步不许让他去补契约（头说"不适用"、尾说"你去补"＝同一屏自相矛盾）
+    assert!(
+        json_next.contains("不用做什么"),
+        "不是一个项目时，下一步该是'不用做什么'，实际：{json_next}"
+    );
+
+    let _ = std::fs::remove_dir_all(&d);
+}

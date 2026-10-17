@@ -76,17 +76,39 @@ fn render(g: &Guide, has_prev: bool) {
         // **"查不了"要说清是谁的**——两种情况的说法必须不同，
         // 因为用户能做的事完全不同（一种是"你补上"，一种是"不怪你"）。
         // 原来这一支只有一句"还查不出来能不能跑"，把那两件事混成了一件。
-        Verdict::Unknown => match g.unknown_why {
-            jingwei_engine::Unknown::TheirGap => "还查不出来——缺一样你这边的东西",
-            jingwei_engine::Unknown::OurGap => "还查不出来——是我们没查到，不怪你",
-            jingwei_engine::Unknown::Unclear => "还查不出来能不能跑",
-        },
+        Verdict::Unknown => {
+            // **但还有一种情况：这个问题对它压根不适用**（2026-10-17）。
+            //
+            // 拿空目录 / `site-packages` 里的库跑 `guide` 时抓到的：
+            // `--json` 已经会说「这里不像一个项目——所以「能不能跑」对它不适用」，
+            // 而**文字输出还在说「缺一样你这边的东西」**——
+            // **同一个事实，两个出口说的不一样**（这是这个仓库的第 N 次）。
+            //
+            // 判据：引擎给了 `what_to_do`（那意味着它**知道场合**，见 `Guide` 的注释），
+            // 就说明这问题不是"缺东西"，而是"**问错了对象**"。
+            if g.what_to_do.is_some() {
+                "这个问题对它不适用"
+            } else {
+                match g.unknown_why {
+                    jingwei_engine::Unknown::TheirGap => "还查不出来——缺一样你这边的东西",
+                    jingwei_engine::Unknown::OurGap => "还查不出来——是我们没查到，不怪你",
+                    jingwei_engine::Unknown::Unclear => "还查不出来能不能跑",
+                }
+            }
+        }
     };
     println!("  {} {}", c(tone, mark), c(BOLD, word));
     println!("    {}", c(DIM, &g.what));
     // 未知时**多给一行"该做什么"**：只说"查不了"等于把问题丢回给用户。
     if matches!(g.ready, Verdict::Unknown) {
-        println!("    {}", c(DIM, g.unknown_why.what_to_do()));
+        // **优先用引擎给的那句话**（它知道场合），没有再退回类型的通用说法。
+        // 原来这里直接读 `g.unknown_why.what_to_do()`，把 `Guide` 上那个
+        // 更具体的 `what_to_do` **整个绕过去了**——`--json` 与文字两套话。
+        let line = g
+            .what_to_do
+            .clone()
+            .unwrap_or_else(|| g.unknown_why.what_to_do().to_string());
+        println!("    {}", c(DIM, &line));
     }
     println!();
 
@@ -109,7 +131,19 @@ fn render(g: &Guide, has_prev: bool) {
     } else if !has_prev {
         // 没挡路的、也没跑过 —— 那"跑一次"就是唯一能给出确定答案的路。
         println!("  {}", c(BOLD, "下一步"));
-        println!("    {} {}", c(GREEN, &g.next_step), c(DIM, "（跑一次就知道它到底行不行）"));
+        // **那句话只对"给出来的是命令"成立**（2026-10-17）。
+        // 「不用做什么——这里不是一个项目」后面再缀"跑一次就知道"就是自相矛盾：
+        // 它本来就不是个能跑的东西。所以按内容决定缀不缀。
+        let is_command = g.what_to_do.is_none();
+        if is_command {
+            println!(
+                "    {} {}",
+                c(GREEN, &g.next_step),
+                c(DIM, "（跑一次就知道它到底行不行）")
+            );
+        } else {
+            println!("    {}", c(DIM, &g.next_step));
+        }
         println!();
     }
 

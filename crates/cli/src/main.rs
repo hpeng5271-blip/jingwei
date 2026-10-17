@@ -236,6 +236,75 @@ fn run() -> i32 {
     }
 
     let root = strip_verbatim(root.canonicalize().unwrap_or(root));
+
+    // **前置条件：这个目录得真的存在**（2026-10-17）。
+    //
+    // ## 抓到的现象（拿边界输入跑出来的）
+    //
+    // 对一个**拼错的路径**，三个出口给了三个不同答案：
+    //   `guide`  → 「补上就能判断」（退出码 **2**）
+    //   `doctor` → 「问题 共 3 条（0 错误）…… 这个项目还没有契约」（退出码 **0**！）
+    //   `audit`  → 又是另一种（退出码 2）
+    //
+    // **`doctor` 退出 0 是最坏的**：脚本靠退出码决定要不要拦下来，
+    // 而它对一个不存在的目录说"一切正常"。
+    //
+    // ## 为什么归 `1` 而不归 `2`
+    //
+    // `介绍.md` 的约定：**`1` = 跑不起来（他的问题）**、`2` = 查不了（我们的问题）。
+    // 路径拼错是**他的问题**——不是我们读不到（那才是 2）。
+    // 所以是 `1`，**不需要发明第四种退出码**。
+    //
+    // ## 为什么只对一部分命令检查
+    //
+    // `new` 是**创建**项目的（目录本来就该不存在）；
+    // `scan` / `clean` / `spec` / `envs` 是**机器级**的，`--root` 对它们没意义。
+    // 别的命令都要读一个已存在的项目——对它们说"目录不存在"**有信息量**，
+    // 而继续往下跑只会给出**看起来正常、其实全是空的**结论。
+    let needs_existing = matches!(
+        cmd.as_str(),
+        "guide"
+            | "howto"
+            | "inspect"
+            | "doctor"
+            | "check"
+            | "audit"
+            | "fix"
+            | "whatschanged"
+            | "run"
+            | "test"
+            | "env"
+            | "note"
+            | "notes"
+            | "log"
+            | "web"
+            | "snap"
+            | "graph"
+            | "index"
+            | "init"
+    );
+    if needs_existing && !root.is_dir() {
+        let why = format!("这个目录不存在：{}", root.display());
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "state": "no",
+                    "reason": why,
+                    "why": "their_gap",
+                    "fix": "确认路径拼写；或者在项目列表里点一个"
+                })
+            );
+        } else {
+            println!();
+            println!("  {} {}", c(RED, "✗"), why);
+            println!("    {}", c(DIM, "确认路径拼写；或者在项目列表里点一个"));
+            println!();
+        }
+        // 退出码 1：**他的问题**（路径不对），不是"我们查不了"（那是 2）
+        return 1;
+    }
+
     match cmd.as_str() {
         "" | "help" => help(),
         // `inspect` 是 `使用说明.md` 承诺过的入口（"看项目：结论、待处理项"），

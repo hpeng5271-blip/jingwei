@@ -54,8 +54,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->335<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
-+ 集成 <!-- fact:integration -->44<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
+单元与集成测试（<!-- fact:tests_total -->337<!-- /fact --> 条：engine <!-- fact:engine_unit -->273<!-- /fact -->
++ 集成 <!-- fact:integration -->46<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。
@@ -183,6 +183,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   因为那些测试验的是树、编辑器、图谱，**没人盯这两张卡是否自洽**。
   修法不是改成 `d.counts.error`，而是**直接用要显示的那个数组**（`todo.length`）：
   数字与"有没有"这句话**必须同一个来源**。门禁：外壳测试两条断言，负向验证过。
+- **拼错的路径，三个出口三个答案**（2026-10-17，拿边界输入跑出来的）：
+  `guide` →「补上就能判断」退 2；`doctor` →「问题 3 条（0 错误）…… 这个项目还没有契约」退 **0**；
+  `audit` → 又是另一种退 2。**`doctor` 退 0 是最坏的**：脚本靠退出码决定要不要拦，
+  而它对一个不存在的目录说"一切正常"。
+  修法：在 `main.rs` 唯一收口点加前置条件（`new`/`scan`/`clean`/`spec`/`envs` 除外），
+  **退 1（他的问题）**——`介绍.md` 的约定里 `1` 就是"跑不起来（他的问题）"，
+  路径拼错不是"我们查不了"，**不需要发明第四种码**。
+  门禁：`目录不存在时三个出口说同一件事`（三命令同码 / 码是 1 / 输出说"不存在"），负向验证过。
+- **`--json` 说对了、文字还说老话**（2026-10-17，同一个病的第 N 次）：
+  上一轮给 `guide` 加了 `what_to_do` 覆盖字段，而 `cmd_guide` 的文字渲染
+  **直接读 `unknown_why.what_to_do()`，把那个字段整个绕过去了**。
+  于是 json 说「这里不像一个项目」，文字说「缺一样你这边的东西 / 补上就能判断」。
+  而且 `nextStep` 也错：头说"不适用"、尾说"你去补一份契约"——**同一屏自相矛盾**。
+  修法：文字优先用 `g.what_to_do`；`not_a_project` 排到 `next_step` 的最前一支；
+  非命令的 nextStep 不再缀"（跑一次就知道）"。
+  门禁：`不是项目时json与文字说同一件事`（三条断言），负向验证过。
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。
 

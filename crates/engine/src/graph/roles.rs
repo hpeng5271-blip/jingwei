@@ -249,6 +249,7 @@ pub fn dir_roles(nodes: &[Value], edges: &[Value]) -> Value {
     }
     let mut entry: Vec<&(&str, i64, i64)> = all.iter().filter(|(_, o, i)| classify(*o, *i) == "entry").collect();
     let mut found: Vec<&(&str, i64, i64)> = all.iter().filter(|(_, o, i)| classify(*o, *i) == "foundation").collect();
+    let middle: Vec<&(&str, i64, i64)> = all.iter().filter(|(_, o, i)| classify(*o, *i) == "middle").collect();
     // 排序：出度大的入口在前；入度大的底层在前。**同值时按名字**，结果才稳定可测。
     entry.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     found.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(b.0)));
@@ -263,11 +264,16 @@ pub fn dir_roles(nodes: &[Value], edges: &[Value]) -> Value {
     // 而这里只放前三名——`total` 是"全部目录"的个数，
     // 读的人**推不出"入口还有第 4 个没显示"**。那又是把"没显示"当成"没有"。
     // 所以每一层各给一个"一共几个"，让界面能说"共 4 个，显示前 3"。
+    // **中间层也要有个数**（2026-10-17 补）：界面原来只列入口与公共底层，
+    // 13 个目录里只提了 5 个——**剩下 7 个中间层目录一个字都没说**，
+    // 读的人会以为"目录只有两类"。这里**只给个数，不给名字**：
+    // 名字那一半会撑爆那一行，而"还有 7 个"这件事必须交代。
     serde_json::json!({
         "entry": pick(&entry),
         "foundation": pick(&found),
         "entryTotal": entry.len(),
         "foundationTotal": found.len(),
+        "middleTotal": middle.len(),
         "total": all.len(),
     })
 }
@@ -403,6 +409,26 @@ mod tests {
         let shown = r["entry"].as_array().map(|a| a.len()).unwrap_or(0);
         assert_eq!(shown, 3, "只显示前三名：{r}");
         assert_eq!(r["entryTotal"], 4, "但要说出「一共 4 个」：{r}");
+    }
+
+    /// **中间层目录也要有个数**（2026-10-17 加）：界面只列入口与底层，
+    /// 那 13 个目录里有 7 个中间层——**一个字都不说，读的人会以为目录只有两类**。
+    #[test]
+    fn 中间层目录也要有个数() {
+        let nodes = vec![
+            node("file:a/x.rs", "file", None),
+            node("file:b/y.rs", "file", None),
+            node("symbol:a/x.rs#f", "symbol", Some("a/x.rs")),
+            node("symbol:b/y.rs#g", "symbol", Some("b/y.rs")),
+        ];
+        // 各 1 条，两个方向都不极端 → 两个都是中间层
+        let edges = vec![json!({
+            "src": "symbol:a/x.rs#f", "dst": "symbol:b/y.rs#g", "kind": "calls"
+        })];
+        let j = dir_roles(&nodes, &edges);
+        assert_eq!(j["middleTotal"], 2, "两个目录都是中间层：{j}");
+        assert_eq!(j["entryTotal"], 0);
+        assert_eq!(j["foundationTotal"], 0);
     }
 
     /// **同一个目录内部互调不算**：它不说明模块之间谁在用谁。

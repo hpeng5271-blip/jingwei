@@ -219,6 +219,13 @@ function ghRenderDirs(dirs) {
   };
   mk('入口', GROLE.entry.c, dirs.entry, 'out', dirs.entryTotal);
   mk('公共底层', GROLE.foundation.c, dirs.foundation, 'in', dirs.foundationTotal);
+  // **中间层只报个数**（2026-10-17 加）：13 个目录里 7 个是中间层，
+  // 原来一个字都不说，读的人会以为"目录只有两类"。
+  // 名字那一半会撑爆这一行，所以**只给数**——交代"还有几个"，不交代"是哪几个"。
+  if (dirs.middleTotal > 0) {
+    groups.push('<span class="gr-role"><i style="background:' + GROLE.middle.c + '"></i>'
+      + '中间层 ' + dirs.middleTotal + ' 个目录</span>');
+  }
   if (!groups.length) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = groups.join('');

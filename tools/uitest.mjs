@@ -225,6 +225,7 @@ function stubTauri() {
                   ],
                   foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }],
                   entryTotal: 4,
+                  middleTotal: 7,
                   foundationTotal: 1,
                   total: 5,
                 },
@@ -685,6 +686,13 @@ try {
   );
   // **截断不许静默**（2026-10-17 加）：入口目录一共 4 个、只画前三名，
   // 界面必须说出「共 4 个」——否则读的人以为入口就这三个。
+  // **中间层目录也要报个数**（2026-10-17 加）：13 个目录里 7 个是中间层，
+  // 原来一个字都不说，读的人会以为「目录只有两类」。
+  check(
+    '图谱：目录级的中间层也要报个数（不报名字）',
+    st.dirs.includes('中间层 7 个目录'),
+    st.dirs,
+  );
   check(
     '图谱：目录级被截断时要说出来（共 N 个）',
     st.dirs.includes('共 4 个'),

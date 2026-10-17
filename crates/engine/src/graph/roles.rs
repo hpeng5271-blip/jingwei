@@ -431,6 +431,65 @@ mod tests {
         assert_eq!(j["foundationTotal"], 0);
     }
 
+    /// **五个格子的和必须等于文件总数**（2026-10-17 加）。
+    ///
+    /// 今天同一个形状的错误出现了 **5 次**：一个格子装着两种东西——
+    /// 「中间层」里混着孤立、「还没连上」里混着我们没解析、目录级截断不说、
+    /// 中间层目录不说……每次都是"数一遍"才发现的。
+    ///
+    /// 这条守恒判据能挡住其中最要命的一种：**某个文件既不在入口、也不在底层、
+    /// 也不在中间层、也不在测试、也不在孤立**——**它掉出了所有格子，而且没人会红**。
+    #[test]
+    fn 五个格子的和必须等于文件总数() {
+        let mut nodes = vec![
+            // 入口：只出不入
+            node("file:cli/main.rs", "file", None),
+            node("symbol:cli/main.rs#f", "symbol", Some("cli/main.rs")),
+            // 底层：只入不出
+            node("file:sys/mem.rs", "file", None),
+            node("symbol:sys/mem.rs#g", "symbol", Some("sys/mem.rs")),
+            // 中间层：一来一往
+            node("file:mid/a.rs", "file", None),
+            node("symbol:mid/a.rs#h", "symbol", Some("mid/a.rs")),
+            node("file:mid/b.rs", "file", None),
+            node("symbol:mid/b.rs#i", "symbol", Some("mid/b.rs")),
+            // 测试：有边也不参与判断
+            node("file:mid/a_tests.rs", "file", None),
+            node("symbol:mid/a_tests.rs#j", "symbol", Some("mid/a_tests.rs")),
+            // 孤立：一条边都没有
+            node("file:lonely/x.rs", "file", None),
+            node("symbol:lonely/x.rs#k", "symbol", Some("lonely/x.rs")),
+        ];
+        let mut edges = Vec::new();
+        for _ in 0..3 {
+            // 入口 → 底层：让 cli 出 3、入 0；mem 入 3、出 0
+            edges.push(json!({
+                "src": "symbol:cli/main.rs#f", "dst": "symbol:sys/mem.rs#g", "kind": "calls"
+            }));
+        }
+        edges.push(json!({
+            "src": "symbol:mid/a.rs#h", "dst": "symbol:mid/b.rs#i", "kind": "calls"
+        }));
+        edges.push(json!({
+            "src": "symbol:mid/b.rs#i", "dst": "symbol:mid/a.rs#h", "kind": "calls"
+        }));
+        edges.push(json!({
+            "src": "symbol:mid/a_tests.rs#j", "dst": "symbol:cli/main.rs#f", "kind": "calls"
+        }));
+
+        // 先数一遍"到底有几个文件"——**这是唯一真源**
+        let files = nodes
+            .iter()
+            .filter(|n| n.get("kind").and_then(|k| k.as_str()) == Some("file"))
+            .count() as i64;
+        let r = annotate(&mut nodes, &edges);
+        let sum = ["entry", "foundation", "middle", "test", "isolated"]
+            .iter()
+            .map(|k| r[*k].as_i64().unwrap_or(0))
+            .sum::<i64>();
+        assert_eq!(sum, files, "五个格子必须正好盖住所有文件，一个不漏：{r}");
+    }
+
     /// **同一个目录内部互调不算**：它不说明模块之间谁在用谁。
     #[test]
     fn 同一目录内部互调不进目录级() {

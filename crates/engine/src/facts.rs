@@ -98,6 +98,55 @@ pub struct DepDetail {
     /// 这条是从哪个文件看出来的
     #[serde(default)]
     pub from: String,
+    /// **"装没装"是从哪儿查的**——这条结论的证据（2026-10-16）。
+    ///
+    /// `AGENTS.md` §2 那条线要求"每条结论可反驳"：用户该能自己去核对。
+    /// 而依赖这一栏原来**只有结论没有来源**——他说不出"我凭什么信你"，
+    /// 也说不出"我去哪儿看才能自己确认"。
+    ///
+    /// 依赖的查法**四种语言各不相同**，所以这个字段不是套话：
+    /// Rust 看 `Cargo.lock`、Web 看 `node_modules`、Java 看 `~/.m2/repository`、
+    /// Python 看 `pip list` 的输出。**说出来用户就知道该去核实哪儿。**
+    ///
+    /// 没查过时是"没有可查的地方"——那是三态在文字上的落法：
+    /// **"没查"与"没装"必须长得不一样。**
+    #[serde(default)]
+    pub evidence: String,
+}
+
+impl DepDetail {
+    /// **`unknown` 是谁造成的**——`AGENTS.md` §2 那句判据的类型化。
+    ///
+    /// 原来这里只有一个 `unknown: bool`：它说得出"不知道"，
+    /// **说不出"这个不知道该怪谁"**。而用户能做的事完全不同：
+    ///   - 我们的失败 → 他可以换个办法，或者等我们修；
+    ///   - 用户的空白 → 他补一个文件就好。
+    ///
+    /// 两句话混成一句，用户就不知道该做什么（这正是三态压扁的代价）。
+    ///
+    /// ## 分类的依据（逐个出口查过，不是猜的）
+    ///
+    /// `detect/deps.rs` 里能产出 `Unknown` 的**只有这四条路**，而**四条全在"我们"这边**：
+    ///   1. `py_installed` 为空（**问工具的那一步没做**——有意跳过的快速路径）；
+    ///   2. `Cargo.lock` **读不出来**（文件在，读失败）；
+    ///   3. `Lang::Web` 且项目是 **PnP**（依赖可见性在 `.pnp.cjs`，
+    ///      **解析它要跑 JS，不在这条路径上**）；
+    ///   4. `Lang::Cpp`（包可能来自系统 / vcpkg / Conan，**我们没实现**）。
+    ///
+    /// 所以返回 `OurGap` **不是默认值，是这四条路的共同结论**。
+    /// 哪天真出现"用户的空白"那一类未知（例如某个我们依赖的清单文件用户没提供），
+    /// 那时要在**产出点**分化，**不是回来改这里猜**。
+    ///
+    /// ## 为什么 `!self.unknown` 返回 `Unclear` 而不是 `TheirGap`
+    ///
+    /// 不是未知的时候这个问题**没有意义**。返回一个"看起来像答案"的值会让调用方误用
+    /// （把"已装"读成"用户的空白"）。用 `Unclear` 明确表示"这个问题不适用"。
+    pub fn unknown_why(&self) -> crate::Unknown {
+        if !self.unknown {
+            return crate::Unknown::Unclear;
+        }
+        crate::Unknown::OurGap
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -109,15 +158,20 @@ pub struct ProjectFacts {
     pub contract_hash: Option<String>,
     pub declared_deps: Vec<String>,
     /// 依赖的「声明 vs 实际」两列。依赖管理工具的价值就在把这两列并排摆出来。
+    ///
+    /// **这是依赖状态的唯一表示。** 这里原来还有一个 `deps_status:
+    /// BTreeMap<String, bool>` 的布尔图，2026-10-16 删了——它的注释自己写着
+    /// "⚠️ 会丢三态：禁止新代码使用（P3 复审发现）……清理计划：M2 接上 store 时……
+    /// 然后删掉本字段"，而 **M2 早就接上了，这句计划过期了很久**。
+    ///
+    /// 它造成的真实损失记两次：
+    ///   - 规则层：`Verdict::Unknown` 被压成 `false` → 命中契约 required 就连
+    ///     `Severity::Error` 报出去，证据还写着"当前解释器已装 0 个包"（第 16 轮修）；
+    ///   - `snapshot.rs` 的概览汇总行："一部分装上 + 一部分无法确认" → "依赖 都装了"（第 24 轮修）。
+    ///
+    /// **两次都是修消费者。第三次直接掐掉来源**：类型装不下三态，就不该存在。
     #[serde(default)]
     pub deps_detail: Vec<DepDetail>,
-    /// ⚠️ **会丢三态：禁止新代码使用**（P3 复审发现）。
-    ///
-    /// 它是 `bool`，所以"无法确认"（例如 C++ 的包可能来自系统/vcpkg/Conan）
-    /// 到这儿就被压成 `false`，在规则判断与界面里等价于"缺失"——**这就是安静地错**。
-    /// 正确的入口是 `deps_detail`（三态：ok / unknown / 缺失，带来源）。
-    /// 清理计划：M2 接上 store 时，规则引擎与 Tauri 输出一起改走 `deps_detail`，然后删掉本字段。
-    pub deps_status: BTreeMap<String, bool>,
     pub venvs: Vec<String>,
     pub recent_files: Vec<String>,
     /// 项目体检：结构、依赖清单、忽略规则。快扫，毫秒级。

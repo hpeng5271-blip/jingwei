@@ -16,8 +16,13 @@ mod java;
 mod node;
 mod python;
 mod ready;
+pub mod rundiag;
 
 use ready::serving_url;
+// 这两个是 `rundiag` 里的辅助（同模块树内直接用，不必 re-export——
+// 对外暴露它们没有意义，它们是"怎么认诊断"的内部细节）。
+use rundiag::{is_informative, truncate_line};
+pub use rundiag::{collect_run_diagnostics, RunDiagnostic};
 
 use crate::understand::contract::{Contract, ReadyWhen};
 use crate::state::runs;
@@ -129,6 +134,12 @@ pub struct Outcome {
     /// 进程异常退出时，从它自己的话里读出来的症结。读不出来就是 None。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnosis: Option<Diagnosis>,
+    /// 这次运行在图谱里留下的诊断（M5 的料）。
+    ///
+    /// **为什么它必须在 Outcome 上**：`record_run` 要的是"这次跑出了哪些问题"，
+    /// 而只有这一层知道（它手里有输出尾部）。外壳拿不到这些，所以不能在外壳里补。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<RunDiagnostic>,
     /// 这次跑的时候内存怎么样。只在采到东西时才有。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<crate::sys::mem::MemReport>,
@@ -144,6 +155,7 @@ pub struct Diagnosis {
     /// 往哪儿走
     pub hint: String,
 }
+
 
 const TOTAL_STAGES: usize = 6;
 
@@ -591,6 +603,83 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
     ) {
         crate::util::dlog::w("9006", &format!("运行记录写入失败：{e}"));
     }
+
+    // ── M5：把这次运行记进图谱 ─────────────────────────────────────
+    //
+    // 为什么**必须在这里**，不能挪到外壳里：诊断清单只有这一层拿得到（它手里有输出尾部）。
+    // 外壳只有 Outcome，拿不到"哪一行是哪条诊断"——把它挪上去，图谱里就只会有一条
+    // 没有落点的症结，"改了这里会影响谁"仍然答不出来。
+    //
+    // 写不进去只记日志、**不影响这次运行的结论**：图谱是可重算的派生数据
+    // （`schema.sql` 开头那句），丢了下一轮补回来；而"这次跑成没成"是当次的事实，
+    // 不能因为一个副产物写失败就把它标成失败。
+    let diagnostics = {
+        let mut v = collect_run_diagnostics(&root, &tail);
+        // 一条都没认出来时的兜底，按"我们知道多少"分三档，**从不假装知道更多**：
+        //   ① 读出了症结（`diagnose` 认得那种失败）→ 用症结，没有落点；
+        //   ② 只是失败了（退出码非 0）→ 记「退出码 N」这一条事实；
+        //   ③ 正常结束 → 什么都不记。
+        //
+        // 为什么要 ②：原来只有 ①，于是"退出码非 0 但症结认不出来"的运行
+        // **在图谱里一条痕迹都没有**（只剩一个 Run 节点）。那等于图谱把"这次失败了"
+        // 这件事悄悄咽掉了——而它恰恰是最该留下的那一条。
+        // 这是 M5 闭环测试当场抓出来的（`没有落点的诊断如实说没有`）。
+        if v.is_empty() {
+            if let Some(d) = &diagnosis {
+                v.push(RunDiagnostic {
+                    title: d.crux.clone(),
+                    file: None,
+                });
+            } else if code != 0 {
+                // 认不出形状时，**把进程自己说的最后一句有信息量的话留下**。
+                //
+                // 原来这里只写「退出码 N（工具没从输出里认出具体原因）」——而实测
+                // （用 `jingwei graph` 看 messy_service 那次失败）那条诊断什么用都没有：
+                // 输出里明明有 python 的报错行，图谱里却只有一句"我不知道"。
+                // 图谱记不下原因的诊断，等于没记。所以退到"原样引用最后那句实在话"。
+                let last = tail
+                    .iter()
+                    .rev()
+                    .map(|l| l.trim())
+                    .find(|l| is_informative(l));
+                v.push(RunDiagnostic {
+                    title: match last {
+                        Some(l) => format!("{}（退出码 {code}）", truncate_line(l, 160)),
+                        None => format!("退出码 {code}（输出里没有可引用的一句话）"),
+                    },
+                    file: None,
+                });
+            }
+        }
+        v
+    };
+    match crate::graph::store::Store::open(&crate::graph_db_path(&root)) {
+        Ok(mut store) => {
+            let pairs: Vec<(String, Option<String>)> = diagnostics
+                .iter()
+                .map(|d| (d.title.clone(), d.file.clone()))
+                .collect();
+            match crate::graph::index::record_run(
+                &mut store,
+                &root,
+                &run_cmd,
+                code,
+                &pairs,
+                crate::graph::index::now_ms(),
+            ) {
+                Ok(rec) => crate::util::dlog::i(
+                    "2101",
+                    &format!(
+                        "图谱已记下这次运行：run={} 诊断={} 挂不到文件的={}",
+                        rec.run_id, rec.diagnostics, rec.unknown_targets
+                    ),
+                ),
+                Err(e) => crate::util::dlog::w("2102", &format!("运行记进图谱失败：{e}")),
+            }
+        }
+        Err(e) => crate::util::dlog::w("2102", &format!("打开图谱库失败：{e}")),
+    }
+
     Ok(Outcome {
         exit_code: code,
         ready: ready_how,
@@ -598,6 +687,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         pid: Some(pid),
         started_at: now_iso(),
         diagnosis,
+        diagnostics,
         memory,
         memory_delta,
     })

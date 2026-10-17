@@ -1,4 +1,4 @@
-//! 依赖：把「清单里声明的」和「机器上实际的」摆成两列。
+﻿//! 依赖：把「清单里声明的」和「机器上实际的」摆成两列。
 //!
 //! 为什么单独一个模块：每种语言的清单长得都不一样。拿 Python 那套去读
 //! 别的语言，界面就会一本正经地显示「未声明依赖」——那不是简洁，是撒谎。
@@ -101,7 +101,7 @@ pub fn collect(
     langs: &[Lang],
     contract: Option<&crate::understand::contract::Contract>,
     py_installed: &[String],
-) -> (Vec<crate::facts::DepDetail>, std::collections::BTreeMap<String, bool>) {
+) -> Vec<crate::facts::DepDetail> {
     let mut decls = declared_all(root, langs);
     if let Some(c) = contract {
         for d in c.deps.required.iter() {
@@ -117,19 +117,28 @@ pub fn collect(
         }
     }
     let mut detail = Vec::new();
-    let mut status = std::collections::BTreeMap::new();
     for d in decls {
         let v = if d.lang == Lang::Python && py_installed.is_empty() {
+            // **"没有 pip 清单"是我们的失败，不是"没装"。**
+            // `collect` 的文档写着空 = "这次没有 pip 清单（快速路径）"——
+            // 也就是说**问工具的那一步没做或没给答案**，而我们**确知**这一点
+            // （它是有意跳过的快速路径，不是"不知道跳没跳"）。所以归 `OurGap` 有依据。
             Verdict::Unknown
         } else {
             installed(root, d.lang, &d.name, py_installed)
         };
+        // **这里原来还顺手产出一个 `BTreeMap<String, bool>`（`deps_status`），2026-10-16 删了。**
+        //
+        // 它是 `detail` 的弱化副本：`Unknown` 插进去就是 `false`，于是"没查过"
+        // 在任何读它的地方都等于"没装"。这个仓库为那个错修过两次消费者
+        // （规则层的假 Error、`snapshot.rs` 的"依赖 都装了"），第三次直接掐掉来源——
+        // **类型装不下三态，就不该存在**。三态全在下面这个 `DepDetail` 里
+        // （`ok` / `unknown` / `have` / `from`）。
         let (ok, unknown, have) = match v {
             Verdict::Yes(ver) => (true, false, ver.unwrap_or_default()),
             Verdict::No => (false, false, String::new()),
             Verdict::Unknown => (false, true, String::new()),
         };
-        status.insert(d.name.clone(), ok);
         detail.push(crate::facts::DepDetail {
             name: d.name,
             want: d.want,
@@ -137,14 +146,50 @@ pub fn collect(
             ok,
             unknown,
             from: d.from,
+            // **"装没装"是从哪儿查的**——这条结论的证据（2026-10-16）。
+            // 由这一层给：只有它知道刚才实际看了哪儿（几种语言各不相同）。
+            evidence: evidence_of(root, d.lang, py_installed.is_empty()),
         });
     }
-    (detail, status)
+    detail
+}
+/// **这一条"装没装"是从哪儿查的**——结论的证据（2026-10-16）。
+///
+/// `AGENTS.md` §2 要求每条结论可反驳，而依赖这一栏原来只有结论没有来源。
+/// 四种语言的查法**各不相同**，所以这不是套话——说出来用户就知道去哪儿核对：
+///   Rust  → `Cargo.lock`
+///   Web   → `node_modules`（可能被提升到仓库根，所以要往上找）
+///   Java  → `~/.m2/repository`
+///   Python→ `pip list` 的输出（没给就是"没有可查的地方"）
+///
+/// **"没查过"与"没装"在文字上必须长得不一样**（三态在措辞上的落法）。
+fn evidence_of(root: &Path, lang: Lang, no_py_list: bool) -> String {
+    if lang == Lang::Python {
+        return if no_py_list {
+            "没有可查的地方（这次没拿到 pip list）".to_string()
+        } else {
+            "pip list".to_string()
+        };
+    }
+    match lang {
+        Lang::Rust | Lang::Unknown if root.join("Cargo.toml").is_file() => {
+            "Cargo.lock".to_string()
+        }
+        Lang::Web => {
+            if crate::detect::web::is_pnp(root) {
+                "没有可查的地方（PnP 项目的依赖表在 .pnp.cjs 里，我们还没读它）".to_string()
+            } else {
+                "node_modules".to_string()
+            }
+        }
+        Lang::Java => "~/.m2/repository".to_string(),
+        Lang::Cpp => "没有可查的地方（C++ 的包可能来自系统 / vcpkg / Conan，我们没实现）".to_string(),
+        _ => "没有可查的地方".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Decl {
-    /// 依赖名（Rust 用 crate 名、Java 用 groupId:artifactId）
+pub struct Decl {    /// 依赖名（Rust 用 crate 名、Java 用 groupId:artifactId）
     pub name: String,
     /// 清单里写的版本。空 = 没写
     pub want: String,
@@ -250,8 +295,12 @@ pub fn declared(root: &Path, lang: Lang) -> Vec<Decl> {
         Lang::Python => python_decls(root),
         Lang::Web => node_decls(root),
         Lang::Java => java_decls(root),
-        Lang::Unknown if root.join("Cargo.toml").is_file() => rust_decls(root),
+        Lang::Rust => rust_decls(root),
         Lang::Cpp => cpp_decls(root),
+        // `Unknown` 不再替 Rust 顶班——那是 `lang::Lang` 少一个变体时的绕道，
+        // 变体补上之后，这里只留"Cargo.toml 在但语言没认出来"这一种真实情况
+        // （比如项目太深、`has_ext` 只扫两层没扫到）。
+        Lang::Unknown if root.join("Cargo.toml").is_file() => rust_decls(root),
         _ => Vec::new(),
     };
     // 顺序固定：清单里的顺序不等于人想看的顺序，而且测试和界面都要稳定
@@ -266,8 +315,9 @@ pub fn declared(root: &Path, lang: Lang) -> Vec<Decl> {
 /// package.json，只报一边就等于告诉用户「另一边不存在」。
 pub fn declared_all(root: &Path, langs: &[Lang]) -> Vec<Decl> {
     let mut list: Vec<Lang> = langs.to_vec();
-    // Rust 在 lang::Lang 里没有独立变体，用清单文件的存在性补上
-    if root.join("Cargo.toml").is_file() && !list.contains(&Lang::Unknown) {
+    // `Unknown` 兜底：语言没认出来、但 Cargo.toml 在时，Rust 依赖照样要报
+    // （`Lang::Rust` 正常会由检测补进 `langs`，这一条只是保险）。
+    if root.join("Cargo.toml").is_file() && !list.contains(&Lang::Unknown) && !list.contains(&Lang::Rust) {
         list.push(Lang::Unknown);
     }
     let mut out: Vec<Decl> = Vec::new();
@@ -431,9 +481,64 @@ fn python_decls(root: &Path) -> Vec<Decl> {
         .collect()
 }
 
+/// **Java 依赖"确认不了"的具体原因**（2026-10-16）。
+///
+/// 两个出口，**都是"我们"这边**（见 `installed` 的 `Lang::Java` 分支）：
+///   ① 读不到 `USERPROFILE`（连本地仓库在哪都不知道）；
+///   ② `~/.m2/repository` 不在 —— 说明**这台机器还没跑过 Maven**，
+///      那么"装没装"这件事**没有可查的地方**（不是用户少装了什么）。
+pub fn why_unknown_java() -> String {
+    if std::env::var_os("USERPROFILE").is_none() {
+        "读不到 USERPROFILE，所以连本地仓库在哪都不知道".to_string()
+    } else {
+        "本地 Maven 仓库（~/.m2/repository）还不存在——这台机器没跑过 Maven，\
+         所以没有能查的地方"
+            .to_string()
+    }
+}
+
+/// **Web 依赖"确认不了"的具体原因**（2026-10-16）。
+///
+/// 原来调用方只能说一句笼统的"确认不了"，用户分不出是"你没装"还是"我们没查到"。
+/// 而这一处**原因很具体**：PnP 项目的依赖可见性写在 `.pnp.cjs` 里，
+/// **解析它要跑 JS，不在这条路径上**——那是**我们没做**，不是用户的问题。
+///
+/// **为什么不直接用 `Unknown::OurGap` 那句话**：`rules.rs` 那边的做法说明了更好的答案——
+/// **能说出具体原因的地方，比一个笼统的归属标签更好**。
+/// `what_to_do()` 那三句是"不知道该怪谁时"的兜底；这里知道，就说知道的那句。
+pub fn why_unknown_web(root: &Path) -> String {
+    if crate::detect::web::is_pnp(root) {
+        "这是 Yarn PnP 项目：依赖装在 `.pnp.cjs` 那张映射表里，\
+         读出它要跑一次 JS，我们还没做这一步"
+            .to_string()
+    } else {
+        // 走到这里说明"未知"来自别处——**不硬编一个原因**（编出来的原因比不编更糟）。
+        crate::Unknown::OurGap.what_to_do().to_string()
+    }
+}
+
 /// 装没装。`py_installed` 是 pip list 的结果（`名字==版本`），只在 Python 下用。
 pub fn installed(root: &Path, lang: Lang, name: &str, py_installed: &[String]) -> Verdict {
-    if root.join("Cargo.toml").is_file() && lang != Lang::Python {
+    // **判据是 `lang`，不是"这个目录里有没有 Cargo.toml"**（2026-10-16 修）。
+    //
+    // 原来这里写的是 `root.join("Cargo.toml").is_file() && lang != Lang::Python`——
+    // 于是**在一个 Rust + 前端的项目里（Tauri 就是），每一条 npm 依赖都被拿去查
+    // `Cargo.lock`**：查不到 → `No` → 报「没装」。
+    //
+    // 实测（这是它怎么被发现的）：`jingwei guide --root D:\projects\jingwei` 报
+    // 「1 个依赖没装：@tauri-apps/cli」，而 `package.json` 声明了它、
+    // `node_modules/@tauri-apps/cli/package.json` **实实在在在磁盘上（2454 字节）**。
+    // **一个假 Error**——用户会去重装一个已经装好的包，然后发现问题依旧。
+    //
+    // 它与 `Lang::Rust` 变体补上之前那三次"绕道"是同一类错：
+    // **用"环境里有什么文件"代替"这条依赖属于哪门语言"**。
+    // 依赖的归属由 `Decl.lang` 一路带下来，这里是它该被用上的地方。
+    //
+    // `Lang::Unknown` 兜底保留旧行为：语言没认出来、但 `Cargo.toml` 在时，
+    // 那确实是"Rust 项目没认出来"（见 `declared` 里同一条兜底），按 Rust 查是对的。
+    let rust_like = matches!(lang, Lang::Rust)
+        || (matches!(lang, Lang::Unknown) && root.join("Cargo.toml").is_file());
+    if rust_like {
         // Rust：Cargo.lock 记着实际锁定的版本。没有 lock 就是没装过依赖。
         let Some(lock_path) = find_up(root, "Cargo.lock", 3) else {
             return Verdict::No;
@@ -517,224 +622,5 @@ pub fn installed(root: &Path, lang: Lang, name: &str, py_installed: &[String]) -
 }
 
 #[cfg(test)]
-mod tests {
-    // 测试里的临时目录清理失败不影响断言，也不能改变结论——这里显式豁免，
-    // 而不是让 lint 在整个 crate 里静默失声。
-    #![allow(clippy::let_underscore_must_use)]
-    use super::*;
-
-    fn tmp(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("jingwei-deps-{}-{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    // ── Node 那三种布局：**这两种原来是误报** ──────────────────────
-
-    /// **PnP 项目：没有 node_modules 是正常的，绝不能报成"未安装"。**
-    ///
-    /// 改之前这里会返回 `No`，界面上一整列依赖全是✗——而它们其实都装着。
-    /// 这类误报比"查不到"糟得多：用户会去重装依赖，然后发现问题依旧。
-    #[test]
-    fn pnp_项目不报未安装() {
-        let d = tmp("pnp");
-        std::fs::write(
-            d.join("package.json"),
-            r#"{"name":"x","dependencies":{"vue":"^3"}}"#,
-        )
-        .unwrap();
-        std::fs::write(d.join("yarn.lock"), "").unwrap();
-        std::fs::write(d.join(".pnp.cjs"), "// pnp\n").unwrap();
-        let v = installed(&d, Lang::Web, "vue", &[]);
-        assert_eq!(
-            v,
-            Verdict::Unknown,
-            "确认不了就说确认不了——不许说成没装"
-        );
-        assert_ne!(v, Verdict::No, "Unknown 绝不能被当成缺失");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// **依赖被提升到仓库根**（npm / yarn / pnpm 的 workspace 都这么干）：
-    /// 成员项目自己目录里没有 node_modules，得往上找。
-    #[test]
-    fn 依赖在仓库根的_node_modules_里也算装了() {
-        let d = tmp("hoist");
-        let member = d.join("apps").join("web");
-        std::fs::create_dir_all(&member).unwrap();
-        std::fs::write(member.join("package.json"), r#"{"name":"web"}"#).unwrap();
-        let pkg = d.join("node_modules").join("vue");
-        std::fs::create_dir_all(&pkg).unwrap();
-        std::fs::write(pkg.join("package.json"), r#"{"version":"3.4.21"}"#).unwrap();
-        assert_eq!(
-            installed(&member, Lang::Web, "vue", &[]),
-            Verdict::Yes(Some("3.4.21".to_string())),
-            "版本要就地读出来，不是猜的"
-        );
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 一个 node_modules 都没有、也不是 PnP —— 那是真的还没装。
-    #[test]
-    fn 真的没装才说没装() {
-        let d = tmp("none");
-        std::fs::write(d.join("package.json"), r#"{"name":"x"}"#).unwrap();
-        assert_eq!(installed(&d, Lang::Web, "vue", &[]), Verdict::No);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn rust_deps_come_from_all_three_sections() {
-        let d = tmp("rust");
-        std::fs::write(
-            d.join("Cargo.toml"),
-            "[package]\nname = \"x\"\n\n[dependencies]\nserde = { version = \"1.0\", features = [\"derive\"] }\nanyhow = \"1\"\n\n[dev-dependencies]\npretty_assertions = \"1.4\"\n",
-        )
-        .unwrap();
-        let got = declared(&d, Lang::Unknown);
-        let names: Vec<&str> = got.iter().map(|x| x.name.as_str()).collect();
-        assert_eq!(names, vec!["anyhow", "pretty_assertions", "serde"]);
-        assert_eq!(got[2].want, "1.0");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn rust_lock_decides_installed() {
-        let d = tmp("lock");
-        std::fs::write(d.join("Cargo.toml"), "[dependencies]\nserde = \"1\"\n").unwrap();
-        assert_eq!(installed(&d, Lang::Unknown, "serde", &[]), Verdict::No);
-        std::fs::write(
-            d.join("Cargo.lock"),
-            "[[package]]\nname = \"serde\"\nversion = \"1.0.197\"\n",
-        )
-        .unwrap();
-        assert_eq!(
-            installed(&d, Lang::Unknown, "serde", &[]),
-            Verdict::Yes(Some("1.0.197".into()))
-        );
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 成员目录自己不带锁文件，锁在工作区根上——向上找不到就会误报「未安装」。
-    #[test]
-    fn rust_lock_is_looked_up_in_parent_dirs() {
-        let root = tmp("lockup");
-        std::fs::write(root.join("Cargo.lock"), "[[package]]\nname = \"serde\"\nversion = \"1.0.197\"\n").unwrap();
-        let member = root.join("crates").join("engine");
-        std::fs::create_dir_all(&member).unwrap();
-        std::fs::write(member.join("Cargo.toml"), "[dependencies]\nserde = \"1\"\n").unwrap();
-        assert_eq!(
-            installed(&member, Lang::Unknown, "serde", &[]),
-            Verdict::Yes(Some("1.0.197".into()))
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// 复合项目：一个 Tauri 仓库同时有 Cargo.toml 和 package.json，
-    /// 只报一边就等于告诉用户「另一边不存在」。
-    #[test]
-    fn composite_projects_merge_every_manifest() {
-        let d = tmp("composite");
-        std::fs::write(d.join("Cargo.toml"), "[dependencies]\nserde = \"1\"\n").unwrap();
-        std::fs::write(d.join("package.json"), r#"{"devDependencies":{"vite":"^5"}}"#).unwrap();
-        let got = declared_all(&d, &[Lang::Web]);
-        let names: Vec<&str> = got.iter().map(|x| x.name.as_str()).collect();
-        assert_eq!(names, vec!["serde", "vite"]);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn node_deps_read_both_groups() {
-        let d = tmp("node");
-        std::fs::write(
-            d.join("package.json"),
-            r#"{"dependencies":{"vue":"^3.4.0"},"devDependencies":{"vite":"^5.0.0"}}"#,
-        )
-        .unwrap();
-        let got = declared(&d, Lang::Web);
-        assert_eq!(got.len(), 2);
-        assert_eq!(got[0].name, "vite");
-        assert_eq!(got[0].from, "package.json · devDependencies");
-        // 没装（没有 node_modules）
-        assert_eq!(installed(&d, Lang::Web, "vue", &[]), Verdict::No);
-        std::fs::create_dir_all(d.join("node_modules").join("vue")).unwrap();
-        assert_eq!(installed(&d, Lang::Web, "vue", &[]), Verdict::Yes(None));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-
-    /// 传递依赖必须读得出来，而且不许猜：Cargo.lock 里写着什么就是什么。
-    #[test]
-    fn rust_tree_reads_the_lock_graph() {
-        let d = tmp("tree");
-        std::fs::write(
-            d.join("Cargo.lock"),
-            "[[package]]\nname = \"app\"\nversion = \"0.1.0\"\ndependencies = [\n \"serde\",\n \"walkdir 2.5.0\",\n]\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.229\"\ndependencies = [\n \"serde_derive\",\n]\n\n[[package]]\nname = \"serde_derive\"\nversion = \"1.0.229\"\n",
-        )
-        .unwrap();
-        let (edges, total) = rust_tree(&d);
-        assert_eq!(total, 3);
-        assert!(edges.contains(&TreeEdge { from: "app".into(), to: "serde".into() }));
-        assert!(edges.contains(&TreeEdge { from: "app".into(), to: "walkdir".into() }));
-        assert!(edges.contains(&TreeEdge { from: "serde".into(), to: "serde_derive".into() }));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 没有锁文件时不许编：返回空，界面就什么都不显示。
-    #[test]
-    fn rust_tree_without_lock_is_empty() {
-        let d = tmp("tree-none");
-        let (edges, total) = rust_tree(&d);
-        assert!(edges.is_empty());
-        assert_eq!(total, 0);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 快速路径拿不到 pip 清单时，Python 依赖必须标「无法确认」。
-    /// 标成「未安装」就是误报——误报比空着更糟，它会让人不信这一栏。
-    #[test]
-    fn python_without_pip_list_is_unknown_not_missing() {
-        let d = tmp("py-unknown");
-        std::fs::write(d.join("requirements.txt"), "rich>=13.0.0\n").unwrap();
-        let (detail, status) = collect(&d, &[Lang::Python], None, &[]);
-        assert_eq!(detail.len(), 1);
-        assert!(detail[0].unknown, "没有 pip 清单时必须标成无法确认");
-        assert!(!detail[0].ok);
-        assert_eq!(status.get("rich"), Some(&false));
-        let (d2, _) = collect(&d, &[Lang::Python], None, &["rich==13.7.1".to_string()]);
-        assert!(d2[0].ok);
-        assert_eq!(d2[0].have, "13.7.1");
-        assert!(!d2[0].unknown);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn java_deps_merge_group_and_artifact() {
-        let d = tmp("java");
-        std::fs::write(
-            d.join("pom.xml"),
-            "<project><dependencies><dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency></dependencies></project>",
-        )
-        .unwrap();
-        let got = declared(&d, Lang::Java);
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].name, "org.slf4j:slf4j-api");
-        assert_eq!(got[0].want, "2.0.9");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// C++ 的包可能来自系统、vcpkg、Conan 或源码树——查不到就必须说「无法确认」，
-    /// 报成「未安装」就是误报，而误报会让人不再相信这个工具。
-    #[test]
-    fn cpp_is_never_reported_as_missing() {
-        let d = tmp("cpp");
-        std::fs::write(d.join("CMakeLists.txt"), "find_package(OpenCV REQUIRED)\n").unwrap();
-        let got = declared(&d, Lang::Cpp);
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].name, "OpenCV");
-        assert_eq!(installed(&d, Lang::Cpp, "OpenCV", &[]), Verdict::Unknown);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-}
+#[path = "deps_tests.rs"]
+mod tests;

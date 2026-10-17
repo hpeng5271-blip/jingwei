@@ -128,7 +128,15 @@ pub(crate) fn prepare(
     } else if !unknown.is_empty() {
         (
             StageStatus::Note,
-            format!("{} 项都在本地仓库；{} 项确认不了", declared.len(), unknown.len()),
+            format!(
+                // **说清是谁的问题**（2026-10-16）：原来只到"确认不了"，
+                // 用户分不出该他补点什么还是等我们修。原因由 deps 那层给
+                // （它知道是读不到 USERPROFILE 还是没跑过 Maven），**不在这里猜**。
+                "{} 项都在本地仓库；{} 项确认不了——{}",
+                declared.len(),
+                unknown.len(),
+                deps::why_unknown_java()
+            ),
         )
     } else {
         (StageStatus::Ok, format!("{} 项都在本地仓库", declared.len()))

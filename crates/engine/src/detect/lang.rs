@@ -12,6 +12,22 @@ use std::path::Path;
 pub enum Lang {
     Python,
     Java,
+    /// Rust：`Cargo.toml` 或 `.rs` 源码。
+    ///
+    /// **这个变体是补上的，而且补得晚。** 在它之前，"Rust 项目"这件事在整个
+    /// `detect` 层是**不存在的**：`hello_rust`（有 Cargo.toml、有 src/main.rs）
+    /// 的 `langs` 是**空数组**、`lang` 是 `Unknown`。三处后果，一处比一处隐蔽：
+    ///
+    ///   1. 界面「项目类型」那栏是空的；
+    ///   2. `understand/project.rs` 里那句 `l == "Rust"` **永不成立**（一句死判断）；
+    ///   3. 最糟的：`understand/rules.rs` 把"`langs` 为空且 `lang` 是 Unknown"
+    ///      当作"可能是 Python 项目"，于是**对一个纯 Rust 项目跑了全套 Python 规则**
+    ///      （解释器、venv、编码、依赖……每条都可能变成假警报）。
+    ///
+    /// 而 `detect/deps.rs` 里留着一句自己承认的绕道：「Rust 在 `lang::Lang` 里
+    /// 没有独立变体，用清单文件的存在性补上」——把 `Unknown` 塞进语言列表冒充 Rust。
+    /// 一个枚举少一个变体，另外三处就得各自绕一次。这就是那三次绕道的总账。
+    Rust,
     Cpp,
     /// Node / 前端那一类：Vue、React、纯 npm 项目
     Web,
@@ -25,6 +41,7 @@ impl Lang {
         match self {
             Lang::Python => "Python",
             Lang::Java => "Java",
+            Lang::Rust => "Rust",
             Lang::Cpp => "C / C++",
             Lang::Web => "前端 / Node",
             Lang::Unknown => "还没认出来",
@@ -103,11 +120,18 @@ fn detect_one(root: &Path) -> Lang {
     if has(root, &["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"]) {
         return Lang::Python;
     }
+    // Rust：构建文件优先于"有没有 .rs 文件"——一个仓库里带个示例 .rs 不该叫 Rust 项目。
+    if has(root, &["Cargo.toml"]) {
+        return Lang::Rust;
+    }
     if has_ext(root, &["py"]) {
         return Lang::Python;
     }
     if has_ext(root, &["java"]) {
         return Lang::Java;
+    }
+    if has_ext(root, &["rs"]) {
+        return Lang::Rust;
     }
     if has_ext(root, &["c", "cc", "cpp", "cxx", "h", "hpp"]) {
         return Lang::Cpp;
@@ -197,6 +221,38 @@ mod tests {
     fn an_empty_folder_is_not_claimed_to_be_anything() {
         let d = scratch("empty");
         assert_eq!(detect(&d), Lang::Unknown);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **Rust 项目要认出来。**
+    ///
+    /// 这条是拿一次真事故换的：`hello_rust`（有 `Cargo.toml`、有 `src/main.rs`）的
+    /// `langs` 是**空数组**、`lang` 是 `Unknown`——因为 `Lang` 枚举里压根没有 Rust 变体。
+    /// 后果里最隐蔽的一条：`understand/rules.rs` 把"`langs` 为空且 `lang` 是 Unknown"
+    /// 当成"可能是 Python 项目"，于是**对一个纯 Rust 项目跑了全套 Python 规则**。
+    /// 所以这里不只断言"认出来"，还断言**不能被当成 Python**。
+    #[test]
+    fn a_rust_project_is_rust_and_not_python() {
+        let d = scratch("rust");
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+        std::fs::write(d.join("src").join("main.rs"), "fn main(){}").unwrap();
+        assert_eq!(detect(&d), Lang::Rust, "有 Cargo.toml 就该认成 Rust 项目");
+        assert!(detect_all(&d).contains(&Lang::Rust), "langs 里要有 Rust");
+        assert!(
+            !detect_all(&d).contains(&Lang::Python),
+            "一个纯 Rust 项目不许被当成 Python——那会让整套 Python 规则跑在它身上"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// 只有 `.rs` 源码、没有构建文件时也要认出来（判据不能只挂在 Cargo.toml 上）。
+    #[test]
+    fn rust_source_alone_is_enough() {
+        let d = scratch("rustsrc");
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("src").join("lib.rs"), "pub fn f(){}").unwrap();
+        assert_eq!(detect(&d), Lang::Rust);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

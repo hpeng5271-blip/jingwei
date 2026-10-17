@@ -1,4 +1,4 @@
-// 外壳不做决定，只做转接：所有判断都在 jingwei-engine 里。
+﻿// 外壳不做决定，只做转接：所有判断都在 jingwei-engine 里。
 // 这里唯一的职责是把引擎的返回值摊平成前端好用的形状，外加把启动事件推出去。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -18,9 +18,33 @@ use tauri_plugin_dialog::DialogExt;
 mod payload;
 use payload::{hygiene_value, inspect_payload};
 
+// 开发工具：`--report <路径>` 把界面状态写进文件（见模块头）。
+// 单独一个文件，是因为 main.rs 本来就贴着 1000 行上限，
+// 而这一段与"窗口、对话框、编辑器、笔记"不是一类东西。
+mod selfcheck;
+use selfcheck::start_report;
+
 /// 启动时如果带了个目录参数，就直接把它当项目打开。
 /// 用起来很顺手：`jingwei.exe D:\projects\myapp`，或者把文件夹拖到 exe 上。
 struct InitialProject(std::sync::Mutex<Option<String>>);
+
+/// 启动时想直接落在哪一页（`--tab graph`）。空 = 停在「概览」。
+///
+/// **为什么要这个参数**：这个项目的界面只能靠人拉开窗口看，
+/// 而"拉开窗口看"没法自动化——想给某一页做截图对比，先得有办法让窗口**直接开在那一页**。
+/// 顺带它也是个真需求：`--tab graph <目录>` 一把跳到图谱页。
+///
+/// 名字由前端校验：这里只把字符串原样交出去，认不出来的页名由前端当"没有"处理
+/// （**不在这里猜**——页名清单是前端的事，两处各写一份迟早对不上）。
+struct InitialTab(std::sync::Mutex<Option<String>>);
+
+#[tauri::command]
+fn initial_tab(state: tauri::State<InitialTab>) -> Value {
+    // 没给参数 = 正常状态（走 yes + null），不是"查不了"。
+    let t = state.0.lock().ok().and_then(|g| g.clone());
+    Envelope::yes(t).to_value()
+}
+
 
 /// 窗口在不在前台。不在就不采样——后台不该占用资源。
 static WINDOW_FOCUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -131,21 +155,13 @@ fn initial_project(state: tauri::State<InitialProject>) -> Value {
 }
 
 
-// ── 图谱：内核里那套东西的对外接口 ─────────────────────────────────
-//
-// 三条命令，对应图谱链的三段：
-//   graph_index  索引（扫 → 解析 → 写库 → 全局解析）
-//   graph_stats  规模（多少节点、多少边、多少拿不准）
-//   graph_dump   数据（给可视化用，天生带上限、超了会如实说截断）
-//
-// **为什么规模要单独一条**：`graph_index` 是"干活"，`graph_stats` 是"看状态"。
-// 前者可能跑几百毫秒，后者毫秒级——界面每秒问一次时只能问后者。
-// 混成一条的话，状态栏每刷新一次就重扫一遍全项目。
-
-/// 图谱库的位置（跟项目走，可删）。
-fn graph_db(root: &Path) -> PathBuf {
-    root.join(".jingwei").join("graph.db")
-}
+// 图谱那几条命令（index / stats / dump / runs）搬进了 `graph.rs`：
+// main.rs 加了 `graph_runs` 之后撞了门禁的 1000 行上限，而"这四条是同一件事的四个深度"
+// 是一条真实的接缝。这里只留模块声明。
+mod graph;
+// 这里只 import 真正**直接调用**的那个（watch_start 要用它）：注册表里用模块路径，
+// 多余的 import 会变成 clippy 的 unused 警告——零警告是门禁里的一道。
+use graph::graph_db;
 
 /// 实时层：正在盯哪个项目。
 ///
@@ -239,69 +255,6 @@ fn watch_stop(state: tauri::State<WatchState>) -> Value {
     Envelope::<Value>::yes(json!({ "watching": null })).to_value()
 }
 
-/// 索引一次：扫 → 解析 → 写库 → 全局解析。
-#[tauri::command]
-fn graph_index(root: String) -> Result<Value, String> {
-    let p = PathBuf::from(&root);
-    if !p.is_dir() {
-        return Err(format!("这个目录不存在：{root}"));
-    }
-    let t0 = std::time::Instant::now();
-    let mut store = jingwei_engine::graph::store::Store::open(&graph_db(&p))
-        .map_err(|e| format!("打开图谱库失败：{e}"))?;
-    let rep = jingwei_engine::graph::index::index_rust(&p, &mut store)
-        .map_err(|e| format!("索引失败：{e}"))?;
-    Ok(Envelope::yes(json!({
-        "files": rep.files,
-        "symbols": rep.symbols,
-        "calls": rep.calls,
-        "incomplete": rep.incomplete,
-        "truncated": rep.truncated,
-        "unreadable": rep.unreadable,
-        // 解析期的三个数**分开报**——它们的说法完全不同
-        "resolved": rep.resolved,
-        "ambiguous": rep.ambiguous.len(),
-        "external": rep.external,
-        "ms": t0.elapsed().as_millis() as u64,
-    }))
-    .to_value())
-}
-
-/// 看规模。**只读打开**——状态栏问得频繁，不该跟写者抢锁。
-#[tauri::command]
-fn graph_stats(root: String) -> Value {
-    let p = PathBuf::from(&root);
-    let db = graph_db(&p);
-    if !db.is_file() {
-        // 还没索引过——**这不是错误**，是"你还没让它建过图"。
-        // 走 `no` 而不是 `unknown`：我们确知它不存在。
-        return Envelope::<Value>::no("这个项目还没建过图谱（点一下索引就行）").to_value();
-    }
-    match jingwei_engine::graph::store::Store::open_readonly(&db) {
-        Ok(s) => match s.counts() {
-            Ok((nodes, edges)) => Envelope::yes(json!({ "nodes": nodes, "edges": edges })).to_value(),
-            Err(e) => Envelope::<Value>::unknown(format!("读图谱规模失败：{e}")).to_value(),
-        },
-        Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),
-    }
-}
-
-/// 给可视化用的数据。**天生带上限**——超了截断并如实说。
-#[tauri::command]
-fn graph_dump(root: String, limit: Option<usize>) -> Value {
-    let p = PathBuf::from(&root);
-    let db = graph_db(&p);
-    if !db.is_file() {
-        return Envelope::<Value>::no("这个项目还没建过图谱").to_value();
-    }
-    match jingwei_engine::graph::store::Store::open_readonly(&db) {
-        Ok(s) => match s.dump(limit.unwrap_or(2000)) {
-            Ok(v) => Envelope::yes(v).to_value(),
-            Err(e) => Envelope::<Value>::unknown(format!("导出图谱失败：{e}")).to_value(),
-        },
-        Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),
-    }
-}
 
 /// 跑一次真实的编译器检查。
 ///
@@ -851,20 +804,83 @@ async fn run_task(app: AppHandle, root: String, task: String) -> Result<Value, S
 
 fn main() {
     jingwei_engine::dlog::install_panic_hook();
-    let start = std::env::args()
-        .nth(1)
-        .filter(|a| Path::new(a).is_dir());
+    // 参数分两类，**与顺序无关**：
+    //   一个存在的目录  → 直接打开它（也支持把文件夹拖到 exe 上）
+    //   `--tab <页名>`  → 启动就落在那一页
+    // 这样 `jingwei-gui.exe D:\proj --tab graph` 和反过来写都一样能用——
+    // 用户不该去记参数顺序。
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    // **取一个开关的值，但不许把下一个开关当值**（2026-10-16 修，真缺陷）。
+    //
+    // 原来的写法是 `.position(|a| a == "--tab").and_then(|i| argv.get(i + 1))`——
+    // 它只看"下一个参数在不在"，**不看它是不是另一个开关**。
+    //
+    // 实际后果（拿界面门禁的取证命令跑出来的）：
+    //   `jingwei-gui.exe <目录> --tab graph --report <path>`
+    //   解析 `--sweep` 时它后面**紧跟着 `--report`** → 于是 `--report` 被当成
+    //   一个页签名，`tabs` 变成非空 → 走"挨页点一遍"那条路，
+    //   **本该只报当前这一页的报告，变成了七页**。
+    // 而读报告的那侧（`uitest-window.mjs`）期望单页 → 断言全落在错的地方。
+    //
+    // 这是**通用的参数解析错**：任何"开关后面漏了值"都会把下一个开关吃掉。
+    // 所以这里一并收紧三处（`--tab` / `--report` / `--sweep`）。
+    let flag_value = |name: &str| -> Option<String> {
+        argv.iter()
+            .position(|a| a == name)
+            .and_then(|i| argv.get(i + 1))
+            // 下一个参数以 `--` 开头 = 它不是值，是另一个开关。
+            .filter(|v| !v.starts_with("--"))
+            .cloned()
+    };
+    let start = argv
+        .iter()
+        .find(|a| Path::new(a.as_str()).is_dir())
+        .cloned();
+    let tab = flag_value("--tab");
+    // `--report <路径>`：把界面状态写进文件（开发工具，见 `start_report`）。
+    let report = flag_value("--report");
+    // **`--shot`（截图）已撤掉（2026-10-16）。**
+    //
+    // 我加过它：JS 里 `canvas.toDataURL()` → Rust 落盘。代码进了 exe，
+    // **但从来没产出过文件，而且没有任何诊断**——因为这个 crate 是
+    // **Windows GUI 子系统**，`eprintln!` 的 stderr 不存在（输出被静默丢掉），
+    // 而 `dlog` 在这个进程里也不落盘。于是"看不见"叠着"看不见"。
+    //
+    // 试了 7 次没收敛 → 按 SOP「失败 2 次就停」撤掉。
+    // **一条"加了没生效"的能力比没有更糟**：它会让人以为有截图这条路，
+    // 而实际上没有（这个项目为"看起来有、其实没有"付过太多次账）。
+    //
+    // 要它的时候怎么做（留给下一次，附条件的记录）：
+    //   ① **先确认诊断通道**——GUI 子系统里 stderr 与 dlog 都可能没有；
+    //      唯一验证过能用的是 `save_report` 那条 invoke 通道，
+    //      所以**第一件事是让截图状态写进报告**，而不是先写截图。
+    //   ② 或者走 Tauri 自己的 window API 截图（不依赖页面）。
+    let report_only = true;
+    let _ = report_only;
+    // `--sweep a,b,c`：启动后**把这几页挨个点一遍**再交报告（开发工具）。
+    // 用它而不是"一页开一次窗口"：外壳有六页，一页一次就是六次冷启动；
+    // 而"挨个点一遍"本来就是用户的动作，更真也更便宜。
+        // 同一个坑：`--sweep` 的值也**不许是另一个开关**（见上面 `flag_value` 的注释）。
+        let sweep: Vec<String> = flag_value("--sweep")
+            .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+            .unwrap_or_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(InitialProject(std::sync::Mutex::new(start)))
+        .manage(InitialTab(std::sync::Mutex::new(tab)))
         .manage(SysSampler(std::sync::Mutex::new(machine::Sampler::new())))
         // 实时层：同时只盯一个项目（见 `WatchState` 的说明）
         .manage(WatchState::default())
         // 状态栏的数字由这里推，不由前端拉：
         // 采样要问系统，前端问不到；每秒来回一次 IPC 也不划算。
-        .setup(|app| {
+        .setup(move |app| {
             jingwei_engine::dlog::i("1000", "app=gui");
             let handle: AppHandle = app.handle().clone();
+            // 自检：只有显式传了 `--report` 才跑。`report` 直接 move 进来，
+            // 不绕 `app.state()`——那要 `Manager` trait，而且没必要为一次性参数上 state。
+            if let Some(p) = report.clone() {
+                start_report(handle.clone(), p, sweep.clone());
+            }
             std::thread::spawn(move || {
                 let mut sampler = machine::Sampler::new();
                 // 先立刻推一帧（CPU 占用要两次采样才有值，先给内存/磁盘/进程数）。
@@ -917,10 +933,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             watch_start,
             watch_stop,
-            graph_index,
-            graph_stats,
-            graph_dump,
+            graph::graph_index,
+            graph::graph_stats,
+            graph::graph_dump,
+            graph::graph_runs,
             initial_project,
+            initial_tab,
+            selfcheck::save_report,
             sample_now,
             inspect,
             audit,

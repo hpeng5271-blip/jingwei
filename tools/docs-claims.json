@@ -1,0 +1,164 @@
+{
+  "note": "『声明 N 项的地方，枚举必须真的是 N 条』的唯一真源。改声明只改这里，不改进脚本；脚本保持只比较、不修改。每条 claim 的字段：id（唯一）/ doc（文档名，仓库内相对路径）/ heading（节标题里一段稳定的文字，不用行号——行号会漂）/ declared（这条声明该是几，记在这里）/ declaredPattern（怎么从文档里把声明的数字读出来，第 1 个捕获组是数字原文，量词一起括进去——「九层」而不是只括「九」，因为「3.5 万」的万是数量级——匹配不到就报错，绝不静默通过）/ declaredWhere（heading 或 section，默认 section）/ unit（单位，只用来报错时好读）/ tolerance（可选，默认 0：声明带「约」的时候给一个容差比例）/ enum（怎么在那一节里数出条目）/ note（为什么这么数）。**声明的数字以文档里读到的为准**，再和两样东西对：枚举数出来的条数、以及这里的 declared 记的数——文档、枚举、真源三处任一处漂了都会报错。enum 的写法：region = heading | fence | table | paragraph | line | section；fence 配 block（第几个代码块，默认 1）；table 配 table（第几张表，默认 1）；paragraph 配 paragraph + lineInParagraph；line 配 linePattern；pattern 是数条目的正则；mode = count（默认，数匹配条数）或 sum（把匹配到的数字加总，配 multiplier）。加一条 = 在那份文档里找一处「写了数字、下面跟着枚举」的地方，想清楚怎么数，然后跑 node tools/check-docs.mjs。**声明跟着枚举走**：枚举是事实，标题是可错的。",
+  "known_gaps": [
+    "设计.md §12.1 标题写「六层，各管一件事」，那张表有 8 行——同一失效模式在《设计》里也有一处。没登记：设计.md 这一轮不许改，登记进门禁就会红（门禁要能失败，但不能红着交）。谁改那一节，谁就顺手把这条 claim 加起来。",
+    "总稿.md §10.2 的「tools 13,714 行（36 个手写文件）」没登记：以 tools/ 下除 graph.json 之外的 36 个文件逐文件数换行符是 8,232 行（其中 1.49MB 的 graphview.png 占 5,572），把 \\r 也当换行是 13,747 行（PNG 占 11,052）——13,714 这个数落在这两种之间，像一个算进了二进制 PNG 的数。这条得先定清楚「行数怎么数」，才能变成断言。"
+  ],
+  "claims": [
+    {
+      "id": "zonggao-1.3-four-lines",
+      "doc": "总稿.md",
+      "heading": "## 1.3 四条不许破的线",
+      "declared": 4,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*条不许破)",
+      "declaredWhere": "heading",
+      "unit": "条",
+      "enum": { "region": "table", "table": 1, "pattern": "^\\| \\*\\*", "mode": "count" },
+      "note": "标题声明四条线，下面那张表每一行以加粗的线名开头——数加粗行"
+    },
+    {
+      "id": "zonggao-2.2-engine-layers",
+      "doc": "总稿.md",
+      "heading": "## 2.2 engine 的分层",
+      "declared": 7,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
+      "declaredWhere": "heading",
+      "unit": "层",
+      "enum": { "region": "fence", "pattern": "^L\\d+\\s", "mode": "count" },
+      "note": "就是这一轮抓出来的两处之一：原来标题写「六层」，而 L0–L6 是 7 行。数代码块里以 L+数字开头的行"
+    },
+    {
+      "id": "zonggao-2.4-entities",
+      "doc": "总稿.md",
+      "heading": "## 2.4 领域模型",
+      "declared": 13,
+      "declaredPattern": "([\\d.]+\\s*实体)",
+      "declaredWhere": "heading",
+      "unit": "个",
+      "enum": { "region": "table", "table": 1, "pattern": "`[A-Za-z_][A-Za-z_0-9]*`", "mode": "count" },
+      "note": "实体表按类分组（4+2+2+1+4），行数不等于实体数——数的是表里的实体名（反引号里的标识符）"
+    },
+    {
+      "id": "zonggao-2.4-relations",
+      "doc": "总稿.md",
+      "heading": "## 2.4 领域模型",
+      "declared": 16,
+      "declaredPattern": "([\\d.]+\\s*关系)",
+      "declaredWhere": "heading",
+      "unit": "条",
+      "enum": { "region": "table", "table": 2, "pattern": "`[A-Za-z_][A-Za-z_0-9]*`", "mode": "count" },
+      "note": "关系表里有些行写两条（`calls` / `references`），所以数关系名而不是数行"
+    },
+    {
+      "id": "zonggao-3.2-tables",
+      "doc": "总稿.md",
+      "heading": "## 3.2 六张表",
+      "declared": 6,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*张表)",
+      "declaredWhere": "heading",
+      "unit": "张",
+      "enum": { "region": "paragraph", "paragraph": 1, "lineInParagraph": 1, "pattern": "`[a-z_0-9]+`", "mode": "count" },
+      "note": "标题下的第 1 段第 1 行用 · 分隔列出表名；FTS 表与视图写在第 2 行，不算在「六张表」里（标题自己把它们分开写了）"
+    },
+    {
+      "id": "zonggao-3.3-drift-tests",
+      "doc": "总稿.md",
+      "heading": "## 3.3 四条守漂移的测试",
+      "declared": 4,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*条守漂移)",
+      "declaredWhere": "heading",
+      "unit": "条",
+      "enum": { "region": "table", "table": 1, "pattern": "^\\| `", "mode": "count" },
+      "note": "表的每行以反引号里的测试名开头——数这样的数据行"
+    },
+    {
+      "id": "zonggao-3.4-write-steps",
+      "doc": "总稿.md",
+      "heading": "## 3.4 写入",
+      "declared": 4,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
+      "declaredWhere": "heading",
+      "unit": "步",
+      "enum": { "region": "fence", "pattern": "^\\d+\\.", "mode": "count" },
+      "note": "标题声明四步，下面的流水账按 1. 2. 3. 4. 排"
+    },
+    {
+      "id": "zonggao-5.1-pipeline-steps",
+      "doc": "总稿.md",
+      "heading": "## 5.1 五步",
+      "declared": 5,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
+      "declaredWhere": "heading",
+      "unit": "步",
+      "enum": { "region": "fence", "pattern": "[^→\\s][^→]*", "mode": "count" },
+      "note": "流水线用 → 串起来，数箭头之间非空的段（段数 = 箭头数 + 1，所以数段而不是数箭头）"
+    },
+    {
+      "id": "zonggao-5.2-filter-steps",
+      "doc": "总稿.md",
+      "heading": "## 5.2 过滤七步",
+      "declared": 7,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
+      "declaredWhere": "heading",
+      "unit": "步",
+      "enum": { "region": "table", "table": 1, "pattern": "^\\| [①②③④⑤⑥⑦⑧⑨⑩]", "mode": "count" },
+      "note": "过滤七步按 ①–⑦ 编号，数带圈数字开头的表行"
+    },
+    {
+      "id": "zonggao-5.3-four-parts",
+      "doc": "总稿.md",
+      "heading": "## 5.3 四要素",
+      "declared": 4,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*要素)",
+      "declaredWhere": "heading",
+      "unit": "样",
+      "enum": { "region": "fence", "pattern": "^\\S", "mode": "count" },
+      "note": "四要素一个一行写在代码块里，数非空行"
+    },
+    {
+      "id": "zonggao-5.4-diagnosis-chain",
+      "doc": "总稿.md",
+      "heading": "## 5.4 排查链",
+      "declared": 9,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
+      "declaredWhere": "heading",
+      "unit": "层",
+      "enum": { "region": "fence", "pattern": "^[①②③④⑤⑥⑦⑧⑨⑩]", "mode": "count" },
+      "note": "就是这一轮抓出来的两处之一：原来标题写「八层」，而 ①–⑨ 是 9 条。数代码块里带圈数字开头的行"
+    },
+    {
+      "id": "zonggao-8.2-test-layers",
+      "doc": "总稿.md",
+      "heading": "## 8.2 四层测试",
+      "declared": 4,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
+      "declaredWhere": "heading",
+      "unit": "层",
+      "enum": { "region": "table", "table": 1, "pattern": "^\\| \\*\\*", "mode": "count" },
+      "note": "已建的四层各占一行（加粗开头）；未建的三层写在表下的散文里，不算在这张表里"
+    },
+    {
+      "id": "zonggao-10.2-handwritten-lines",
+      "doc": "总稿.md",
+      "heading": "## 10.2 规模",
+      "declared": 35000,
+      "declaredPattern": "约\\s*([\\d.]+\\s*万)",
+      "declaredWhere": "section",
+      "unit": "行",
+      "tolerance": 0.05,
+      "enum": { "region": "line", "linePattern": "^\\|\\s*手写代码", "pattern": "([\\d,]{3,})", "mode": "sum" },
+      "note": "就是这一轮抓出来的两处之一：这一行逐项列出 5 个 crate 的行数，声明「约 3.5 万」是它们的加总。声明里带「约」，所以给 5% 容差——原来的 5.7 万差了 69%，照样会被抓住"
+    },
+    {
+      "id": "zonggao-11.2-measured",
+      "doc": "总稿.md",
+      "heading": "## 11.2 本版实测过的三件事",
+      "declared": 3,
+      "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*件事)",
+      "declaredWhere": "heading",
+      "unit": "件",
+      "enum": { "region": "table", "table": 1, "pattern": "^\\| ", "mode": "count" },
+      "note": "三件事各占一行"
+    }
+  ]
+}

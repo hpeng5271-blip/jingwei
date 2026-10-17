@@ -327,28 +327,7 @@ impl Store {
         let Some(row) = rows.next().context("读节点行失败")? else {
             return Ok(None);
         };
-        let kind_s: String = row.get(1)?;
-        let source_s: String = row.get(7)?;
-        let conf: f64 = row.get(8)?;
-        let data: Option<String> = row.get(6)?;
-        Ok(Some(Node {
-            id: row.get(0)?,
-            kind: kind_from_str(&kind_s).with_context(|| format!("库里存了未知的 kind：{kind_s}"))?,
-            name: row.get(2)?,
-            file_path: row.get(3)?,
-            line: row.get(4)?,
-            language: row.get(5)?,
-            data: match data {
-                Some(t) => Some(serde_json::from_str(&t).context("节点 data 不是合法 JSON")?),
-                None => None,
-            },
-            source: source_from_str(&source_s)
-                .with_context(|| format!("库里存了未知的 source：{source_s}"))?,
-            confidence: jingwei_model::Confidence::from_value(conf as f32),
-            checksum: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-        }))
+        Ok(Some(row_to_node(row)?))
     }
     /// 库里记着哪些文件（用来找"索引过但现在已经没有了"的）。
     pub fn indexed_files(&self) -> Result<Vec<String>> {
@@ -362,6 +341,33 @@ impl Store {
         let mut out = Vec::new();
         for r in rows {
             out.push(r.context("读文件路径失败")?);
+        }
+        Ok(out)
+    }
+
+    /// 按类型列节点。**新到旧的顺序**（`created_at` 降序）。
+    ///
+    /// 为什么需要它：在这之前，读图谱只有三条路——按 id 点查（`node`）、
+    /// 按文件查（`file_state`）、整张导出（`dump`）。所以"上次跑失败了哪些问题"
+    /// 这类问题**根本问不出来**：知道要看 `run` 节点，却没有"给我所有 run"这条入口。
+    /// M5 的验收（`tests/m5_run_into_graph.rs`）就是卡在这一点上才把它补出来的。
+    ///
+    /// `limit` 是必需的，不给默认值：图谱是几千个节点的东西，
+    /// "全给我"这种调用在界面上一定会变成卡顿，而卡顿的锅最后会算到图谱头上。
+    pub fn list_kind(&self, kind: NodeKind, limit: usize) -> Result<Vec<Node>> {
+        let mut st = self
+            .conn
+            .prepare_cached(
+                "SELECT id,kind,name,file_path,line,language,data,source,confidence,checksum,created_at,updated_at
+                 FROM nodes WHERE kind=?1 ORDER BY created_at DESC LIMIT ?2",
+            )
+            .context("准备按类型列节点失败")?;
+        let mut rows = st
+            .query(params![kind.as_str(), limit as i64])
+            .context("按类型查节点失败")?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().context("读节点行失败")? {
+            out.push(row_to_node(row)?);
         }
         Ok(out)
     }
@@ -552,6 +558,37 @@ impl Store {
         tx.commit().context("提交失败")?;
         Ok(report)
     }
+}
+
+/// 一行 `nodes` → 领域模型里的 `Node`。
+///
+/// **只有这一处映射**：它原来内联在 `node()` 里，而 `list_kind` 又要用同一套列顺序，
+/// 分开写就迟早歪（列顺序或类型改一处、漏一处，症状是"读出来的节点字段串了"，不报错）。
+/// 两条读路径（点查 / 按类型列）共用它。
+fn row_to_node(row: &rusqlite::Row<'_>) -> Result<Node> {
+    let id: String = row.get(0)?;
+    let kind_s: String = row.get(1)?;
+    let data: Option<String> = row.get(6)?;
+    let source_s: String = row.get(7)?;
+    let conf: f64 = row.get(8)?;
+    Ok(Node {
+        id,
+        kind: kind_from_str(&kind_s).with_context(|| format!("库里存了未知的 kind：{kind_s}"))?,
+        name: row.get(2)?,
+        file_path: row.get(3)?,
+        line: row.get(4)?,
+        language: row.get(5)?,
+        data: match data {
+            Some(t) => Some(serde_json::from_str(&t).context("节点 data 不是合法 JSON")?),
+            None => None,
+        },
+        source: source_from_str(&source_s)
+            .with_context(|| format!("库里存了未知的 source：{source_s}"))?,
+        confidence: jingwei_model::Confidence::from_value(conf as f32),
+        checksum: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
 }
 
 /// 字符串 → 枚举。**认不出来是错误，不是默认值**：

@@ -90,6 +90,46 @@ fn 索引两遍图谱不会变大() {
     assert_eq!(first, second, "重跑不该涨库");
 }
 
+/// **`scanned` 与 `files` 是两个数，而且第二遍 `files` 就该是 0**（2026-10-16）。
+///
+/// 为什么这条值得单独钉：这两个数**混着用会把用户骗了**——
+/// `jingwei index` 原来只报 `files`，而它是"这次真正处理了几个"，
+/// 于是增量运行会显示「1 个文件 · 10 个符号」，**看起来像"这个项目只有一个文件"**。
+/// 实测两处外壳因此差 7 倍：`jingwei index` 报 1，`export_graph`（临时空库）报 91。
+///
+/// 三个断言分开钉，因为它们会各自坏：
+///   ① 第一遍：扫到 N 个，且**全都处理了**（`files == scanned`）；
+///   ② 第二遍：扫到的数**不变**（一个都没漏扫），而处理的是 **0**（全被增量跳过）；
+///   ③ 第二遍的 `skipped_unchanged + skipped_same_content` **等于 `scanned`**——
+///      否则"没变"这个说法就没有下落（可能是被别的分支悄悄丢掉的）。
+#[test]
+fn 扫到的数与处理了的数是两个数() {
+    let root = make_project("scanned-vs-files");
+    let mut s = open(&root);
+
+    let first = index::index_rust(&root, &mut s).expect("第一次失败");
+    assert!(first.scanned > 0, "空库第一遍必须扫到东西");
+    assert_eq!(
+        first.files, first.scanned,
+        "空库第一遍：扫到的都该被处理"
+    );
+
+    let second = index::index_rust(&root, &mut s).expect("第二次失败");
+    assert_eq!(
+        second.scanned, first.scanned,
+        "第二遍扫到的数不该变——变了说明收集不稳定"
+    );
+    assert_eq!(
+        second.files, 0,
+        "第二遍什么都没改，处理数必须是 0（这正是'增量在正常工作'）"
+    );
+    assert_eq!(
+        second.skipped_unchanged + second.skipped_same_content,
+        second.scanned,
+        "没变的数要对得上：否则'跳过了'这个说法没有下落"
+    );
+}
+
 /// 符号的 id 里必须带容器路径——不然 `Ledger::post` 和别的 `post` 会撞成同一个节点。
 #[test]
 fn impl_里的方法带容器路径() {

@@ -4,7 +4,7 @@
 //!
 //! * **关系必有来源**：`Edge::new` 的 `source` 是必填参数——没来源的关系造不出来。
 //! * **三态而非布尔**：`Verdict` 区分"没有"与"无法确认"。后者永远不算缺失。
-//! * **估的不许报 Error**：`Conclusion::error_checked` 会拒绝
+//! * **估的不许报 Error**：`Finding` 过 `rules::enforce_evidence` 时会被降级（见那个函数）
 //!   推测来源（`Confidence::Guessed`）或无自查命令的结论。
 //! * **稳定标识**：`node_id` 做规范化（分隔符、大小写），保证同一个东西永远同一个 id。
 //!
@@ -296,6 +296,52 @@ pub enum Verdict<T> {
     Unknown,
 }
 
+/// **"查不了"是谁造成的**——`Verdict::Unknown` 缺的那一半。
+///
+/// ## 为什么它必须存在（2026-10-16）
+///
+/// `AGENTS.md` §2 一直写着一条判据：
+/// **「这是"用户的空白"，还是"我们的失败"？」**
+/// 而它**只活在文档里**——代码里 32 处 `Verdict::Unknown` **一处都没区分**。
+/// 判据写在文档里就是没人执行（这个项目为这条付过 5 次账）。
+///
+/// ## 为什么不做成 `Verdict::Unknown(Unknown)` 的载荷
+///
+/// 因为 `Verdict::Unknown` 是**无载荷**的，32 处 `matches!` /
+/// `Verdict::Unknown =>` 都依赖这一点。给它加字段 = 一次性改 32 处，
+/// 而其中大多数（例如 `query.rs` 的"没索引到"）**本身就知道原因**、
+/// 只是没有地方表达。所以做成**独立类型、钉在产出点**：
+/// 只有产出 `Unknown` 的那一处才知道为什么，下游猜不出来。
+///
+/// ## 为什么"分不清"要单独一档
+///
+/// 有些地方真的分不出（拿到的只是一个字符串）。**硬归到两头就是编**——
+/// 而"编"正是这个系统最反对的事。所以给一档 `Unclear`，让它如实站着。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unknown {
+    /// **用户的空白**：项目里本来就没有，或用户没提供判据的入口。
+    /// 例：没有声明文件、契约里没写这一项。→ 用户能做点什么。
+    TheirGap,
+    /// **我们的失败**：东西可能存在，是我们查不到 / 没实现。
+    /// 例：问不到 pip、这个语言的依赖检测我们还没做。→ 我们能做点什么。
+    OurGap,
+    /// 分不清是哪一头。**不许硬归**（编出来的归类比不归更糟）。
+    Unclear,
+}
+
+impl Unknown {
+    /// 给用户看的一句话。**两种情况的说法必须不同**——
+    /// 因为用户能做的事完全不同：一种是"你补上"，一种是"等我们/换个办法"。
+    pub fn what_to_do(self) -> &'static str {
+        match self {
+            Unknown::TheirGap => "这一项你这边没有；补上就能判断",
+            Unknown::OurGap => "可能是有的，是我们查不到（不是你的问题）",
+            Unknown::Unclear => "查不了，而且现在分不清是哪一头",
+        }
+    }
+}
+
 impl<T> Verdict<T> {
     pub fn is_yes(&self) -> bool {
         matches!(self, Verdict::Yes(_))
@@ -369,6 +415,17 @@ impl Node {
     pub fn with_file(mut self, path: &str, line: u32) -> Node {
         self.file_path = Some(normalize_path(path));
         self.line = Some(line);
+        self
+    }
+
+    /// 挂一段结构化数据在节点上（持久化在 `nodes.data`，读回来还是这份 JSON）。
+    ///
+    /// 用途是**记住"构造时知道、但边不足以表达"的事实**。第一个用它是 `Diagnostic`：
+    /// 它要记住"我原本说自己在哪个文件"——不然查询层分不开
+    /// "本来就没说位置"和"说了但那个文件没索引到"，只会一律回"没有位置"，
+    /// 而界面上为后者写的那一支就永远是死代码。
+    pub fn with_data(mut self, data: serde_json::Value) -> Node {
+        self.data = Some(data);
         self
     }
 }
@@ -465,26 +522,21 @@ impl Edge {
 }
 
 /// 结论级别。颜色只是它的表现，语义在这里。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Level {
-    /// 静默（不显示）
-    Silent,
-    /// 进度
-    Progress,
-    /// 注意（有问题但不挡路）
-    Warn,
-    /// 要修（挡住运行）
-    Error,
-}
-
-/// 一条结论的严重度。**与 `Level` 的分工**：`Level` 是"给不给用户看、用什么颜色"，
-/// `Severity` 是"这条结论本身有多严重"。两者刻意分开——静默的结论也可能很严重，
-/// 只是被上层根因挡住了（设计 §8.3 的抑制）。
 ///
-/// **这两个类型原来长在 `engine::rules` 里**（Q6 抓到的一对循环：`project` 要用它们、
-/// 而 `rules` 又要用 `project::HYGIENE_IDS`）。它们本来就是领域概念——"给用户看的东西"
-/// 和 `Conclusion` 是邻居——所以搬到这一层。`rules` 那边 `pub use` 转发，调用点不用改。
+/// **这里原来有两个"级别"类型，2026-10-16 合成了一个。**
+/// 一个是这个 `Severity`；另一个叫 `Level`（`Silent` / `Progress` / `Warn` / `Error`），
+/// 文档说它们分工是"`Level` 管给不给用户看、`Severity` 管这条本身多严重"。
+/// 实情是 **`Level` 在生产里零构造点**——它只活在另一个也没人用的类型 `Conclusion` 上，
+/// 两者一起删了。留着一个并行概念比删掉它危险：读代码的人会以为"给不给用户看"
+/// 这件事有人在管，其实一行都没执行。
+///
+/// 连带删掉的还有那条挂在上面的设计：`Level::Silent` 背后的"抑制下位"机制
+/// **从来没实现**（详见 `AGENTS.md` §5），所以"隐藏必须可查"那条要求也就无从谈起。
+/// 顺带的好处：`复审记录.md` 当初列的 B 档风险"抑制下位可能是永久沉默"
+/// **因为不存在而不可能发生**。
+///
+/// **如果将来真要做"给不给用户看"这一层**：把 `Level` 加回来时，
+/// **同一次改动里连"隐藏必须可查"的入口一起做**，否则就会重演这件事。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -493,8 +545,12 @@ pub enum Severity {
     Info,
 }
 
-/// 项目体检与排查链上的一条发现。它是 `Conclusion` 的"壳"：
-/// `Conclusion` 管"这一条凭什么成立"，`Finding` 管"它在界面上挂在哪一层、哪一组"。
+/// 项目体检与排查链上的一条发现。
+///
+/// 它同时管两件事：**"这一条凭什么成立"**（`source` / `confidence` / `evidence` / `verify`）
+/// 与**"它在界面上挂在哪一层、哪一组"**（`layer` / `group`）。
+/// 2026-10-16 之前这两件事分在两个类型上（另一个叫 `Conclusion`），而那个类型生产零调用——
+/// 所以合成了一个，见下面那段删除说明。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub id: String,
@@ -515,131 +571,45 @@ pub struct Finding {
     pub boundary: String,
     pub next: String,
     pub excluded: Vec<String>,
+    /// 这条结论是**凭什么来的**。`Error` 级必须权威来源（见 `rules::enforce_evidence`）。
+    ///
+    /// 2026-10-16 补：这两个字段原来**只在一个生产零调用的类型上有**，
+    /// 于是"估的不许报 Error"这条线，机器上只守住了三分之一（只有"有自查命令"那条）。
+    /// 现在补在生产真正构造的类型上，三道闸齐全（见 `rules::enforce_evidence`）。
+    #[serde(default = "default_source")]
+    pub source: Source,
+    /// 置信度。`Guessed` 不许报 `Error`。
+    #[serde(default = "default_confidence")]
+    pub confidence: Confidence,
 }
 
-/// 四要素结论。**字段都是必填的**——因为少一个就不该出卡。
-///
-/// **字段是私有的，只留一条构造入口**：设计里那条"估的不许报 Error"
-/// 如果只写在文档里，就等于没写——任何人都能直接塞一个 `level: Error` 进去。
-/// 现在它必须过 `Conclusion::new`，而 `new` 里面就是那道闸（`error_checked`）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Conclusion {
-    level: Level,
-    title: String,
-    /// 看到的事实（带数字、带来源）
-    facts: Vec<String>,
-    /// 你自己怎么验证（一条能复制粘贴的命令）
-    verify: Vec<String>,
-    /// 什么时候不用管
-    boundary: Option<String>,
-    /// 下一步（建议；**不生成修复命令**）
-    next: Option<String>,
-    source: Source,
-    confidence: Confidence,
-    /// 被过滤掉时说明原因（设计 §8.3：隐藏必须可查）
-    suppressed: Option<SuppressReason>,
+fn default_source() -> Source {
+    // 老数据 / 反序列化缺少这个字段时的兜底：**最保守的那个**。
+    // 用 `User`（非权威）而不是 `Meta`，这样"缺字段"不会意外通过权威闸。
+    Source::User
 }
 
-impl Conclusion {
-    /// **唯一的构造入口。** 想造 Error？先过三道闸（权威来源 / 非推测 / 有自查命令）。
-    /// 不满足就自动降级成 Warn，并把降级原因写进 `facts`——用户能看见为什么降级。
-    pub fn new(
-        level: Level,
-        title: impl Into<String>,
-        facts: Vec<String>,
-        verify: Vec<String>,
-        source: Source,
-        confidence: Confidence,
-    ) -> Conclusion {
-        error_checked(Conclusion {
-            level,
-            title: title.into(),
-            facts,
-            verify,
-            boundary: None,
-            next: None,
-            source,
-            confidence,
-            suppressed: None,
-        })
-    }
-
-    pub fn with_boundary(mut self, b: impl Into<String>) -> Conclusion {
-        self.boundary = Some(b.into());
-        self
-    }
-
-    pub fn with_next(mut self, n: impl Into<String>) -> Conclusion {
-        self.next = Some(n.into());
-        self
-    }
-
-    pub fn suppressed(mut self, why: SuppressReason) -> Conclusion {
-        self.suppressed = Some(why);
-        self
-    }
-
-    pub fn level(&self) -> Level {
-        self.level
-    }
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-    pub fn facts(&self) -> &[String] {
-        &self.facts
-    }
-    pub fn verify(&self) -> &[String] {
-        &self.verify
-    }
-    pub fn boundary(&self) -> Option<&str> {
-        self.boundary.as_deref()
-    }
-    pub fn next(&self) -> Option<&str> {
-        self.next.as_deref()
-    }
-    pub fn source(&self) -> Source {
-        self.source
-    }
-    pub fn confidence(&self) -> Confidence {
-        self.confidence
-    }
-    pub fn suppression(&self) -> Option<SuppressReason> {
-        self.suppressed
-    }
+fn default_confidence() -> Confidence {
+    // 同理，兜底用最保守的：算"推测"，不许撑 `Error`。
+    Confidence::Guessed
 }
 
-/// 隐藏的原因。没有原因就不许隐藏。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SuppressReason {
-    Duplicate,
-    SuppressedByParent,
-    Aggregated,
-    BelowSilenceThreshold,
-    UserDisabled,
-}
+// **这里原来有一整套「四要素结论」类型：`Conclusion` / `Level` / `SuppressReason`
+// 以及 `error_checked`（三道闸：权威来源 / 非推测置信度 / 有自查命令）。**
+// 2026-10-16 删掉了，理由值得留着：
+//
+//   - 它们在生产代码里**零调用**——真正出卡的是 `Finding`（这个文件里还在），
+//     而"不误报"的闸长在 `crates/engine/src/understand/rules.rs` 的 `enforce_evidence` 上。
+//   - 而那道闸原来**只有一条**（"有自查命令"），因为 `Finding` 上根本没有
+//     source / confidence 两个字段——**设计里那条"估的不许报 Error"只守住了三分之一**。
+//     现在补齐了：`Finding` 带这两个字段（默认最保守：非权威 + 推测），
+//     `enforce_evidence` 三条闸齐全，想报 Error 的规则必须显式用 `f_meta` 声明权威。
+//   - 两处实现迟早分家，而这个仓库已经因为"同一个判断两处各写一遍"吃过苦头。
+//     **所以留下生产真正走的那一份，删掉没人走的那一份。**
+//
+// 如果将来真需要"结论"这一层（例如把 `Finding` 拆成"凭什么成立"与"挂在哪"两半），
+// 再把它们加回来——**加的时候连闸一起加**，不要只加类型。
 
-/// 结论的构造入口。**这里是"不误报"的最后一道闸**：
-/// 想造一个 Error，必须同时满足三条——权威来源、非推测置信度、有自查命令。
-/// 任何一条不满足，就会被降级成 `Warn`，并在 `facts` 里写清为什么降级。
-pub fn error_checked(mut c: Conclusion) -> Conclusion {
-    if c.level != Level::Error {
-        return c;
-    }
-    if !c.source.is_authoritative() {
-        c.facts
-            .push(format!("（来源 {} 不算权威，已降级为「注意」）", c.source.as_str()));
-        c.level = Level::Warn;
-    } else if c.confidence == Confidence::Guessed {
-        c.facts.push("（结论是估的，已降级为「注意」）".to_string());
-        c.level = Level::Warn;
-    } else if c.verify.is_empty() {
-        c.facts
-            .push("（没有可复制的自查命令，已降级为「注意」）".to_string());
-        c.level = Level::Warn;
-    }
-    c
-}
 
 /// 稳定标识：`<kind>:<规范化 key>`。
 /// 规范化做的事：反斜杠转正斜杠、去掉 `./`、统一小写（Windows 路径大小写不敏感）。
@@ -689,63 +659,6 @@ mod tests {
     // 而不是让 lint 在整个 crate 里静默失声。
     #![allow(clippy::let_underscore_must_use)]
     use super::*;
-
-    /// 测试助手也**必须走受检入口**——否则测试测的就不是真实路径了。
-    fn c(level: Level, source: Source, confidence: Confidence, verify: &[&str]) -> Conclusion {
-        Conclusion::new(
-            level,
-            "t",
-            vec![],
-            verify.iter().map(|s| s.to_string()).collect(),
-            source,
-            confidence,
-        )
-    }
-
-    /// **这是这个 crate 存在的理由**：没有自查命令的 Error 不许出门。
-    #[test]
-    fn an_error_without_a_self_check_is_downgraded() {
-        let got = error_checked(c(Level::Error, Source::Meta, Confidence::Certain, &[]));
-        assert_eq!(got.level(), Level::Warn);
-        assert!(got.facts().iter().any(|f| f.contains("自查命令")));
-    }
-
-    /// 推测出来的东西不许报成"要修"——这是"不误报"的核心。
-    #[test]
-    fn a_guessed_conclusion_is_never_an_error() {
-        let got = error_checked(c(
-            Level::Error,
-            Source::Meta,
-            Confidence::Guessed,
-            &["cargo metadata"],
-        ));
-        assert_eq!(got.level(), Level::Warn);
-    }
-
-    /// 语法层的推断（非权威来源）也不许直接报 Error。
-    #[test]
-    fn a_non_authoritative_source_is_never_an_error() {
-        let got = error_checked(c(
-            Level::Error,
-            Source::TreeSitter,
-            Confidence::High,
-            &["grep -n foo src/"],
-        ));
-        assert_eq!(got.level(), Level::Warn);
-    }
-
-    /// 三条都满足时才允许 Error。
-    #[test]
-    fn a_backed_error_stays_an_error() {
-        let got = error_checked(c(
-            Level::Error,
-            Source::Meta,
-            Confidence::Certain,
-            &["cargo metadata --format-version=1"],
-        ));
-        assert_eq!(got.level(), Level::Error);
-        assert!(got.facts().is_empty(), "没降级就不该塞解释");
-    }
 
     /// **"无法确认"绝不是"没有"**。C++ 的包查不到时，说缺失就是误报。
     #[test]
@@ -917,21 +830,5 @@ mod tests {
         assert_eq!(Confidence::from_value(0.5), Confidence::Guessed);
         assert_eq!(Confidence::Guessed.value(), 0.5);
     }
-
-    /// 隐藏必须给得出理由，否则不许隐藏。
-    #[test]
-    fn suppression_always_carries_a_reason() {
-        let reasons = [
-            SuppressReason::Duplicate,
-            SuppressReason::SuppressedByParent,
-            SuppressReason::Aggregated,
-            SuppressReason::BelowSilenceThreshold,
-            SuppressReason::UserDisabled,
-        ];
-        let json = serde_json::to_value(reasons).unwrap();
-        assert_eq!(json.as_array().unwrap().len(), 5);
-        let cc = c(Level::Warn, Source::Meta, Confidence::Certain, &["x"])
-            .suppressed(SuppressReason::Duplicate);
-        assert_eq!(cc.suppression(), Some(SuppressReason::Duplicate));
-    }
 }
+

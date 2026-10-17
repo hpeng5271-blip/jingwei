@@ -427,8 +427,7 @@ pub fn probe_project(root: &Path) -> ProjectFacts {
     // 这里没有 pip 清单（快速路径），Python 那一档会标成「无法确认」——
     // 不猜，是因为猜错一次，用户就再也不信这一栏了。
     let langs = crate::detect::lang::detect_all(root);
-    let (deps_detail, deps_status) =
-        crate::detect::deps::collect(root, &langs, contract.as_ref(), &[]);
+    let deps_detail = crate::detect::deps::collect(root, &langs, contract.as_ref(), &[]);
     ProjectFacts {
         root: root.to_string_lossy().to_string(),
         exists: true,
@@ -437,7 +436,6 @@ pub fn probe_project(root: &Path) -> ProjectFacts {
         contract_error,
         declared_deps: declared,
         deps_detail,
-        deps_status,
         venvs: scan_venvs(root),
         recent_files: recent_files(root, 10),
         hygiene: Some(crate::project::scan(root)),
@@ -538,9 +536,7 @@ pub fn make_facts(root: &Path, python_exe: Option<&Path>) -> Facts {
     // 顺带把「装上的版本」也留下——依赖管理的价值就是这两列并排：
     // 清单里要什么、机器上是什么、对得上对不上。
     // 依赖清单与两列状态：和快速路径共用同一段逻辑（见 deps::collect）
-    let (detail, status) = crate::detect::deps::collect(root, &langs, contract.as_ref(), &py.installed);
-    project.deps_detail = detail;
-    project.deps_status = status;
+    project.deps_detail = crate::detect::deps::collect(root, &langs, contract.as_ref(), &py.installed);
 
     Facts {
         schema_version: SCHEMA_VERSION,

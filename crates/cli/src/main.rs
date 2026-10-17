@@ -11,12 +11,16 @@ static MORE: AtomicBool = AtomicBool::new(false);
 // 拆的边界不是"大小平均切"：同一个文件里的东西该回答同一类问题。
 mod cmd_clean;
 mod cmd_doctor;
+mod cmd_graph;
+mod cmd_guide;
 mod cmd_machine;
 mod cmd_project;
 mod cmd_run;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};
+use cmd_graph::cmd_graph;
+use cmd_guide::cmd_guide;
 use cmd_machine::{cmd_spec, cmd_web};
 use cmd_project::{
     cmd_env, cmd_envs, cmd_init, cmd_new, cmd_note, cmd_notes, cmd_snap, kind_list,
@@ -234,7 +238,11 @@ fn run() -> i32 {
     let root = strip_verbatim(root.canonicalize().unwrap_or(root));
     match cmd.as_str() {
         "" | "help" => help(),
-        "doctor" | "check" => cmd_doctor(&root, json, want_check),
+        // `inspect` 是 `使用说明.md` 承诺过的入口（"看项目：结论、待处理项"），
+        // 而它**从来没在分派表里出现过**——按说明书照做会撞上"不认识子命令"。
+        // 现在把它接成 doctor 的同一个入口：**同一个内核，两个名字**。
+        "inspect" | "doctor" | "check" => cmd_doctor(&root, json, want_check),
+        "guide" | "howto" => cmd_guide(&root, json),
         "new" => cmd_new(&root, json, rest, template, parent_dir, python_exe, want_venv, want_git, purpose, lang_name),
         "env" => cmd_env(&root, rest, venv_name, python_exe),
         "note" => cmd_note(&root, rest, kind, purpose),
@@ -251,9 +259,24 @@ fn run() -> i32 {
         "spec" | "machine" => cmd_spec(json),
         "web" | "node" => cmd_web(&root, json),
         "init" => cmd_init(&root, json),
+        "graph" => cmd_graph(&root, json, &rest),
+        // **`jingwei index` = 把项目带到"图谱可用"的状态。**
+        // 与界面「索引一次」同一个内核入口（`graph::index::index_rust`）。
+        //
+        // 为什么它必须存在：**要人开窗手点的操作，就等于不能被执行**。
+        // 原来 `graph index` 是"故意没做"的（理由是"两处实现迟早不一致"），
+        // 而这里是一处实现两条外壳——不冲突，而缺它的代价是每次看图都要手点。
+        "index" | "index-graph" => cmd_graph(&root, json, &["index".to_string()]),
         other => {
             eprintln!("不认识子命令：{}", other);
-            help()
+            help();
+            // **返回非 0。**
+            //
+            // 这原来是 `help()`——而 `help()` 返回 0，于是**"不认识这个命令"被报成了成功**。
+            // 脚本里 `jingwei inspect && next_step` 会继续往下走，
+            // 而用户以为自己刚跑完一次体检。这与四条线里"三态不许压扁"是同一条：
+            // **"没做"不许长得像"做成了"。**
+            1
         }
     }
 }
@@ -269,30 +292,90 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
     }
     p
 }
-fn help() -> i32 {
-    println!(
+/// **子命令表：唯一真源。**
+///
+/// `--help` 显示什么、测试允许什么，都从这一份走。
+///
+/// ## 为什么要有它（2026-10-16 抓到的两处真缺陷）
+///
+/// 1. **`--help` 漏了四个主命令**：`inspect` / `graph` / `spec` / `machine` 都能跑，
+///    却不在 `--help` 里——而 `使用说明.md` 是准的。**两份清单各写各的，必然漂移。**
+/// 2. 更要紧的是 `使用说明.md` 承诺的 `jingwei inspect [目录]`（"看项目：结论、待处理项"）
+///    **在 CLI 里根本不存在**：跑它会打印"不认识子命令：inspect"。
+///    一条被文档承诺、却被命令行拒绝的入口——用户按说明书照做就撞墙。
+///
+/// 所以把清单收成一份，再让 `--help` 与它**同源**，并由测试盯着两边不许分家。
+///
+/// 每项是 `(名字, 别名, 说明)`。名字是**主名**（`--help` 里显示的那个），
+/// 别名只记在这里、供分派用。
+pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
+    ("new", &[], "从模板建一个能立刻跑起来的项目"),
+    (
+        "guide",
+        &["howto"],
+        "**一句话回答「现在能不能跑、卡在哪、下一步敲什么」**——比 doctor 短，因为它会排序",
+    ),
+    ("env", &[], "环境：status / init(建虚拟环境并绑进契约) / install / use"),
+    ("doctor", &["check"], "体检：解释器、依赖、契约、环境变化，给出问题清单"),
+    ("inspect", &[], "看这个项目：结论、待处理项（与 doctor 同一个入口）"),
+    (
+        "audit",
+        &["health"],
+        "项目体检：忽略规则、锁文件、密钥、路径、体积（--deep 才算体积）",
+    ),
+    ("fix", &[], "替你把体检里能安全代做的改掉（默认只预演，--yes 才动手）"),
+    (
+        "whatschanged",
+        &["changed"],
+        "从上次看过算起，这个项目被改了哪些地方",
+    ),
+    ("run", &["start"], "按契约启动项目：6 阶段进度 + 实时输出 + 就绪判定"),
+    ("test", &[], "跑契约里声明的 test 命令"),
+    (
+        "note",
+        &[],
+        "记一句想法；-k 选类别（goal/idea/plan/blocker/learned/decision/note）",
+    ),
+    ("notes", &["log"], "看这个项目的工作记录"),
+    ("scan", &["clean-list"], "清理清单：哪些能删、哪些要管理员、哪些别碰"),
+    ("clean", &[], "执行清理（默认只预演，加 --yes 才动手）"),
+    ("snap", &["snapshot"], "记录一份环境快照，并和上一份对比"),
+    ("envs", &["python"], "列出这台机器上所有能用的 Python"),
+    (
+        "web",
+        &["node"],
+        "Node / 前端：包管理器、依赖装到哪去了、版本要求写在哪",
+    ),
+    ("init", &[], "给已有项目补一份 env.contract.json"),
+    ("spec", &["machine"], "这台机器：CPU / 内存 / 磁盘 / 显卡 / 系统设置"),
+    ("graph", &[], "运行历史：跑过几次、各出了什么问题、挂在哪"),
+    (
+        "index",
+        &[],
+        "**建/更新图谱**——之后图谱页与 `jingwei graph` 就有东西了（与界面「索引一次」同一个内核入口）",
+    ),
+];
+
+/// 把帮助文本渲染成字符串——`help()` 与测试都走它。
+///
+/// **为什么不让 `help()` 直接 `println!`**：那样测试只能去抓 stdout，
+/// 而这条测试要断言的是"每个子命令都出现在帮助里"。拆出可测的纯函数，
+/// 判据才能真的落在**渲染出来的那一份**上，而不是落在"我以为它会渲染什么"上。
+fn render_help() -> String {
+    // 子命令那段**从 `COMMANDS` 生成**，不手写。
+    // 手写的那一版漏了四个能跑的命令（`inspect` / `graph` / `spec` / `machine`），
+    // 而说明书是准的——两份清单各写各的必然漂移。见 `COMMANDS` 的注释。
+    let mut subs = String::new();
+    for (name, _aliases, desc) in COMMANDS {
+        subs.push_str(&format!("  {:<12} {}\n", name, desc));
+    }
+    format!(
         "{}  ·  项目环境体检 / 启动 / 清理\n\
          \n\
          用法：  jingwei <子命令> [选项]\n\
          \n\
          子命令\n\
-         \x20 new <名字>   从模板建一个能立刻跑起来的项目\n\
-         \x20 env         环境：status / init(建虚拟环境并绑进契约) / install / use\n\
-         \x20 doctor      体检：解释器、依赖、契约、环境变化，给出问题清单\n\
-         \x20 audit       项目体检：忽略规则、锁文件、密钥、路径、体积（--deep 才算体积）\n\
-         \x20 fix         替你把体检里能安全代做的改掉（默认只预演，--yes 才动手）\n\
-         \x20 whatschanged 从上次看过算起，这个项目被改了哪些地方\n\
-         \x20 run [参数]  按契约启动项目：6 阶段进度 + 实时输出 + 就绪判定\n\
-         \x20 test        跑契约里声明的 test 命令\n\
-         \x20 note \"...\"  记一句想法；-k 选类别（goal/idea/plan/blocker/learned/decision/note）\n\
-         \x20 notes       看这个项目的工作记录\n\
-         \x20 scan        清理清单：哪些能删、哪些要管理员、哪些别碰\n\
-         \x20 clean       执行清理（默认只预演，加 --yes 才动手）\n\
-         \x20 snap        记录一份环境快照，并和上一份对比\n\
-         \x20 envs        列出这台机器上所有能用的 Python\n\
-         \x20 web         Node / 前端：包管理器、依赖装到哪去了、版本要求写在哪\n\
-         \x20 init        给已有项目补一份 env.contract.json\n\
-         \n\
+         {subs}\
          选项\n\
          \x20 -C, --root <目录>   指定项目根（默认当前目录）\n\
          \x20 --template <模板>   new 用：script / package / cli\n\
@@ -310,7 +393,11 @@ fn help() -> i32 {
          \x20 --permanent         永久删除（不加则走回收站）\n\
          \x20 -y, --yes           跳过预演，直接执行清理",
         c(BOLD, "jingwei")
-    );
+    )
+}
+
+fn help() -> i32 {
+    println!("{}", render_help());
     0
 }
 
@@ -364,4 +451,215 @@ pub(crate) fn setup_console() {
 #[cfg(not(windows))]
 pub(crate) fn setup_console() {
     COLOR.store(std::io::stdout().is_terminal(), Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **子命令层也要"认不出就报错"，不许静默当成默认行为。**
+    ///
+    /// 这条是拿一个真缺陷换的（2026-10-16，第 27 轮目标盘点时抓到）：
+    /// `cmd_graph` 里"空子命令"（列运行历史）和"认不出的子命令"**共用同一个 `_ =>` 兜底**，
+    /// 于是 `jingwei graph index`——**账本里写着"故意没做"的那条命令**——
+    /// 会打印运行历史并**返回 0**。脚本里 `jingwei graph index && 下一步`
+    /// 就这么安心往下走了。
+    ///
+    /// 这与 `main.rs` 顶层分派第 19 轮修的是同一条线（**没做不许长得像做成了**），
+    /// 那次只修了外面那一层。**同一个形状漏在里面一层，隔了八轮才被发现。**
+    ///
+    /// `cmd_env` 里就是对的（`other => { eprintln!(...); 2 }`），所以这条测试盯的是
+    /// "别把 `cmd_graph` 改回去"——判据是那条兜底臂必须**显式叫 `other`**，而且**返回非 0**。
+    ///
+    /// **这条测试的第一版判据写宽了**：它只在 `match sub {` 之后找 `_ =>`，
+    /// 而那段里还有别的 `_ =>`（`serde_json` 的 `unwrap_or_default()` 之类），
+    /// 于是**对着已经修好的代码报红**。改成盯 `other =>` 这个显式名字 + 它的返回码——
+    /// **判据要么精确，要么会被人当成噪声绕过去。**
+    #[test]
+    fn graph_认不出的子命令不许静默成功() {
+        let src = include_str!("cmd_graph.rs");
+        // ① 空子命令那条臂必须在（默认行为），否则"默认"和"认不出"又会被同一段代码接住
+        assert!(
+            src.contains("\"\" =>"),
+            "cmd_graph 里该有一条专门处理空子命令的臂——\
+             否则「只看运行历史」这个默认行为和「认不出的子命令」又会被同一段代码接住"
+        );
+        // ② 认不出的那条臂必须显式叫 other，并且返回非 0
+        let tail = src
+            .split("match sub {")
+            .nth(1)
+            .expect("找不到 `match sub {`——cmd_graph 的形状变了，同步改这条测试");
+        let other_at = tail.find("other =>").expect(
+            "cmd_graph 的 `match sub` 里没有 `other =>` 兜底臂。\
+             认不出的子命令会被静默吞掉（`jingwei graph index` 返回 0）——\
+             用户以为跑成功了。请补上显式的 `other => { ...; 2 }`。",
+        );
+        let arm = &tail[other_at..(other_at + 400).min(tail.len())];
+        assert!(
+            arm.contains("2"),
+            "`cmd_graph` 里认不出子命令的那条臂没有返回非 0——\
+             与 main.rs 顶层分派第 19 轮修的是同一条线：**没做不许长得像做成了**。\narm = {arm}"
+        );
+    }
+
+    /// **`--help` 与分派表不许分家。**
+    ///
+    /// 这条是拿两处真缺陷换的（2026-10-16）：
+    ///   1. `--help` 漏了 `inspect` / `graph` / `spec` / `machine` 四个能跑的主命令；
+    ///   2. `使用说明.md` 承诺的 `jingwei inspect` **在 CLI 里根本不存在**，
+    ///      跑它会打印"不认识子命令"——用户按说明书照做就撞墙。
+    ///
+    /// 判据分两层，缺一层就会漏：
+    ///   - 第一层：表里每个名字都要出现在 `--help` 里（防"加了命令没写说明"）；
+    ///   - 第二层：表里每个名字都要**真的接上分派**——做法是把本文件读出来，
+    ///     找 `match cmd.as_str()` 那一段里有没有这个字符串字面量。
+    ///     只查 `--help` 是不够的：那样"只加说明、没接线"照样能过。
+    #[test]
+    fn 每个子命令都出现在帮助里而且真的接上了分派() {
+        let src = include_str!("main.rs");
+        let dispatch = src
+            .split("match cmd.as_str()")
+            .nth(1)
+            .and_then(|s| s.split("other =>").next())
+            .expect("找不到 match cmd.as_str() 那一段——分派表的形状变了，得同步改这条测试");
+
+        // 把 `--help` 真的渲染一遍来断言——**不靠"这句断言恒真"蒙过去**。
+        // （第一版这里写过一条 `COMMANDS.iter().any(...)` 的占位断言，它永远为真；
+        //  那正是这个仓库在防的"恒真断言"，当场删了。）
+        let rendered = render_help();
+        for (name, aliases, desc) in COMMANDS {
+            assert!(
+                !desc.is_empty(),
+                "子命令 {name} 没有说明；`--help` 是要给人看的"
+            );
+            // 第一层：`--help` 渲染出来里得有它
+            assert!(
+                rendered.contains(&format!("\n  {name}")),
+                "子命令 {name} 没出现在 `--help` 里——用户看不到它"
+            );
+            // 第二层：**主名必须自己出现在分派里**。
+            //
+            // 这里原来写的是"主名**或任一别名**命中即可"——**那是个口子**
+            // （2026-10-16 外部对照复核指出的）：把 `"spec" | "machine"` 改成只剩
+            // `"machine"`，判据照样绿，而 `--help` 打印的是**主名** `spec`
+            // （`render_help` 忽略别名），用户看到 `spec` 却敲不动它。
+            // 主名才是对外承诺的那个名字，所以必须单独钉。
+            assert!(
+                dispatch.contains(&format!("\"{name}\"")),
+                "子命令 {name} 是 `--help` 里对外承诺的名字，却**没接上分派**——\
+                 用户会看到它，然后撞上「不认识子命令」"
+            );
+            // 别名（如果有）也各钉一次：别名是"同一个内核的另一个名字"，同样不能是死的
+            for a in aliases.iter() {
+                assert!(
+                    dispatch.contains(&format!("\"{a}\"")),
+                    "子命令 {name} 的别名 {a} 没接上分派——写了个敲不动的名字"
+                );
+            }
+        }
+    }
+
+    /// **分派表里不许有"被注释掉的臂"。**
+    ///
+    /// 这是上一个口子的另一面（2026-10-16 外部对照复核指出）：上面的判据是在
+    /// `match cmd.as_str()` 那一段里做**子串**匹配，而注释也在那一段里。
+    /// 把 `"graph" => cmd_graph(...)` 整行注释掉，`"graph"` 这个字符串还在，
+    /// **判据照样绿，而命令已经死了**。所以要把注释行排除掉再找。
+    #[test]
+    fn 分派里不许有被注释掉的臂() {
+        let src = include_str!("main.rs");
+        let dispatch = src
+            .split("match cmd.as_str()")
+            .nth(1)
+            .and_then(|s| s.split("other =>").next())
+            .expect("找不到 match cmd.as_str() 那一段");
+        // 去掉行注释：`// ...` 到行尾（这几条臂都是单行的，不需要处理块注释）
+        let live: String = dispatch
+            .lines()
+            .map(|l| match l.find("//") {
+                Some(i) => &l[..i],
+                None => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (name, aliases, _) in COMMANDS {
+            for w in std::iter::once(*name).chain(aliases.iter().copied()) {
+                let lit = format!("\"{w}\"");
+                if dispatch.contains(&lit) && !live.contains(&lit) {
+                    panic!(
+                        "子命令 {w} 的名字只出现在**注释里**——那条臂被注释掉了，\
+                         命令已经死了，而字符串还在，所以旧的子串判据查不出来"
+                    );
+                }
+            }
+        }
+    }
+
+    /// **不允许有名字写重**（主名与别名都不许撞）。
+    ///
+    /// 撞了的时候，`match` 的先后顺序会决定谁生效——那种"看着有两个入口、
+    /// 其实只有一个能用"的坑，比缺一个命令还难查。
+    #[test]
+    fn 主名与别名都不许重复() {
+        let mut seen: Vec<&str> = Vec::new();
+        for (name, aliases, _) in COMMANDS {
+            for w in std::iter::once(*name).chain(aliases.iter().copied()) {
+                assert!(!seen.contains(&w), "子命令名 {w} 出现了两次");
+                seen.push(w);
+            }
+        }
+    }
+
+    /// `inspect` 必须在表里——它是 `使用说明.md` 承诺过的入口。
+    ///
+    /// 单拎出来钉住，是因为它正是上面说的第 2 处缺陷：**文档承诺了、命令行不认**。
+    /// 光靠"表与分派一致"是查不出这件事的（两边都不含它也一样一致）。
+    #[test]
+    fn 说明书承诺过的_inspect_必须在表里() {
+        assert!(
+            COMMANDS.iter().any(|(n, _, _)| *n == "inspect"),
+            "`使用说明.md` 写着 `jingwei inspect [目录]`——表里没有它，说明书就在骗人"
+        );
+    }
+
+    /// **打不开图谱库时，不许一律说成"还没建过图谱"**（2026-10-16）。
+    ///
+    /// 原来的代码是 `Err(_)` + 一句话——把**库在、打不开**（被别的进程占着 /
+    /// 文件坏了 / 权限不对）也说成"你还没建过图谱"。用户于是去点「索引一次」，
+    /// **而那个动作解决不了他的问题**：真正的错因被那句话盖住了。
+    /// 这是三态压扁的典型形态：**"我们读不到"伪装成了"你没有"。**
+    ///
+    /// ## 为什么用扫源码，而不是造一个打不开的库
+    ///
+    /// 试过了：SQLite 很宽容——**垃圾内容它能打开**（错误延后到查询时才出），
+    /// 而把库的位置放成**目录**时 `db.is_file()` 是 false，走的是 `no` 那条路。
+    /// 也就是说**"库在、但 `open_for_query` 失败"这个组合在磁盘上很难自然造出来**。
+    /// 而这条判据要守的恰恰是那一段——所以像上面那条一样扫源码：
+    /// **判据要么能构造，要么就精确地盯住那段代码。**
+    ///
+    /// 三个断言分开钉，因为它们会各自坏：
+    ///   ① 必须**先看磁盘上有没有那个库**（那是事实，不是猜）；
+    ///   ② 库里没有 → 才允许说"还没建过图谱"；
+    ///   ③ 库在 → 必须是 `unknown` 而不是 `no`（**不许把我们的失败说成用户的空白**）。
+    #[test]
+    fn 打不开图谱库时不许一律说成还没建过() {
+        let src = include_str!("cmd_graph.rs");
+        assert!(
+            src.contains("db.is_file()"),
+            "必须先按'磁盘上有没有那个库'分流——那是事实，不是猜"
+        );
+        assert!(
+            src.contains(r#""state": "unknown""#),
+            "库在、读不到必须是 unknown；一律说成 no 就是把我们的失败说成用户的空白"
+        );
+        assert!(
+            src.contains(r#""why": "our_gap""#),
+            "unknown 那一支要带上归属（our_gap），别让外壳猜"
+        );
+        // 而且它**不许**被算成"跑不起来"（1）——"查不了"与"跑不起来"是两件事。
+        assert!(
+            src.contains("return 2;"),
+            "读不到库时退出码该是 2（查不了），不是 1（跑不起来）"
+        );
+    }
 }

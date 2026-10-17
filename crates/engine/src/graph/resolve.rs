@@ -146,6 +146,22 @@ pub fn resolve_file(
             continue;
         }
 
+        // ①.5 **限定名先拆掉路径，按末段查。**（2026-10-16 实测抓出的真缺口）
+        //
+        // `cmd_doctor.rs` 里的 `rules::run_all(...)` / `snapshot::load_latest(...)`
+        // 原来**一条边都连不上**——整个项目的跨文件调用只有 80 条。
+        // 根因：parser 把**原始写法**记进 `RefFact.name`（留着是对的，以后要做接收者推断），
+        // 而这里直接拿它查表，**表的键是短名** → 永远查不到 → 全落进"外部符号"。
+        //
+        // 为什么"只取末段"就够：**下一步的"唯一命中才连"自带安全性**——
+        // `load_latest` 全图只有一个 → 连；`new` 有几十个 → 记进 `ambiguous`，不连。
+        // 歧义由既有规则兜住，这里只需让**本来是唯一命中的那些**别被路径前缀挡在门外。
+        // 修后跨文件调用 80 → 265（`tools/graph_probe.mjs` 量的）。
+        let lookup: &str = match r.name.rsplit_once("::") {
+            Some((_, last)) if !last.is_empty() => last,
+            _ => r.name.as_str(),
+        };
+
         // ② 自己文件里没有，去全图谱找。**只有唯一命中才连**——
         //    同名多个的话，凭什么挑那一个？
         //
@@ -158,7 +174,7 @@ pub fn resolve_file(
         // **值命名空间 = `value` + `local`**：闭包是能被调用的局部绑定，
         // 它在符号空间里的位置和函数一样（只是可见范围小得多）。
         let values: Vec<&SymbolEntry> = all
-            .get(&r.name)
+            .get(lookup)
             .map(|v| {
                 v.iter()
                     .filter(|e| e.class == "value" || e.class == "local")
@@ -178,7 +194,9 @@ pub fn resolve_file(
             0 => {
                 // **名字在图谱里、但不在值命名空间**——别把它混进"外部"。
                 // 外部是"不归我们管"，这个是"有，但不是能调的东西"。
-                if all.contains_key(&r.name) {
+                // 用 `lookup`（末段）而不是 `r.name`：限定名的情况下
+                // 表里有的也是短名（与上面那段同一个道理）。
+                if all.contains_key(lookup) {
                     out.namespace_mismatch.push(format!("{}:{} {}", rel, r.line, r.name));
                 } else {
                     out.external += 1;
@@ -212,13 +230,48 @@ fn through_import(
     all: &SymbolTable,
     rel: &str,
 ) -> Option<String> {
-    let imp = imports.iter().find(|i| i.local == r.name)?;
+    // 两种引用形状，**朴素名那条一个字没动**：
+    //
+    //   ① `r.name == "which"`：本文件 `use ...::which;` 引进来的名字。
+    //   ② `r.name == "hello_python::core::greet"`：**限定名**——Python 那边
+    //      遇到"接收者是 import 引进来的模块"时会产出这种形状
+    //      （`from hello_python import core` 之后的 `core.greet()`）。
+    //
+    // 第二条是 2026-10-16 加 Python 时补的。**它有一个硬前提**：
+    // `r.name` 的末段才是符号名，前面那段必须**恰好等于**某条 import 的 path。
+    // 用"前缀匹配"而不是"随便找个 import"——后者会给出错误的落点，
+    // 而错的边比没有边糟得多（那是这个文件反复强调的一条）。
+    let (imp, name): (&super::imports::ImportFact, &str) = match imports
+        .iter()
+        .find(|i| i.local == r.name)
+    {
+        Some(i) => (i, r.name.as_str()),
+        None => {
+            let (prefix, last) = r.name.rsplit_once("::")?;
+            let i = imports.iter().find(|i| i.path == prefix)?;
+            (i, last)
+        }
+    };
     let mut hits: Vec<String> = Vec::new();
-    for (file, name) in import_candidates(&imp.path, rel) {
-        if let Some(entries) = all.get(&name) {
+    for (file, nm) in import_candidates(&imp.path, rel) {
+        if let Some(entries) = all.get(&nm) {
             for e in entries {
-                if id_is_symbol_in(&e.id, &file, &name) {
+                if id_is_symbol_in(&e.id, &file, &nm) {
                     hits.push(e.id.clone());
+                }
+            }
+        }
+    }
+    // 限定名那一路：候选文件名要用**末段**（`greet`），不是整串路径。
+    // 上面 `import_candidates(&imp.path, …)` 已经用 `imp.path` 推出了文件，
+    // 所以这里只需要确认"那个文件里的 `name`"存在。
+    if name != r.name {
+        for (file, _) in import_candidates(&imp.path, rel) {
+            if let Some(entries) = all.get(name) {
+                for e in entries {
+                    if id_is_symbol_in(&e.id, &file, name) {
+                        hits.push(e.id.clone());
+                    }
                 }
             }
         }
@@ -339,6 +392,33 @@ fn import_candidates(path: &str, rel: &str) -> Vec<(String, String)> {
     if !from_crate_root && !rest.is_empty() {
         out.extend(landing("", &rest[1..].join("/"), &name));
     }
+    // (c) **"名字之前那一段全是目录"**——Python 的模块路径就是这个形状。
+    //
+    //     这一条是加 Python 时补的，而**Rust 那边一直也缺它**：
+    //     `from hello_python.core import greet` 里 `greet` 是符号名，
+    //     落点 `hello_python/core.py` 要求"把 `hello_python` 当目录"——
+    //     而 (a) 用的是 `base`（对本文件 `main.py` 来说是空）、(b) 又丢掉了首段。
+    //     两条路都给不出 `hello_python/core.py`，于是**一条边都连不上**。
+    //
+    //     为什么现在才加：Rust 那边 `use crate::a::b` 有显式的 `crate` 前缀，
+    //     (a) 走 `base="" + joined="a/b"`，正好等价于这一条；
+    //     只有"裸路径"这个形状两边都漏。加它的代价是候选多几条——
+    //     而候选多**不会造假边**（`through_import` 要求恰好一个命中）。
+    let mut all_segs: Vec<&str> = rest.clone();
+    all_segs.push(&name);
+    if all_segs.len() >= 2 {
+        let dir = all_segs[..all_segs.len() - 1].join("/");
+        out.extend(landing(&format!("{base}/{dir}"), "", &name));
+        // **`base` 为空那一种也要给**：Python 的 `from hello_python.core import greet`
+        // 是**从项目根算起**的绝对导入，与"当前模块在哪"无关。
+        //
+        // 少这一条会出一个**很隐蔽**的错：`base` 对本文件 `main.py` 来说是
+        // `main.py`（`split_rel` 之后 `is_mod=false`，于是把文件自己的名字当成了
+        // 模块目录），候选就变成 `main.py/hello_python/core.py`——
+        // **一个把文件当目录的路径**，永远不可能命中，而且不报错、只是静默不连边。
+        // 实测：`hello_python` 演示项目里 `main.py` 调 `core.greet()` 一条边都没有。
+        out.extend(landing(&dir, "", &name));
+    }
     out.sort();
     out.dedup();
     out
@@ -357,8 +437,7 @@ fn import_candidates(path: &str, rel: &str) -> Vec<(String, String)> {
 ///
 /// 前两条和后两条是**两种完全不同的解释**（名字在 `winutil` 里 vs 名字**就是** `winutil` 的子模块），
 /// 必须都给出来——只给一种的话，`use crate::a::b;` 这种引模块的写法永远落不下来。
-fn landing(base: &str, joined: &str, name: &str) -> Vec<(String, String)> {
-    let dir = match (base.trim_matches('/'), joined) {
+fn landing(base: &str, joined: &str, name: &str) -> Vec<(String, String)> {    let dir = match (base.trim_matches('/'), joined) {
         ("", "") => String::new(),
         ("", j) => j.to_string(),
         (b, "") => b.to_string(),
@@ -380,16 +459,36 @@ fn landing(base: &str, joined: &str, name: &str) -> Vec<(String, String)> {
         // 名字本身是 `dir` 底下的一个子模块
         (format!("{dir}/{name}.rs"), name.to_string()),
         (format!("{dir}/{name}/mod.rs"), name.to_string()),
+        // ── Python（2026-10-16 加的第二门语言）────────────────────────────
+        //
+        // Python 的模块树是**目录 = 包**，包用 `__init__.py` 标记：
+        // `from hello_python.core import hello` → `hello_python/core.py` 里的 `hello`。
+        //
+        // **为什么把两种语言的后缀放在同一张表里、而不是按语言分支**：
+        // `through_import` 的规矩是"**恰好一个**候选才连边，多个就回到不猜"。
+        // 所以多给几条候选**不会造出假边**——最坏情况是同一段路径在两门语言里
+        // 都命中，于是 `hits.len() > 1`，那条边不建（no edge，而不是 wrong edge）。
+        // 这比"按语言分支"少一层状态：`landing` 不用知道自己在处理哪门语言。
+        (format!("{dir}.py"), name.to_string()),
+        (format!("{dir}/__init__.py"), name.to_string()),
+        (format!("{dir}/{name}.py"), name.to_string()),
+        (format!("{dir}/{name}/__init__.py"), name.to_string()),
     ]
 }
 
-/// 相对路径 → (所在目录, 是不是 `mod.rs` / `lib.rs` / `main.rs`)。
+/// 相对路径 → (所在目录, 是不是"模块文件本身")。
+///
+/// **"模块文件本身"两门语言各有一套**：Rust 是 `mod.rs` / `lib.rs` / `main.rs`，
+/// Python 是 `__init__.py`。区别是实打实的——`pkg/mod.rs` **就是** `pkg` 这个模块，
+/// 而 `pkg/core.py` 是 `pkg.core`（多一层）。少认 `__init__.py` 的话，
+/// `pkg/__init__.py` 里的 `from .core import f` 会被当成从 `pkg/__init__/`
+/// 往上层找，落点全错。
 fn split_rel(rel: &str) -> (&str, bool) {
     let (dir, file) = match rel.rsplit_once('/') {
         Some((d, f)) => (d, f),
         None => ("", rel),
     };
-    let is_mod = matches!(file, "mod.rs" | "lib.rs" | "main.rs");
+    let is_mod = matches!(file, "mod.rs" | "lib.rs" | "main.rs" | "__init__.py");
     (dir, is_mod)
 }
 

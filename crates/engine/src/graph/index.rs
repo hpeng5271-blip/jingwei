@@ -16,7 +16,20 @@ use std::path::{Path, PathBuf};
 /// 一次索引干了什么。**数字要能报到界面上**——"索引完了"不算信息。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexReport {
+    /// **这次真正处理（解析 + 写库）的文件数。**
+    ///
+    /// ⚠️ **它不等于"项目里有几个文件"**——没变的那些被三级检测跳过了
+    /// （见 `skipped_unchanged` / `skipped_same_content`）。
+    /// 想知道项目规模要看 `scanned` 或 `store.indexed_files()`。
     pub files: usize,
+    /// **这次扫到的文件总数**（收集阶段的结果，不管变没变）。
+    ///
+    /// 2026-10-16 加。原来只有一个 `files`，而外壳把它当"项目有几个文件"报出去——
+    /// 于是**增量的一次普通运行会显示「1 个文件 · 10 个符号」**，
+    /// 看起来像"这个项目只有一个文件"。实测就是这个症状：
+    /// `jingwei index` 报 1 个而 `export_graph`（临时空库、全部处理）报 91 个，
+    /// 差别**不是我漏了输入，是增量检测在正常工作**。
+    pub scanned: usize,
     pub symbols: usize,
     /// 抽出来的**文件内调用关系**条数。
     /// 跨文件的那部分还没做——它要等"解析期"（设计 §6.2.1）。
@@ -52,6 +65,57 @@ pub struct IndexReport {
     pub unmapped_imports: Vec<String>,
     /// 名字在图谱里、但不在值命名空间——调用点写错了，或者我们的命名空间判断没跟上。
     pub namespace_mismatch: Vec<String>,
+}
+
+impl IndexReport {
+    /// **一份 JSON，两个出口**（CLI 与桌面界面）（2026-10-16）。
+    ///
+    /// ## 为什么要把它放在这儿，而不是各写各的
+    ///
+    /// 原来 CLI（`cmd_graph.rs`）与 Tauri（`src-tauri/src/graph.rs`）**各拼一份**，
+    /// 而它们**已经在漂了**——实测差异：
+    ///   - CLI 有 `unmappedImports` / `namespaceMismatch`，**界面那份没有**；
+    ///   - `skippedUnchanged` 的口径不同：CLI 只算一级（`skipped_unchanged`），
+    ///     界面把二级也算上（`+ skipped_same_content`）——**两个数说的不是一件事**。
+    ///
+    /// 这与 `--help` 漏列 4 个命令、说明书承诺一个不存在的 `inspect` 是**同一个形态**：
+    /// **两份清单各写各的，必然漂移。** 而这一处比那个更隐蔽——
+    /// 两边都是"能跑通的 JSON"，只是字段不一样，**没有任何东西会红**。
+    ///
+    /// ## 一条口径
+    ///
+    /// `skippedUnchanged` = **一级 + 二级**（"没变，所以我们没读它"）。
+    /// 二级（内容哈希一样、只是 `touch` 过）在用户眼里同样是"没变"，
+    /// 分开报只会让人以为漏了一批文件。
+    ///
+    /// `unmappedImports` / `namespaceMismatch` 报**长度**：名字列表是给
+    /// `jingwei index` 的文字输出用的，JSON 这边只需要知道"有几处"。
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            // ⚠️ **`files` / `symbols` 是"这次处理了几个"，不是"项目有几个"。**
+            // 增量检测会跳过没变的文件，所以**第二次索引时它们就是 0**——
+            // 只说这两个数，用户会以为图谱被清空了（而它其实好好的）。
+            // `scanned` 才是"扫到多少"。
+            "files": self.files,
+            "scanned": self.scanned,
+            "skippedUnchanged": self.skipped_unchanged + self.skipped_same_content,
+            "symbols": self.symbols,
+            "calls": self.calls,
+            "incomplete": self.incomplete,
+            "truncated": self.truncated,
+            "unreadable": self.unreadable,
+            // 解析期的三个数**分开报**——它们的说法完全不同：
+            // "连上"是我们接住了，"拿不准"是命中了多个候选所以不猜，
+            // "外部"是不归我们管。合成一个数等于把三种情况压扁。
+            "resolved": self.resolved,
+            "ambiguous": self.ambiguous.len(),
+            "external": self.external,
+            // **我们自己漏的那两类**：不许省——它们与"外部"是两件事，
+            // 少了它们，"外部 N 个"里就混着我们自己的漏接。
+            "unmappedImports": self.unmapped_imports.len(),
+            "namespaceMismatch": self.namespace_mismatch.len(),
+        })
+    }
 }
 
 const MAX_FILES: usize = 2000;
@@ -113,12 +177,15 @@ fn collect_rust_files(root: &Path, rep: &mut IndexReport) -> Vec<(String, PathBu
                     continue;
                 }
                 stack.push((p, depth + 1));
-            } else if name.ends_with(".rs") {
-                if let Ok(rel) = p.strip_prefix(root) {
-                    out.push((
+            } else if name.ends_with(".rs") || name.ends_with(".py") {
+                match p.strip_prefix(root) {
+                    Ok(rel) => out.push((
                         rel.to_string_lossy().replace('\\', "/"),
                         p,
-                    ));
+                    )),
+                    // **不静默丢掉**：`strip_prefix` 失败时至少把它记进 `unreadable`，
+                    // 否则"少收了文件"这件事一声不响（2026-10-16 查收集器时加）。
+                    Err(_) => rep.unreadable = rep.unreadable.saturating_add(1),
                 }
             }
         }
@@ -127,7 +194,7 @@ fn collect_rust_files(root: &Path, rep: &mut IndexReport) -> Vec<(String, PathBu
     out
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -202,6 +269,24 @@ pub fn record_run(
             Confidence::Certain,
             now,
         );
+        // **把"它说自己在哪个文件"存下来。**
+        //
+        // 2026-10-16 外部对照复核抓出的缺陷：查询层分不开这两种情形——
+        //   ① 这条诊断**本来就没说**是哪个文件（比如"缺包 requests"）；
+        //   ② 它**说了**，但那个文件不在图谱里（指向未索引的文件）。
+        // 两者都没有 `diagnosed_at` 边，而诊断节点又没存原本的路径，
+        // 于是查询层**只能**一律回 `Verdict::No`——界面上那句「（这条问题没有说是哪个文件）」
+        // 对第 ② 种就是在撒谎，而 CLI / Tauri / 界面里**为第 ② 种写的那三支渲染成了死代码**
+        // （`ui/graph.js` 的「没索引到」、`cmd_graph.rs` 与 `src-tauri/graph.rs` 的同名分支）。
+        //
+        // 这正是这个项目的招牌不变量（是 / 不是 / **查不了**）在查询层**没有生产者**：
+        // `AGENTS.md` §2 写着"`unknown` 永远不许显示成'没有'"，而唯一能产出它的地方
+        // 从来没产出过。修法不是改文案，是**把这个事实存下来**——
+        // 写入侧手里本来就有那个相对路径，只是丢掉了。
+        let d = match target {
+            Some(rel) => d.with_data(serde_json::json!({ "target": rel })),
+            None => d,
+        };
         edges.push(edge(
             &run.id,
             &d.id,
@@ -214,7 +299,25 @@ pub fn record_run(
         )?);
         if let Some(rel) = target {
             let fid = jingwei_model::node_id(NodeKind::File, rel);
-            if store.node(&fid)?.is_some() {
+            // **文件在磁盘上真的存在时，就地为它落一个 File 节点。**
+            //
+            // 这一条是 M5 接线时才暴露出来的真缺陷：原来只在"图谱里已经有这个文件节点"
+            // 时才挂 `diagnosed_at`，而"先跑一次、后索引"是最常见的顺序——
+            // 那时节点还不存在，于是**每条诊断都挂不上去**，`unknown_targets` 涨一片，
+            // 图谱里留下一堆没有落点的诊断，"改了这里会影响谁"根本答不出来。
+            //
+            // 为什么这是对的而不是造假：项目节点在上面就是"先落一次"（单独跑一次也要记得下），
+            // 文件节点同理——我们**确知**这个文件就是这次运行报出来的那个（相对路径就在眼前），
+            // 落一个真节点比留一条悬空诊断诚实得多。
+            // 为什么还要判 is_file：路径可能是输出文本里的一段，磁盘上没有它；
+            // 那种情况**不凭空造节点**，仍然如实记进 `unknown_targets`。
+            let known = store.node(&fid)?.is_some();
+            if !known && root.join(rel).is_file() {
+                let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
+                let f = Node::new(NodeKind::File, rel, name, Source::SelfTool, Confidence::Certain, now);
+                nodes.push(f.with_file(rel, 1));
+            }
+            if known || nodes.iter().any(|n| n.id == fid) {
                 edges.push(edge(
                     &d.id,
                     &fid,
@@ -283,6 +386,8 @@ pub fn index_rust(
     store.upsert(std::slice::from_ref(&project), &[])?;
 
     let files = collect_rust_files(root, &mut rep);
+    // **扫到多少要单独记下来**（`files` 是"处理了几个"，两者不是一回事）。
+    rep.scanned = files.len();
     let seen: std::collections::BTreeSet<&str> = files.iter().map(|(r, _)| r.as_str()).collect();
 
     // 磁盘上已经没有的：撤掉（节点 + 状态行，边由级联带走）
@@ -363,7 +468,15 @@ pub fn index_rust(
         );
         rep.files += 1;
 
-        let parsed = crate::parse::parse_rust(&rel, &file.text, now);
+        // **按扩展名分派**（2026-10-16 加的 Python）。
+        //
+        // 这两门语言的"符号"定义不一样，所以是两个解析器而不是一个带开关的解析器：
+        // 一个函数里塞两套规则，改一门必然碰到另一门。
+        let parsed = if rel.ends_with(".py") {
+            crate::graph::parse_python::parse_python(&rel, &file.text, now)
+        } else {
+            crate::parse::parse_rust(&rel, &file.text, now)
+        };
         if !parsed.complete {
             rep.incomplete += 1;
         }
@@ -493,4 +606,87 @@ pub fn index_rust(
     }
 
     Ok(rep)
+}
+
+#[cfg(test)]
+mod to_json_tests {
+    use super::IndexReport;
+
+    /// **`files` 与 `scanned` 是两个数，JSON 里必须都在**（2026-10-16）。
+    ///
+    /// 这条守的是一个**两次被同一个误解咬过**的地方：外壳把"这次处理了几个"
+    /// 当成"项目有几个"报出去，于是**一个正常项目跑第二遍时会显示「0 个文件」**，
+    /// 看起来像图谱被清空了。
+    ///   - 第一次在 CLI（`jingwei index`），修法：加 `scanned`；
+    ///   - 第二次在桌面界面（`graph_index`），**同一个形态又出现了一次**——
+    ///     因为两处各拼各的 JSON。
+    ///
+    /// 所以现在**只有一份 `to_json()`**，这条测试守住它：
+    /// 少了 `scanned`，两处外壳就都瞎了。
+    #[test]
+    fn files_与_scanned_是两个数() {
+        // 这次什么都没变，但项目里扫到 91 个
+        let v = IndexReport {
+            files: 0,
+            scanned: 91,
+            ..Default::default()
+        }
+        .to_json();
+        assert_eq!(v["files"], 0);
+        assert_eq!(v["scanned"], 91, "少了它，界面会把'没变'读成'项目是空的'");
+    }
+
+    /// **`skippedUnchanged` 要合并两级**。
+    ///
+    /// 一级（大小与时间都没动）和二级（`touch` 过、内容哈希一样）在用户眼里
+    /// **是同一件事："没变"**。分开报只会让人以为漏了一批文件。
+    ///
+    /// 而且这条测试还钉住了一个**真实存在过的口径不一致**：
+    /// CLI 那份只算了 `skipped_unchanged`，界面那份把二级也算上了——
+    /// **两个数说的不是一件事，而两边都"能跑通"，没有任何东西会红。**
+    #[test]
+    fn 跳过的数要把两级合并() {
+        let v = IndexReport {
+            skipped_unchanged: 3,
+            skipped_same_content: 4,
+            ..Default::default()
+        }
+        .to_json();
+        assert_eq!(v["skippedUnchanged"], 7, "两级都是'没变'，该合并");
+    }
+
+    /// **"我们自己漏的"那两类不许省。**
+    ///
+    /// `unmappedImports`（写了 `use` 却没接上）与 `namespaceMismatch`
+    /// （名字在、命名空间不符）是**我们自己的失败**——少了它们，
+    /// 「外部 N 个」这个数里就混着我们的漏接，"不归我们管"就成了挡箭牌。
+    #[test]
+    fn 我们自己漏的两类不许省() {
+        let v = IndexReport {
+            unmapped_imports: vec!["a".into(), "b".into()],
+            namespace_mismatch: vec!["c".into()],
+            ..Default::default()
+        }
+        .to_json();
+        assert_eq!(v["unmappedImports"], 2, "写了 use 却没接上的处数");
+        assert_eq!(v["namespaceMismatch"], 1, "命名空间不符的处数");
+    }
+
+    /// **解析期那三个数分开报**——它们说的是三件完全不同的事：
+    /// "连上"是我们接住了，"拿不准"是命中多个候选所以**不猜**，
+    /// "外部"是不归我们管。合成一个数就是把三种情况压扁。
+    #[test]
+    fn 解析期的三个数不许合成一个() {
+        let v = IndexReport {
+            resolved: 292,
+            ambiguous: vec!["x".into(), "y".into()],
+            external: 4613,
+            ..Default::default()
+        }
+        .to_json();
+        assert_eq!(v["resolved"], 292);
+        assert_eq!(v["ambiguous"], 2);
+        assert_eq!(v["external"], 4613);
+        assert_ne!(v["resolved"], v["external"], "这两个数不是一件事");
+    }
 }

@@ -8,7 +8,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
     let jdks: Vec<&crate::detect::jvm::Jdk> = j.jdks.iter().filter(|d| d.is_jdk).collect();
 
     if j.jdks.is_empty() {
-        out.push(f(
+        out.push(f_meta(
             "java-no-runtime",
             Severity::Error,
             "这是个 Java 项目，但机器上没有 java",
@@ -19,7 +19,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
             vec![],
         ));
     } else if jdks.is_empty() {
-        out.push(f(
+        out.push(f_meta(
             "java-jre-only",
             Severity::Error,
             "只有 JRE，没有 JDK：能跑别人的 jar，编译不了自己的代码",
@@ -59,7 +59,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
             "设成 JDK 根目录（含 bin 的那一级），然后新开终端",
             vec![],
         )),
-        (Some(h), false) => out.push(f(
+        (Some(h), false) => out.push(f_meta(
             "java-home-broken",
             Severity::Error,
             format!("JAVA_HOME 指向的目录里没有 java.exe：{}", h),
@@ -97,7 +97,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
     }
     if let (Some(req), Some(used)) = (j.required, path_jdk) {
         if used.major != 0 && req != used.major {
-            out.push(f(
+            out.push(f_meta(
                 "java-version-mismatch",
                 Severity::Error,
                 format!("项目要求 Java {}，命令行用的是 Java {}", req, used.major),
@@ -120,7 +120,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
             || r.home.is_empty()
             || !std::path::Path::new(&r.home).join("bin").join("java.exe").is_file();
         if unusable {
-            out.push(f(
+            out.push(f_meta(
                 "java-pinned-missing",
                 Severity::Error,
                 format!("项目钉死的 Java 版本用不了：{}", r.source),
@@ -139,7 +139,7 @@ fn r_java(x: &Facts) -> Vec<Finding> {
     // 声明了要求，但算出来的那个 JDK 对不上——真正会报 class file version 的场景
     if let (Some(req), Some(r)) = (j.required, &j.resolved) {
         if r.major != 0 && req > r.major {
-            out.push(f(
+            out.push(f_meta(
                 "java-toolchain-too-old",
                 Severity::Error,
                 format!("项目要 Java {}，但实际会用起来的是 Java {}", req, r.major),
@@ -163,7 +163,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
     let Some(c) = &x.cc else { return vec![] };
     let mut out = Vec::new();
     if c.compilers.is_empty() {
-        out.push(f(
+        out.push(f_meta(
             "cc-no-compiler",
             Severity::Error,
             "这是个 C/C++ 项目，但机器上没有任何编译器",
@@ -201,7 +201,7 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
         }
     }
     if c.has_cmake_lists && c.cmake.is_none() {
-        out.push(f(
+        out.push(f_meta(
             "cc-cmake-missing",
             Severity::Error,
             "项目用 CMake 组织，但机器上没有 cmake",
@@ -227,11 +227,47 @@ fn r_cc(x: &Facts) -> Vec<Finding> {
 }
 
 /// 前端 / Node：主要就两件事——有没有 node，依赖装没装。
+/// Rust 项目。**这是这一组里补得最晚的一条**——在它之前，Rust 有检测（`Lang::Rust`）、
+/// 有依赖解析（`Cargo.toml`）、有诊断通道（`cargo check --message-format=json`）、
+/// 有体检条目（`cargo-lock-missing`），唯独**体检规则一条都没有**。
+/// 于是 `tauri_like` 那种项目（`package.json` + `src-tauri/Cargo.toml`）
+/// 报出来的全是 Node 的事，Rust 那一半一句不说。
+///
+/// 为什么第一条偏偏是"有没有工具链"：**这是唯一一道会把人挡死的墙**。
+/// 别的条目都是"能跑但不舒服"，而没装 rustc 时 `cargo build` 直接起不来——
+/// 用户看到的是 `'cargo' 不是内部或外部命令`，而这句话不会告诉他"这台机器缺工具链"。
+fn r_rust(x: &Facts) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let has_rustc = x.toolchain.get("rustc").map(|t| t.ok).unwrap_or(false);
+    if !has_rustc {
+        out.push(f_meta(
+            "rust-no-toolchain",
+            // 报"要处理"而不是"注意"：这不是建议，是**现在就跑不起来**。
+            Severity::Error,
+            "这是个 Rust 项目，但机器上没有 Rust 工具链",
+            // 事实那栏说清"我们查的是哪个可执行文件"——不然用户没法反驳我们。
+            vec!["在 PATH 里找 rustc.exe：没找到".into()],
+            vec!["where rustc".into(), "where cargo".into()],
+            // 成立的区间：只看 rustc 在不在 PATH 上。
+            // 用 rustup 装但没进 PATH、或者只装了 cargo 没装 rustc，这里都会报——
+            // 而那两种情况确实跑不起来，所以不算误报。
+            "只是想读这个项目的代码、不打算构建它时，不用管这一条",
+            "用 rustup 装：https://rustup.rs 。装完**重开一个终端**——\
+             它改的是 PATH，已经开着的窗口读不到新值",
+            vec![],
+        ));
+    }
+    // 第二条本来想写"Cargo.lock 没提交"，写完发现**重复**：
+    // `understand/project.rs` 已经有 `cargo-lock-missing` 了（体检条目那边）。
+    // 同一件事在两处各报一次，用户会以为是两个问题——**宁可少说，不可说两遍**。
+    out
+}
+
 fn r_web(x: &Facts) -> Vec<Finding> {
     let ok = |name: &str| x.toolchain.get(name).map(|t| t.ok).unwrap_or(false);
     let mut out = Vec::new();
     if !ok("node") || !ok("npm") {
-        out.push(f(
+        out.push(f_meta(
             "web-no-node",
             Severity::Error,
             "这是个前端项目，但机器上没有 Node.js",
@@ -263,7 +299,7 @@ fn r_web(x: &Facts) -> Vec<Finding> {
 
 // 这两个类型已经上移到 `model`（Q6 拆循环）：它们本来就是领域概念。
 // 这里转发，**所有调用点都不用改**，而 `project → rules` 那条边从此消失。
-pub use jingwei_model::{Finding, Severity};
+pub use jingwei_model::{Confidence, Finding, Severity, Source};
 
 #[allow(clippy::too_many_arguments)]
 fn f(
@@ -288,26 +324,79 @@ fn f(
         boundary: boundary.into(),
         next: next.into(),
         excluded,
+        // **默认为最保守**：`User`（非权威）+ `Guessed`（推测）。
+        //
+        // 想报 `Error` 的规则必须**显式**声明 `f_meta(...)` / `f_high(...)` ——
+        // 这样"估的不许报 Error"就成了一条**必须主动绕过才能违反**的规则，
+        // 而不是"忘了标就默认通过"。默认值的方向决定了这道闸是默认开还是默认关。
+        source: Source::User,
+        confidence: Confidence::Guessed,
     }
 }
 
-/// 硬规矩：给不出「怎么证伪它」的结论，不许报成错误。
+/// 和 `f` 一样，但标明「这条来自权威工具的直接观测」——`Error` 级必须用它。
+///
+/// **为什么要显式**：`f` 的默认是"非权威 + 推测"，那种组合过不了 `enforce_evidence`
+/// 的权威闸，会被降成 `Warn`。所以一个规则想真的报 `Error`，就得在这里说清
+/// "我凭什么权威"——设计里那条"估的不许报 Error"只有这样才落得下来。
+/// （2026-10-16：这条闸原来只长在零调用的 `Conclusion` 上，生产里等于不存在。）
+#[allow(clippy::too_many_arguments)]
+fn f_meta(
+    id: &str,
+    severity: Severity,
+    title: impl Into<String>,
+    evidence: Vec<String>,
+    verify: Vec<String>,
+    boundary: &str,
+    next: &str,
+    excluded: Vec<String>,
+) -> Finding {
+    let mut x = f(id, severity, title, evidence, verify, boundary, next, excluded);
+    // `Meta` = 我们直接读到的事实（文件内容、清单、PATH 上的可执行文件），
+    // 且 `Certain` = 权威工具直接给出的。两者一起才配得上 `Error`。
+    x.source = Source::Meta;
+    x.confidence = Confidence::Certain;
+    x
+}
+
+/// 硬规矩：**想报「错误」，必须同时满足三条**——权威来源 / 非推测置信度 / 有自查命令。
 ///
 /// 这是「不误报」的底线。一个错误级的结论，用户要么照做、要么怀疑工具——
 /// 而如果他手上没有一条能自己验证的命令，他就只剩下怀疑这一条路。
 /// 所以这条不是写在文档里的约定，是写在这里、每次诊断都会过的一道闸。
+///
+/// 2026-10-16：这道闸原来**只有第三条**（verify 非空）。前两条长在
+/// `model` 的 `Conclusion::error_checked` 上，而 `Conclusion` **生产里零调用**——
+/// 于是设计里那条"估的不许报 Error"在机器上只守住了三分之一。
+/// 现在 `Finding` 带上了 `source` / `confidence`，三条闸在这里补齐。
 fn enforce_evidence(out: &mut [Finding]) -> usize {
     let mut downgraded = 0;
     for x in out.iter_mut() {
-        if x.severity == Severity::Error && x.verify.iter().all(|v| v.trim().is_empty()) {
-            x.severity = Severity::Warn;
-            if !x.boundary.is_empty() {
-                x.boundary = format!("{}（没有可自查的命令，所以只报「注意」）", x.boundary);
-            } else {
-                x.boundary = "没有可自查的命令，所以只报「注意」".into();
-            }
-            downgraded += 1;
+        if x.severity != Severity::Error {
+            continue;
         }
+        // 三条按顺序查，**第一条不满足就降级并说明**（与 `error_checked` 同序同口径）
+        let why = if !x.source.is_authoritative() {
+            Some(format!(
+                "（来源 {} 不算权威，已降级为「注意」）",
+                x.source.as_str()
+            ))
+        } else if x.confidence == Confidence::Guessed {
+            Some("（结论是估的，已降级为「注意」）".to_string())
+        } else if x.verify.iter().all(|v| v.trim().is_empty()) {
+            Some("（没有可复制的自查命令，已降级为「注意」）".to_string())
+        } else {
+            None
+        };
+        let Some(why) = why else { continue };
+        x.severity = Severity::Warn;
+        // 降级原因写进 `boundary`——用户能看见为什么降级（与 `error_checked` 同一做法）
+        if x.boundary.is_empty() {
+            x.boundary = why;
+        } else {
+            x.boundary = format!("{} {}", x.boundary, why);
+        }
+        downgraded += 1;
     }
     downgraded
 }
@@ -331,6 +420,9 @@ pub fn run_all(facts: &Facts, prev: Option<&Facts>) -> Vec<Finding> {
     }
     if has(crate::detect::lang::Lang::Java) {
         out.extend(r_java(facts));
+    }
+    if has(crate::detect::lang::Lang::Rust) {
+        out.extend(r_rust(facts));
     }
     if has(crate::detect::lang::Lang::Cpp) {
         out.extend(r_cc(facts));
@@ -573,7 +665,7 @@ fn r_python_missing(x: &Facts) -> Vec<Finding> {
     if x.python.found {
         return vec![];
     }
-    vec![f(
+    vec![f_meta(
         "python-not-found",
         Severity::Error,
         "没找到可用的 Python 解释器",
@@ -588,7 +680,7 @@ fn r_python_missing(x: &Facts) -> Vec<Finding> {
 fn r_contract(x: &Facts) -> Vec<Finding> {
     let p = &x.project;
     if let Some(err) = &p.contract_error {
-        return vec![f(
+        return vec![f_meta(
             "contract-unparsable",
             Severity::Error,
             "env.contract.json 不是合法 JSON",
@@ -620,7 +712,7 @@ fn r_version(x: &Facts) -> Vec<Finding> {
     if x.python.version.is_empty() || range_ok(spec, &x.python.version) {
         return vec![];
     }
-    vec![f(
+    vec![f_meta(
         "python-version-mismatch",
         Severity::Error,
         format!("Python 版本不满足契约：需要 {}，当前 {}", spec, x.python.version),
@@ -667,14 +759,34 @@ fn r_deps(x: &Facts) -> Vec<Finding> {
     let contract = x.project.contract.as_ref();
     let req = contract.map(|c| c.deps.required.clone()).unwrap_or_default();
     let opt = contract.map(|c| c.deps.optional.clone()).unwrap_or_default();
-    let missing: Vec<String> = x
-        .project
-        .deps_status
-        .iter()
-        .filter(|(_, ok)| !**ok)
-        .map(|(k, _)| k.clone())
-        .collect();
-    if missing.is_empty() {
+    // **走 `deps_detail`（三态），不走 `deps_status`（布尔图）。**
+    //
+    // 2026-10-16 外部对照复核抓出的假 Error：`deps_status` 把 `Verdict::Unknown`
+    // 也写成 `false`，而这里只按 `!ok` 过滤——于是**"我们没查过"被当成"没装"**，
+    // 命中契约 `deps.required` 就连 `Severity::Error` 报出去，证据还写着
+    // 「当前解释器已装 0 个包，里面没有：X」——**那句话是我们没查过的事实**。
+    //
+    // 什么时候会变成 Unknown：`probe.rs` 枚举 pip 列表时 `except Exception: pass`
+    // 吞掉异常（列表为空或残缺），或者机器上根本没装 Python。
+    // 那两种都**不是"没装"**。
+    //
+    // `facts.rs` 早就把这笔账写在自己头上了（"⚠️ 会丢三态：禁止新代码使用"），
+    // 复审记录给的验收判据是「`rg deps_status` 在 crates/ 与 src-tauri/ 里 0 命中」。
+    // 就剩这几处了。
+    let mut missing: Vec<String> = Vec::new();
+    let mut unknown: Vec<String> = Vec::new();
+    for d in &x.project.deps_detail {
+        if d.ok {
+            continue;
+        }
+        if d.unknown {
+            unknown.push(d.name.clone());
+        } else {
+            missing.push(d.name.clone());
+        }
+    }
+    // 一条都查不到时**不算"都装好了"**：那只是 `deps_detail` 是空的。
+    if missing.is_empty() && unknown.is_empty() {
         return out;
     }
     let install = contract
@@ -691,7 +803,7 @@ fn r_deps(x: &Facts) -> Vec<Finding> {
         .cloned()
         .collect();
     if !hard.is_empty() {
-        out.push(f(
+        out.push(f_meta(
             "required-dep-missing",
             Severity::Error,
             format!("契约要求的依赖没装：{}", hard.join(", ")),
@@ -718,6 +830,33 @@ fn r_deps(x: &Facts) -> Vec<Finding> {
             vec![format!("python -m pip show {}", soft[0])],
             "不影响功能，只影响体验；不想装就永远别管",
             &format!("想要就用：{}", install),
+            vec![],
+        ));
+    }
+    // **"查不了"要单独说出来，不能因为不好说就沉下去。**
+    //
+    // 把 Unknown 从 `missing` 里摘出去之后，剩下这条路：只报"没装的"，对"没查成的"一声不响。
+    // 那也是错——**沉默的 Unknown 和假 Error 一样让人判断错**，只是方向相反。
+    // 所以报一条**提示**（不是错误、也不是警告：我们没有任何证据说它有问题），
+    // 并把"为什么查不到"说清楚，因为那条原因决定用户下一步做什么。
+    if !unknown.is_empty() {
+        let why = if !x.python.found {
+            "这台机器上没找到 Python 解释器".to_string()
+        } else {
+            format!("没能列出这个解释器装了哪些包（{}）", x.python.exe)
+        };
+        out.push(f(
+            "dep-status-unknown",
+            // 提示级：**没有任何证据说它有问题**。报成 Warn 就成了另一种误报。
+            Severity::Info,
+            format!("这些依赖查不到装没装：{}", unknown.join(", ")),
+            vec![
+                why,
+                format!("契约里声明了 {} 项依赖，其中 {} 项无法确认", req.len() + opt.len(), unknown.len()),
+            ],
+            vec!["python -m pip list".into()],
+            "确信它们装着（比如刚在别的终端装过）时不用管这一条",
+            "跑一次 python -m pip list 能列出来，就说明只是这次没读上；列不出来才是真没装",
             vec![],
         ));
     }
@@ -956,164 +1095,5 @@ fn r_snapshot(x: &Facts, prev: Option<&Facts>) -> Vec<Finding> {
 // 学习场景下，误报比漏报更坏：一个平平无奇、什么都没配错的项目，
 // 如果冒出「要修」，用户会开始怀疑自己，然后怀疑工具。
 #[cfg(test)]
-mod tests {
-    // 测试里的临时目录清理失败不影响断言，也不能改变结论——这里显式豁免，
-    // 而不是让 lint 在整个 crate 里静默失声。
-    #![allow(clippy::let_underscore_must_use)]
-    use super::*;
-    use std::path::PathBuf;
-
-    fn scratch(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pl-rules-{}-{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    fn errors(facts: &Facts) -> Vec<String> {
-        run_all(facts, None)
-            .into_iter()
-            .filter(|f| f.severity == Severity::Error)
-            .map(|f| f.id)
-            .collect()
-    }
-
-    /// 初学者最常见的项目长这样：一个 .py，没有契约、没有依赖声明。
-    /// 这种项目不该有任何「要修」。
-    #[test]
-    fn a_plain_python_project_raises_no_errors() {
-        let d = scratch("healthy");
-        std::fs::write(d.join("main.py"), "print('hi')\n").unwrap();
-        let facts = crate::detect::probe::make_facts(&d, None);
-        let e = errors(&facts);
-        assert!(e.is_empty(), "一个普通项目不该有「要修」级别的问题，实际有：{:?}", e);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 刚建的 Java 项目，只因为没设 JAVA_HOME 就报警，是典型误报：
-    /// 在 IDE 里点运行根本用不到它。
-    #[test]
-    fn missing_java_home_is_never_an_error() {
-        let d = scratch("java");
-        std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
-        let facts = crate::detect::probe::make_facts(&d, None);
-        let hit = run_all(&facts, None)
-            .into_iter()
-            .find(|f| f.id == "java-home-missing");
-        if let Some(f) = hit {
-            assert_ne!(f.severity, Severity::Error, "没设 JAVA_HOME 不该是错误级");
-        }
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 复合项目里两边都得照顾到：Java 那边不该报 Python 的问题。
-    #[test]
-    fn a_pure_java_project_gets_no_python_findings() {
-        let d = scratch("pure");
-        std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
-        let facts = crate::detect::probe::make_facts(&d, None);
-        let ids: Vec<String> = run_all(&facts, None).into_iter().map(|f| f.id).collect();
-        assert!(
-            !ids.iter().any(|i| i.starts_with("python") || i == "not-in-venv" || i == "isolated-interpreter"),
-            "纯 Java 项目里不该出现 Python 的结论：{:?}",
-            ids
-        );
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    fn mem_facts(paging: bool, reliable: bool, avail_mb: u64) -> Facts {
-        Facts {
-            last_mem: Some(crate::sys::mem::MemFacts {
-                at: "2026-01-01T00:00:00Z".into(),
-                command: "python main.py".into(),
-                reliable,
-                paging,
-                peak_working_mb: 900,
-                phys_total_mb: 16 * 1024,
-                phys_avail_at_peak_mb: avail_mb,
-                ..Default::default()
-            }),
-            ..Default::default()
-        }
-    }
-
-    /// 采不准的样本不许用来下结论。拿一次没采到的数字说「你内存不够」，
-    /// 就是最没道理的那种误报。
-    #[test]
-    fn unreliable_memory_evidence_says_nothing() {
-        assert!(r_memory(&mem_facts(true, false, 100)).is_empty());
-    }
-
-    #[test]
-    fn real_paging_is_reported_at_the_bottom_layer() {
-        let out = r_memory(&mem_facts(true, true, 200));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].id, "memory-paging");
-        assert_eq!(layer_of(&out[0].id).2, 1, "资源层必须排在整条链的最前面");
-    }
-
-    /// 内存用得多不是问题，用超了才是。这条区分不清，就会天天报警。
-    #[test]
-    fn using_a_lot_of_memory_is_not_a_problem_by_itself() {
-        assert!(r_memory(&mem_facts(false, true, 4 * 1024)).is_empty());
-    }
-
-    #[test]
-    fn being_nearly_out_is_a_hint_not_a_warning() {
-        let out = r_memory(&mem_facts(false, true, 512));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].severity, Severity::Info, "还没换页就只该是提示");
-    }
-
-    /// 「不误报」的底线是能被验证。给不出自查命令的结论，
-    /// 用户只能在「照做」和「怀疑工具」之间猜——那就降级。
-    #[test]
-    fn an_error_without_a_self_check_is_downgraded() {
-        let mut out = vec![
-            f(
-                "no-proof",
-                Severity::Error,
-                "我猜你有问题",
-                vec!["没有证据".into()],
-                vec![],
-                "",
-                "去改点什么",
-                vec![],
-            ),
-            f(
-                "has-proof",
-                Severity::Error,
-                "这个有据可查",
-                vec!["证据".into()],
-                vec!["where python".into()],
-                "",
-                "照做",
-                vec![],
-            ),
-        ];
-        let n = enforce_evidence(&mut out);
-        assert_eq!(n, 1, "只该降级一条");
-        assert_eq!(out[0].severity, Severity::Warn, "没有自查命令的不能留在错误级");
-        assert_eq!(out[1].severity, Severity::Error, "有自查命令的不受影响");
-        assert!(out[0].boundary.contains("没有可自查的命令"));
-    }
-
-    /// 真跑一遍全部规则：不管哪条触发，都不许有「没有自查命令的错误」漏出去。
-    #[test]
-    fn no_rule_can_ship_an_unverifiable_error() {
-        let d = scratch("audit");
-        // 空目录是最容易同时触发好几条的状态
-        let facts = crate::detect::probe::make_facts(&d, None);
-        let got = run_all(&facts, None);
-        for x in &got {
-            if x.severity == Severity::Error {
-                assert!(
-                    x.verify.iter().any(|v| !v.trim().is_empty()),
-                    "规则 {} 报成了错误却没有自查命令，会被降级闸拦下——说明它写错了",
-                    x.id
-                );
-            }
-        }
-        let _ = std::fs::remove_dir_all(&d);
-    }
-}
+#[path = "rules_tests.rs"]
+mod tests;

@@ -18,10 +18,14 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 jingwei-model = { path = "../model" }
 # 解析：把源码变成符号。Q8 实测过版本兼容（core 0.27 + rust 0.24），
 # 也实测过体积（core + 1 个语法 = 1.3MB，之后每加一门约 1.14MB）。
-# **先只做 Rust**：设计 §1.2 那条"加语言只许改 lang.rs 一处"的判据，
-# 要等第二门语言进来才验得了——先把一门做通，再拿第二门来验抽象。
+#
+# **2026-10-16 加了第二门（Python）。** 注释里原来写着"先只做 Rust：
+# 设计 §1.2 那条『加语言只许改 lang.rs 一处』的判据，要等第二门语言进来才验得了"——
+# 现在就是来验它的。**实测结果是那条判据不成立**（详见 `graph/parse.rs` 文件头），
+# 债记在 `AGENTS.md` §5。
 tree-sitter = "0.27"
 tree-sitter-rust = "0.24"
+tree-sitter-python = "0.23"
 
 [lints]
 workspace = true

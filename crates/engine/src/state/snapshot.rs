@@ -1,4 +1,4 @@
-use crate::facts::Facts;
+﻿use crate::facts::Facts;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -208,21 +208,54 @@ pub fn diff(old: &Facts, new: &Facts) -> Vec<Change> {
                 ch("dep-".into(), Some((*x).clone()), None, None);
             }
         }
-        for (k, v) in &new.project.deps_status {
-            if old.project.deps_status.get(k) != Some(v) {
-                ch(
-                    format!("dep-status:{}", k),
-                    None,
-                    Some(
-                        old.project
-                            .deps_status
-                            .get(k)
-                            .map(|b| if *b { "已装" } else { "未装" })
-                            .unwrap_or("未知")
-                            .into(),
-                    ),
-                    Some(if *v { "已装" } else { "未装" }.into()),
-                );
+        // 依赖状态的变化：**按三态比，而且遍历两侧的并集。**
+        //
+        // 这一段原来读 `deps_status`（`BTreeMap<String, bool>`）。两个问题一起修了：
+        //   ① 它**只遍历新侧**（`for (k, v) in &new.…`），而布尔图里"无法确认"的项
+        //      压根不进去——所以某依赖从"已装"变成"无法确认"时，**差异里一行都不产生**
+        //      （静默丢失）。同一个文件里 env 那段专门补过"只遍历新侧会漏掉删除"的第二个循环，
+        //      这一段没有。现在按两侧并集比。
+        //   ② 布尔图本身装不下三态（那个类型 2026-10-16 已删），所以以前这里
+        //      只能说"已装/未装"，说不了"这下查不了了"。
+        {
+            let state_of = |x: &Facts| -> std::collections::BTreeMap<String, String> {
+                x.project
+                    .deps_detail
+                    .iter()
+                    .map(|d| {
+                        let s = if d.ok {
+                            format!("已装 {}", d.have)
+                        } else if d.unknown {
+                            // **"无法确认"后面要跟上是"谁的问题"**（2026-10-16）。
+                            //
+                            // 原来这里只有光秃秃四个字「无法确认」。而"无法确认"有两种：
+                            // 用户那边没有（他没提供判据的入口），和我们这边查不到
+                            // （问不到 pip / 那个语言我们没实现 / 文件读不出来）。
+                            // **同一句"无法确认"会让用户不知道该做什么**——
+                            // 一种是"你补上"，一种是"不怪你，等我们修"。
+                            //
+                            // 归属由 `DepDetail::unknown_why()` 给（那里逐个出口查过），
+                            // **不在这里猜**：快照层看不到"为什么未知"，它只该转述。
+                            format!("无法确认——{}", d.unknown_why().what_to_do())
+                        } else {
+                            "未装".to_string()
+                        };
+                        (d.name.clone(), s)
+                    })
+                    .collect()
+            };
+            let (os, ns) = (state_of(old), state_of(new));
+            let names: std::collections::BTreeSet<&String> = os.keys().chain(ns.keys()).collect();
+            for k in names {
+                let (a, b) = (os.get(k), ns.get(k));
+                if a != b {
+                    ch(
+                        format!("dep-status:{}", k),
+                        None,
+                        a.map(|s| s.as_str()).unwrap_or("（这次没声明）").to_string().into(),
+                        b.map(|s| s.as_str()).unwrap_or("（这次没声明）").to_string().into(),
+                    );
+                }
             }
         }
         if old.project.contract_hash != new.project.contract_hash {
@@ -272,22 +305,58 @@ pub fn summary_lines(x: &Facts) -> Vec<(String, String)> {
         "PATH".into(),
         format!("{} 条（hash {}）", x.system.path.count, x.system.path.hash),
     ));
-    if !x.project.deps_status.is_empty() {
-        let missing: Vec<String> = x
-            .project
-            .deps_status
-            .iter()
-            .filter(|(_, ok)| !**ok)
-            .map(|(k, _)| k.clone())
-            .collect();
-        v.push((
-            "依赖".into(),
-            if missing.is_empty() {
-                "都装了".into()
-            } else {
-                format!("缺 {}", missing.join(", "))
-            },
-        ));
+    // **这一行原来只看布尔图（`deps_status`），于是把"无法确认"说成了"都装了"。**
+    //
+    // 2026-10-16 外部对照复核抓出：第 16 轮修掉的是 `ui/projects.js` 里那句
+    // 「解释器、依赖、契约都对得上」，而**这条路径没被扫到**——它更底层，
+    // 一路走到 CLI（`cmd_doctor` / `cmd_project`）和界面的 `#facts`。
+    // 三种情形都会说错：
+    //   - 一部分 true + 一部分 unknown → `missing` 为空 → 打印「依赖 都装了」；
+    //   - 全部 unknown → `deps_status` 是空 map → **这行整个消失**（沉默）；
+    //   - 而同屏的左边栏（`ui/shell.js`）会说「N 项无法确认」——**自相矛盾**。
+    //
+    // 现在按三态说话：unknown 单独列出来，**"都装了"只在真的都确认装了时出现**。
+    let mut deps_ok = 0;
+    let mut deps_missing: Vec<String> = Vec::new();
+    let mut deps_unknown: Vec<String> = Vec::new();
+    for d in &x.project.deps_detail {
+        if d.ok {
+            deps_ok += 1;
+        } else if d.unknown {
+            deps_unknown.push(d.name.clone());
+        } else {
+            deps_missing.push(d.name.clone());
+        }
+    }
+    if deps_ok + deps_missing.len() + deps_unknown.len() > 0 {
+        let mut parts: Vec<String> = Vec::new();
+        if !deps_missing.is_empty() {
+            parts.push(format!("缺 {}", deps_missing.join(", ")));
+        }
+        if !deps_unknown.is_empty() {
+            // 「查不了」既不是"缺"也不是"都装了"——单列，并说清是哪几项。
+            //
+            // 2026-10-16：**再加"是谁的"**。原来这句只说"无法确认"，
+            // 用户分不出"我没提供判据"和"它没查到"——而这两件事该做的事完全不同。
+            // 归属从 `DepDetail::unknown_why()` 来（逐个出口查过，不是这里猜的）。
+            let why = x
+                .project
+                .deps_detail
+                .iter()
+                .find(|d| d.unknown)
+                .map(|d| d.unknown_why().what_to_do())
+                .unwrap_or("");
+            parts.push(format!(
+                "{} 项无法确认（{}）——{}",
+                deps_unknown.len(),
+                deps_unknown.join(", "),
+                why
+            ));
+        }
+        if parts.is_empty() {
+            parts.push("都装了".into());
+        }
+        v.push(("依赖".into(), parts.join("；")));
     }
     v.push((
         "契约".into(),
@@ -352,5 +421,81 @@ mod tests {
         let d = diff(&old, &new);
         let kinds: Vec<String> = d.iter().map(|c| c.kind.clone()).collect();
         assert!(kinds.contains(&"dep+".to_string()), "{:?}", kinds);
+    }
+
+    /// **「无法确认」要说是谁的问题**（2026-10-16）。
+    ///
+    /// 同一个解释器、同一批依赖，唯一不同的是 `deps_detail` 里那一条 `unknown`。
+    /// 快照那两处输出（变更卡的逐条状态、概览那行的汇总）**都要带上归属**——
+    /// 光说"无法确认"，用户不知道是该他补点什么，还是等我们修。
+    ///
+    /// 这里同时钉两处，因为它们会各自坏：
+    ///   ① `summary_lines`（概览那行）
+    ///   ② `diff` 里那条 `dep?`（变更卡逐条）
+    #[test]
+    fn 无法确认的依赖在两处都要说清是谁的问题() {
+        let mk = |unknown: bool| {
+            let mut f = facts("C:\\same\\python.exe", &[]);
+            f.project.deps_detail = vec![crate::facts::DepDetail {
+                name: "rich".into(),
+                want: ">=13".into(),
+                have: String::new(),
+                ok: false,
+                unknown,
+                from: "requirements.txt".into(),
+            evidence: "pip list".into(),
+            }];
+            f
+        };
+        // 装了的那种（用来造"状态变了"）
+        let mk_ok = || {
+            let mut f = facts("C:\\same\\python.exe", &[]);
+            f.project.deps_detail = vec![crate::facts::DepDetail {
+                name: "rich".into(),
+                want: ">=13".into(),
+                have: "13.7.1".into(),
+                ok: true,
+                unknown: false,
+                from: "requirements.txt".into(),
+            evidence: "pip list".into(),
+            }];
+            f
+        };
+        // ① 概览那行
+        let lines = summary_lines(&mk(true));
+        let deps = lines
+            .iter()
+            .find(|(k, _)| k == "依赖")
+            .map(|(_, v)| v.clone())
+            .expect("该有「依赖」这一行");
+        assert!(deps.contains("无法确认"), "{deps}");
+        assert!(
+            deps.contains("我们") || deps.contains("不怪你"),
+            "「无法确认」必须说清是我们的失败，实际：{deps}"
+        );
+        // ② 变更卡：**让状态真的变化**（"已装"→"无法确认"），那条记录才会带上归属。
+        //
+        //    写这条测试时踩了一次：我第一版拿**同一份** facts 相减（`diff(&mk(true), &mk(true))`），
+        //    得到空变更 → 断言直接失败在 `""` 上。原因是 `state_of` 那个字符串
+        //    **只用于比较两侧状态**，不进任何输出——**没变化就没输出，也就没有断言对象**。
+        //    所以测试必须构造"状态变了"，否则它测的是一个没有消费者的中间量。
+        let known = mk_ok();
+        let d_changed = diff(&known, &mk(true));
+        let text = format!("{d_changed:?}");
+        assert!(
+            text.contains("不怪你") || text.contains("我们"),
+            "从'已装'变成'无法确认'时，变更卡里的说法要带归属，实际：{text}"
+        );
+        // 而未装那侧**不许**被说成"无法确认"（那是把两种情形混成一种）
+        let d_missing = diff(&known, &mk(false));
+        let missing_text = format!("{d_missing:?}");
+        assert!(
+            missing_text.contains("未装"),
+            "真的没装要报成'未装'：{missing_text}"
+        );
+        assert!(
+            !missing_text.contains("无法确认"),
+            "真的没装不该说成无法确认：{missing_text}"
+        );
     }
 }

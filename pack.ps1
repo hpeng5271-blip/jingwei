@@ -1,47 +1,143 @@
-﻿# 打包：把两个 exe 和双击入口放进一个目录，再压成 zip。
-# 不做安装器——这个工具是绿色的，解压就能跑，删掉就是卸载。
+# Packaging: two exes + double-click entry + manual + demo walkthrough + three demo projects
+# into one folder, then zip it. No installer -- this tool is portable: unzip to run,
+# delete the folder to uninstall.
+#
+# ============================================================================
+# ASCII ONLY. Why this rule exists (it was paid for once):
+#   PowerShell 5.1 reads a .ps1 WITHOUT a BOM as ANSI, so Chinese text inside the
+#   script is mangled -- quote characters included -- and the whole script turns
+#   into a syntax error. That is exactly what happened here: this file used to hold
+#   Chinese messages, an edit dropped the BOM, and packaging stopped working.
+# So: this script contains no non-ASCII byte. All Chinese lives in
+#   tools\demos\pack-msg.txt (UTF-8, read explicitly, addressed by line number).
+# ============================================================================
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$ver = (Get-Content "$root\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
-$name = "jingwei-$ver-win-x64"
-$out = Join-Path $root "dist\$name"
 
-Write-Host "打包 $name"
-if (Test-Path $out) { [System.IO.Directory]::Delete($out, $true) }
-[void](New-Item -ItemType Directory -Path $out -Force)
+# ---- Chinese strings: UTF-8 file, read explicitly ----
+$msgFile = Join-Path $root 'tools\demos\pack-msg.txt'
+if (-not (Test-Path -LiteralPath $msgFile)) {
+    throw "missing $msgFile (packaging needs it for the Chinese text; see this script's header)"
+}
+$M = [System.IO.File]::ReadAllLines($msgFile, [System.Text.Encoding]::UTF8)
 
-foreach ($exe in @('jingwei.exe', 'jingwei-gui.exe')) {
-    $src = Join-Path $root "target\release\$exe"
-    if (-not (Test-Path $src)) { throw "缺 $exe：先跑 cargo build --release -p jingwei -p jingwei-app" }
-    Copy-Item $src $out
+# T(i) = line i of pack-msg.txt. Line numbers are fixed by the file's own layout;
+# if someone reorders it, the throw below says so instead of silently shipping the wrong name.
+function T([int]$i) {
+    if ($i -ge $M.Count) { throw "pack-msg.txt is missing line $i" }
+    return $M[$i]
 }
 
-# 双击入口。内容是纯 ASCII——.cmd 里写中文在 GBK/UTF-8 之间很容易变乱码，
-# 说明写在 txt 里，那个可以带 BOM。
-$cmd = @(
+$ver  = (Get-Content "$root\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
+$name = "jingwei-$ver-win-x64"
+$out  = Join-Path $root "dist\$name"
+$utf8bom = New-Object System.Text.UTF8Encoding($true)
+
+Write-Host "packing $name"
+if (Test-Path -LiteralPath $out) { [System.IO.Directory]::Delete($out, $true) }
+[void](New-Item -ItemType Directory -Path $out -Force)
+
+# ---- the two exes ----
+foreach ($exe in @('jingwei.exe', 'jingwei-gui.exe')) {
+    $src = Join-Path $root "target\release\$exe"
+    if (-not (Test-Path -LiteralPath $src)) {
+        throw "missing $exe -- run: cargo build --release -p jingwei -p jingwei-app"
+    }
+    Copy-Item -LiteralPath $src -Destination $out
+}
+
+# ---- double-click entry. ASCII body on purpose: Chinese in a .cmd file is a
+# ---- classic mojibake source (GBK vs UTF-8), so the text lives in a .txt instead.
+$runCmd = @(
     '@echo off',
     'cd /d "%~dp0"',
     'start "" "jingwei-gui.exe" %*'
 ) -join "`r`n"
-[System.IO.File]::WriteAllText((Join-Path $out 'run.cmd'), $cmd + "`r`n", [System.Text.Encoding]::ASCII)
+[System.IO.File]::WriteAllText((Join-Path $out 'run.cmd'), $runCmd + "`r`n", [System.Text.Encoding]::ASCII)
 
-# 说明文件是发行版的一部分，缺了就该在这里停下——曾经它是"有就拷、没有就算了"，
-# 结果打包出来的一份里没有说明，谁都没发现。
-$doc = Join-Path $root '使用说明.md'
-if (-not (Test-Path -LiteralPath $doc)) {
-    throw "缺 使用说明.md——发行版必须带说明书，不能悄悄少一份"
-}
+# ---- the manual. A release MUST carry it, so stop here if absent. ----
+# This rule has a history: it used to be "copy it if it exists, otherwise skip",
+# and one shipped zip turned out to have no manual -- nobody noticed.
+# A missing manual is not an acceptable degradation.
+$doc = Join-Path $root (T 5)
+if (-not (Test-Path -LiteralPath $doc)) { throw "missing $doc" }
 
-$msg = "经纬 $ver" + [Environment]::NewLine + [Environment]::NewLine
-$msg += "完整说明见同目录的 使用说明.md。"
-$msg += [Environment]::NewLine + [Environment]::NewLine
-$msg += "第一次用：双击 run.cmd，选一个装代码的目录，然后选中列出来的项目看「概览」。"
-[System.IO.File]::WriteAllText((Join-Path $out '先看这个.txt'), $msg, (New-Object System.Text.UTF8Encoding($true)))
+$firstLook = (T 0) + [Environment]::NewLine + [Environment]::NewLine `
+    + (T 1) + [Environment]::NewLine + [Environment]::NewLine `
+    + (T 2) + [Environment]::NewLine + [Environment]::NewLine `
+    + (T 3) + [Environment]::NewLine + [Environment]::NewLine `
+    + (T 10)
+[System.IO.File]::WriteAllText((Join-Path $out (T 4)), $firstLook, $utf8bom)
 Copy-Item -LiteralPath $doc -Destination $out
 
+# ---- engineer-facing overview: design -> build -> implement -> verify ----
+# Same rule as the manual: a release MUST carry it. It is the one document that
+# explains WHY, and shipping without it makes the package look like a black box.
+$intro = Join-Path $root (T 8)
+if (-not (Test-Path -LiteralPath $intro)) { throw "missing $intro" }
+Copy-Item -LiteralPath $intro -Destination $out
+
+# ---- real screenshots (generated by tools/shot.mjs, not mock-ups) ----
+# Kept as a folder rather than inline: the .md references them by relative path,
+# so a zip that carries only the .md renders with broken images.
+$shots = Join-Path $root (T 9)
+if (Test-Path -LiteralPath $shots) {
+    $shotOut = Join-Path $out (T 9)
+    [void](New-Item -ItemType Directory -Path $shotOut -Force)
+    Get-ChildItem -LiteralPath $shots -Filter *.png | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $shotOut
+    }
+}
+
+# ---- demo walkthrough: what to open, what to point at, what to say ----
+$demoDoc = Join-Path $root (T 6)
+if (-not (Test-Path -LiteralPath $demoDoc)) {
+    throw "missing $demoDoc -- the release must carry a demo walkthrough"
+}
+Copy-Item -LiteralPath $demoDoc -Destination $out
+
+# ---- three demo projects, each answering one question ----
+# (healthy baseline / deliberately broken / something for the graph page)
+# Built and measured by tools\make-demos.ps1; this step only copies them.
+# Missing = stop with an error: discovering a missing demo mid-presentation is too late.
+$demoSrc = Join-Path (Split-Path -Parent $root) 'jingwei-demo'
+if (-not (Test-Path -LiteralPath $demoSrc)) {
+    throw "missing $demoSrc -- run: powershell -File tools\make-demos.ps1"
+}
+$demoOut = Join-Path $out (T 7)
+[void](New-Item -ItemType Directory -Path $demoOut -Force)
+foreach ($d in Get-ChildItem $demoSrc -Directory) {
+    # Skip the tool's own data dir when it sits among the demos: `jingwei-demo\.jingwei`
+    # appears the moment the tool is pointed at that folder, and `-Directory` would ship
+    # it as if it were a fourth "demo project" (it did, on 2026-10-16).
+    if ($d.Name -eq '.jingwei') { continue }
+    $target = Join-Path $demoOut $d.Name
+    [void](New-Item -ItemType Directory -Path $target -Force)
+    # Copy the demo WITHOUT its .jingwei: that is the tool's own data dir, and a demo
+    # that has been opened once carries graph.db + runs.jsonl + notes inside it.
+    # Those are process artifacts (and graph.db holds absolute machine paths).
+    foreach ($item in Get-ChildItem $d.FullName -Force) {
+        if ($item.Name -eq '.jingwei') { continue }
+        Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force
+    }
+    # Two kinds of build artifact never belong in a release:
+    #   target/       Rust build output (if the demo was built once while verifying it)
+    #   __pycache__/  Python bytecode (if the demo was run once while verifying it)
+    # Both shipped in a real pack on 2026-10-16 -- caught by reading the file listing,
+    # not by any test. That is why the listing gets read.
+    foreach ($junk in @('target', '__pycache__')) {
+        Get-ChildItem $target -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq $junk } |
+            ForEach-Object { [System.IO.Directory]::Delete($_.FullName, $true) }
+    }
+    $n = (Get-ChildItem $target -Recurse -File -Force | Measure-Object).Count
+    Write-Host ("  demo {0,-16} {1,3} files" -f $d.Name, $n)
+}
+
+# ---- zip ----
 $zip = Join-Path $root "dist\$name.zip"
-if (Test-Path $zip) { [System.IO.File]::Delete($zip) }
+if (Test-Path -LiteralPath $zip) { [System.IO.File]::Delete($zip) }
 Compress-Archive -Path "$out\*" -DestinationPath $zip -CompressionLevel Optimal
 
-$size = [math]::Round((Get-Item $zip).Length / 1MB, 2)
-Write-Host "好了：$zip（$size MB）"
+$size = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 2)
+Write-Host "done: $zip ($size MB)"

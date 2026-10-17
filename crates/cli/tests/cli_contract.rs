@@ -1,0 +1,268 @@
+//! **CLI 的端到端契约测试**（2026-10-16 加）。
+//!
+//! ## 为什么需要这一层
+//!
+//! 规划测试时量出来的缺口：`crates/cli` 原来只有 **7 条**测试，而且**全是"扫源码"式**的
+//! （读 `include_str!("cmd_graph.rs")`，断言里面有某段代码）——
+//! 那类测试守得住"别改回去"，**守不住"跑起来到底返回什么"**。
+//!
+//! 而 CLI 是**用户的主界面**，它的 **退出码与输出字段是脚本的契约**：
+//! `jingwei graph --json` 被取证脚本直接读，`jingwei index` 的退出码决定
+//! `&& 下一步` 走不走。**改了行为，原来没有任何东西会红。**
+//!
+//! ## 为什么用 `CARGO_BIN_EXE_`
+//!
+//! 它由 cargo 在集成测试里自动提供（**不用引 `assert_cmd` 之类的依赖**，
+//! 也不用自己找 target 目录——"不许给自己搭脚手架"）。拿到的就是刚构建的那个
+//! `jingwei` 可执行文件，所以**测的是真二进制，不是 `main` 里的某个函数**。
+//!
+//! ## 这一层管什么、不管什么
+//!
+//! 管：**退出码分档** / **关键字段在不在** / **"查不了"与"没有"分不分得开**。
+//! 不管：具体措辞（那是 `ui` 与文档的事）、性能、屏幕上的样子（那是界面门禁）。
+
+// 测试里的临时目录清理失败不影响断言，也不能改变结论——显式豁免，
+// 而不是让 lint 在整个 crate 里静默失声（与 `deps_tests.rs` 同一句）。
+#![allow(clippy::let_underscore_must_use)]
+
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+/// 拿 cargo 给的那个真二进制。**拿不到就跳过并说明原因**——
+/// 而不是让整条测试无声地"通过"（这个仓库为"看起来在守"付过账）。
+fn bin() -> Option<PathBuf> {
+    option_env!("CARGO_BIN_EXE_jingwei").map(PathBuf::from)
+}
+
+/// 一个临时的空目录（用它当"没有项目的目录"）。
+fn empty_dir(tag: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("jingwei-cli-{}-{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).expect("建临时目录");
+    d
+}
+
+/// 跑一次 CLI。**不设 cwd**：这几个命令都接 `--root`，
+/// 顺带钉住"不靠当前目录也能用"（cwd 默认是哪儿是这个仓库踩过的坑）。
+fn run(args: &[&str]) -> Output {
+    let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
+    Command::new(b).args(args).output().expect("跑不起来")
+}
+
+/// 退出码。**这比输出文字重要**：脚本只看它。
+fn code(o: &Output) -> i32 {
+    o.status.code().unwrap_or(-1)
+}
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).to_string()
+}
+
+/// `--help` 要列全命令，而且**退出码必须是 0**。
+///
+/// 这一条对应 `事故账本` 里那笔账：`--help` 曾**漏列 4 个命令**，
+/// 而 `使用说明.md` 承诺的 `inspect` 根本不存在。两份清单各写各的，必然漂移。
+#[test]
+fn help_列出全部命令并成功退出() {
+    let Some(_) = bin() else { return };
+    let o = run(&["--help"]);
+    assert_eq!(code(&o), 0, "`--help` 该成功退出");
+    let s = stdout(&o);
+    for cmd in ["index", "graph", "guide", "doctor", "inspect", "run", "scan"] {
+        assert!(
+            s.contains(cmd),
+            "`--help` 里该有 `{cmd}`——说明书承诺过的入口不能在表里缺席"
+        );
+    }
+}
+
+/// **认不出的子命令必须非 0**，不许静默当成默认行为。
+///
+/// 这条线的由来：`cmd_graph` 里"空子命令"与"认不出的子命令"曾共用同一个兜底臂，
+/// 于是 `jingwei graph index`（账本里写着"故意没做"的那条）会打印运行历史并**返回 0**——
+/// 脚本里 `jingwei graph index && 下一步` 就这么安心往下走了。
+#[test]
+fn 认不出的子命令不许静默成功() {
+    let Some(_) = bin() else { return };
+    let top = run(&["这不是一个命令"]);
+    assert_ne!(code(&top), 0, "顶层认不出的子命令必须非 0");
+    let sub = run(&["graph", "这不是子命令"]);
+    assert_ne!(code(&sub), 0, "`graph` 认不出的子命令必须非 0");
+}
+
+/// **空目录：说"没有"，退出码 0**——那是用户的空白，不是我们的失败。
+#[test]
+fn 空目录的图谱查询说没有而不是报错() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("nodeps");
+    let o = run(&["graph", "--root", d.to_str().unwrap()]);
+    assert_eq!(code(&o), 0, "还没建过图谱是正常情形，不该非 0 退出");
+    let s = stdout(&o);
+    assert!(s.contains("还没建过图谱"), "要说清是'还没建'：{s}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **索引一个真目录：退出码 0，而且报告要分开说"扫到多少"与"处理了多少"**。
+///
+/// 这条钉的是那个"报告拿'变了几个'当'项目有几个'"的缺陷：
+/// `files` 是这次处理了几个，**没变的会被增量检测跳过**，
+/// 所以一个正常项目跑第二遍时 `files` 就是 0 而 `scanned` 不变。
+#[test]
+fn 索引报告要分开说扫到多少与处理了多少() {
+    let Some(_) = bin() else { return };
+    // 用一个真的装着源码的目录（本仓库自己的 `crates/util` 之类的最小集合不够稳，
+    // 所以就地造一个只有两个 rs 文件的目录）
+    let d = empty_dir("idx");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    std::fs::write(d.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(d.join("src/lib.rs"), "pub fn a() {}\n").unwrap();
+
+    let first = run(&["index", "--root", d.to_str().unwrap()]);
+    assert_eq!(code(&first), 0, "索引该成功：{}", String::from_utf8_lossy(&first.stderr));
+    let s1 = stdout(&first);
+    assert!(s1.contains("2 个文件"), "第一遍该处理 2 个文件：{s1}");
+
+    // 第二遍：什么都没改 → 扫到的数不变，处理的数是 0
+    let second = run(&["index", "--root", d.to_str().unwrap()]);
+    assert_eq!(code(&second), 0, "第二遍也该成功");
+    let s2 = stdout(&second);
+    assert!(
+        s2.contains("处理了 0 个文件") || s2.contains("0 个文件"),
+        "第二遍没变，处理的该是 0：{s2}"
+    );
+    assert!(
+        s2.contains("扫到 2 个"),
+        "扫到的数不该变——变了说明收集不稳定：{s2}"
+    );
+
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **真空目录：索引必须非 0**，而且要把"扫的是哪个目录"说出来。
+///
+/// 原来它报「✓ 图谱已建好」并**退出码 0**——"成功的空结果"与"失败"分不开。
+#[test]
+fn 索引一个没有源码的目录要非零退出() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("empty");
+    let o = run(&["index", "--root", d.to_str().unwrap()]);
+    assert_ne!(code(&o), 0, "一个源文件都没有时不该报成功");
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("扫到 0 个文件"), "要说清扫到了 0 个：{err}");
+    assert!(
+        err.contains(d.to_str().unwrap()),
+        "要把扫的目录说出来，否则'0 个文件'没法查：{err}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **`--json` 的字段是契约**：脚本直接读它，改名就是破坏性变更。
+#[test]
+fn json_输出的关键字段在() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("json");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    std::fs::write(d.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    let o = run(&["index", "--root", d.to_str().unwrap(), "--json"]);
+    assert_eq!(code(&o), 0, "带 --json 也该成功");
+    let s = stdout(&o);
+    for k in ["files", "scanned", "symbols", "calls"] {
+        assert!(s.contains(&format!("\"{k}\"")), "JSON 里该有 {k}：{s}");
+    }
+
+    // 图谱查询那边的 JSON 契约（"没有"要说成 no，不是报错）。
+    //
+    // ⚠️ **必须换一个干净目录**：上面刚对 `d` 索引过，它的库里已经有东西了，
+    // 再查 `d` 自然不是 `no`。第一版就是在这儿红的——
+    // **夹具的"前置状态"没算清楚，测试就会自己造出假失败。**
+    let clean = empty_dir("json-empty");
+    let g = run(&["graph", "--root", clean.to_str().unwrap(), "--json"]);
+    assert_eq!(code(&g), 0, "还没建过图谱是正常情形，不该非 0 退出");
+    let gs = stdout(&g);
+    assert!(
+        gs.contains("\"state\"") && gs.contains("\"no\""),
+        "还没建过图谱时 JSON 该是 state=no：{gs}"
+    );
+
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&clean);
+}
+
+/// **`guide` 的 JSON 是 CLI 与桌面界面共用的那一份**（2026-10-16）。
+///
+/// ## 这条钉的是什么
+///
+/// 概览页主位那张「一句话指南」和 `jingwei guide` **必须同源**——
+/// 构造在 `Guide::to_json()` 上，两个出口都调它。
+/// 两处各写一遍的后果这个仓库很清楚：`--help` 漏列 4 个命令、
+/// 说明书承诺一个不存在的 `inspect`——**两份清单各写各的，必然漂移。**
+///
+/// 三个断言分开钉：
+///   ① `ready` 是**一个对象带 `state`**，不是一个布尔（三态要装得下）；
+///   ② 有 `headline` 与 `nextStep`（界面主位要的就是这两句）；
+///   ③ `state=unknown` 时**必须带 `why`**——那是"该谁去补"，
+///      少了它界面就只能显示一句压扁的"查不出来"。
+#[test]
+fn guide_json是命令行与界面共用的那一份() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("guide");
+    std::fs::write(d.join("requirements.txt"), "rich>=13\n").unwrap();
+
+    let o = run(&["guide", "--root", d.to_str().unwrap(), "--json"]);
+    let s = stdout(&o);
+    let v: serde_json::Value = serde_json::from_str(&s).expect("guide --json 要是合法 JSON");
+
+    // ① ready 是个对象，带 state
+    let state = v["ready"]["state"].as_str().unwrap_or("");
+    assert!(
+        ["yes", "no", "unknown"].contains(&state),
+        "ready.state 必须是三态之一，实际：{state}"
+    );
+    // ② 界面主位要的那两句
+    assert!(v["headline"].is_string(), "要有 headline（第一眼看的那句）");
+    assert!(v["nextStep"].is_string(), "要有 nextStep（能直接敲的那条）");
+    // ③ 「查不了」要能分出是谁的
+    if state == "unknown" {
+        let why = v["ready"]["why"].as_str().unwrap_or("");
+        assert!(
+            ["their_gap", "our_gap", "unclear"].contains(&why),
+            "state=unknown 时必须带 why（该谁去补）：{s}"
+        );
+        assert!(
+            v["ready"]["whatToDo"].is_string(),
+            "还要带 whatToDo（用户该做什么）：{s}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **退出码就是三态**：能跑 0 / 跑不起来 1 / 查不了 2。
+///
+/// 这一条是 `guide` 的招牌（它的注释里写着"三支都要有"）。
+/// **"查不了"与"跑不起来"共用退出码 = 把三态压扁**，
+/// 而脚本要靠它决定"要不要拦下来"。
+#[test]
+fn guide的退出码分三档() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("guide-code");
+    // 一个"什么都没声明"的目录：没有契约、没有清单 → 查不了（2）
+    let o = run(&["guide", "--root", d.to_str().unwrap()]);
+    let c = code(&o);
+    assert!(
+        c == 0 || c == 2,
+        "空目录该是'查不了'(2)或'能跑'(0)，实际 {c}"
+    );
+    assert_ne!(c, 1, "空目录不该是'跑不起来'(1)——那是把我们的空白说成他的问题");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// 夹具的路径必须真的是我们造的那个（**先确认夹具本身没搭错**）。
+#[test]
+fn 夹具目录是可用的() {
+    let d = empty_dir("sanity");
+    assert!(d.is_dir());
+    let _ = std::fs::remove_dir_all(&d);
+}

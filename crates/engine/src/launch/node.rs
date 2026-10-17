@@ -169,11 +169,15 @@ pub(crate) fn prepare(
         (
             StageStatus::Note,
             format!(
-                "{} 项都已声明；但有 {} 项**确认不了**（{}）——{}",
+                "{} 项都已声明；但有 {} 项**确认不了**（{}）——{}。{}",
                 declared.len(),
                 unknown.len(),
                 facts.link_kind,
-                facts.link_from
+                facts.link_from,
+                // **说清是谁的问题**（2026-10-16）。原来只到"确认不了"，
+                // 用户分不出该他补点什么还是等我们修。原因由 deps 那层给
+                // （它知道是 PnP 要跑 JS），**不在这里猜**。
+                deps::why_unknown_web(root)
             ),
         )
     } else {

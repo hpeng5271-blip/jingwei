@@ -1,13 +1,18 @@
-// 门禁里那些"没法靠编译器守"的规矩，用这个脚本守。
+﻿// 门禁里那些"没法靠编译器守"的规矩，用这个脚本守。
 //
 // 为什么不写成文档里的一句话：规矩写在文档里没人执行就等于没有（§13 迭代规矩）。
-// 这里只放三件能自动判定的，其余留给 clippy 和测试。
+// 这里只放五件能自动判定的，其余留给 clippy 和测试。
 //
 // 用法：node tools/gate.mjs
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { checkFacts, selftest as selftestFacts } from './check_facts.mjs';
+import { checkDocs, selftest as selftestDocs } from './check-docs.mjs';
+import { checkUiDoc } from './check-ui-doc.mjs';
+import { checkDocLinks } from './check-doc-links.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const problems = [];
@@ -176,13 +181,84 @@ function checkFileLength() {
   }
 }
 
+/**
+ * 文档数字与真源一致。
+ *
+ * 判断在 check_facts.mjs 里，这里只是把它挂进门禁——同一份判断只有一处实现
+ * （§3.2 判断只有一份）。为什么要挂在 gate.mjs 而不是单开一道门禁：
+ * gate.mjs 管的就是"没法靠编译器守的规矩"，而"文档里的数字必须在仓库里跑得出来"
+ * 正是这一类；挂在它下面，门禁道数仍是 5 道，文档里那些"五道门禁"的说法不用重写。
+ */
+function checkDocFacts() {
+  const r = checkFacts(ROOT);
+  for (const p of r.problems) problems.push(p);
+  // **自测一起跑**（2026-10-16 加）：这道门禁的"零标记"判据是**枚举式**的
+  // （词表见 `check_facts.mjs`），弱点就是"换种说法就漏"——
+  // 新写的 `介绍.md` 用表格报规模，原来那四个词一个都不匹配，整份文档走了过去。
+  // 光加词不够，**得有一个地方能演示它到底漏不漏**。
+  // 自测只依赖内存字符串、不碰磁盘，所以不会像 `check-docs` 自测那样
+  // 坏在 `mkdtemp` 上（那次七道门禁整套没跑起来，而没人知道）。
+  const st = selftestFacts();
+  for (const p of st) problems.push('check-facts 自测没过：' + p);
+  if (!r.problems.length && !st.length) {
+    console.log(`  · 文档数字：${r.marked} 处标记逐个等于 tools/facts.json 里的真值（${r.keys} 个数字）· 自测过（报规模的写法命中、概念性写法不命中）`);
+  }
+}
+
+/**
+ * 文档自洽：**声明 N 项的地方，枚举必须真的是 N 条**。
+ * 判断在 check-docs.mjs 里，这里只把它挂进门禁——同一份判断只留一个实现。
+ * 为什么挂在 gate.mjs 而不是往 gates.json 里加一道：理由同上（见 checkDocFacts 的注释）。
+ * 五道门禁这个道数是文档里写着的数（总稿 §8.1、设计 §12.3、tools/facts.json 的 gates），
+ * 再加一道就得连着改那三处；而"文档不许自己跟自己矛盾"本来就属于工程门禁这一类。
+ * 每次连自测一起跑：自测证明这道门禁**能失败**——不是只会在绿的时候绿。
+ */
+function checkDocClaims() {
+  const r = checkDocs(ROOT);
+  for (const p of r.problems) problems.push(p);
+  const st = selftestDocs();
+  for (const p of st.problems) problems.push('check-docs 自测没过：' + p);
+  if (!r.problems.length && !st.problems.length) {
+    console.log(
+      `  · 文档自洽：${r.claims} 条「声明 N 项」逐个等于枚举数出来的条数（自测 ${st.cases} 例：一致→过、对不上 / 找不到→报错）`,
+    );
+  }
+}
+
+/**
+ * 页面清单：**说明书讲到的页签集合 == 代码里的页签集合**；外加**文档链接点得开**。
+ *
+ * 两条判据分开放在两个文件里（各管一件事），这里只挂进工程门禁：
+ *   - `check-ui-doc.mjs`：页签集合相等 + 标题页数 == 表行数 == 代码页数；
+ *   - `check-doc-links.mjs`：markdown 链接从仓库根解析存不存在。
+ *
+ * **`check-doc-links` 的边界写在它自己的文件头里**：它只保证"链接不烂"，
+ * 抓不到"文档承诺了一个不存在的界面"那类语义问题——那类只能靠人读。
+ * 2026-10-16 我试着把它做成通用判据，**三次负向测试都没红**，于是收回到这一条。
+ */
+function checkPageList() {
+  const r = checkUiDoc(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (!r.problems.length) {
+    console.log(`  · 页面清单：代码里 ${r.pages} 页，说明书第三节逐页都讲了（集合相等）`);
+  }
+  const l = checkDocLinks(ROOT);
+  for (const p of l.problems) problems.push(p);
+  if (!l.problems.length) {
+    console.log(`  · 文档链接：${l.checked} 条本地链接都点得开`);
+  }
+}
+
 checkVersion();
 checkFileLength();
 checkMotives();
+checkDocFacts();
+checkDocClaims();
+checkPageList();
 
 if (problems.length) {
   console.log('门禁未通过：');
   for (const p of problems) console.log('  × ' + p);
   process.exit(1);
 }
-console.log('门禁通过：版本号三处一致，源文件行数在限内');
+console.log('门禁通过：版本号三处一致，源文件行数在限内，文档数字与 tools/facts.json 一致，文档声明与枚举一致，页面清单与说明书一致，文档链接都点得开');

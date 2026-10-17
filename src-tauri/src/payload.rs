@@ -29,6 +29,15 @@ pub(crate) fn inspect_payload(root: &Path) -> Value {
     let web_tree = jingwei_engine::deps::web_tree(root);
     let findings = rules::run_all(&facts, prev.as_ref());
     let (contract, contract_err) = Contract::load(root);
+    // **一句话指南**（2026-10-16）：项目是什么 / 能不能跑 / 卡在哪 / 下一步敲什么。
+    //
+    // 数据与 `jingwei guide` **完全同源**：同一条 `make_guide` 取数路径 +
+    // 同一个 `Guide::to_json()`。这样界面与命令行**不可能各说各的**——
+    // 两处各写一遍是这个仓库付过账的错（`--help` 漏列命令、说明书承诺不存在的入口）。
+    //
+    // 界面拿它当**概览页主位**：人打开一个项目时问的是一个**问题**（"怎么把它跑起来"），
+    // 而不是一份清单。清单在下面的「诊断」里。
+    let guide = jingwei_engine::understand::guide::make_guide(&facts, &[]);
 
     let summary: Vec<Value> = snapshot::summary_lines(&facts)
         .into_iter()
@@ -64,9 +73,16 @@ pub(crate) fn inspect_payload(root: &Path) -> Value {
         // 体检的快扫结果跟着 facts 一起回来了：打开项目的那一下就已经有了，
         // 界面不用再问一次。深扫（算体积）才需要单独叫 audit。
         "hygiene": hygiene_value(facts.project.hygiene.as_ref()),
-        // 右侧面板要显示"这个项目声明了什么依赖、装了没装"
-        "deps": facts.project.deps_status,
+        // 右侧面板要显示"这个项目声明了什么依赖、装了没装"。
+        //
+        // **这里原来还有一项 `"deps"`（`BTreeMap<String, bool>` 的布尔图），2026-10-16 删了。**
+        // 它是 `depsDetail` 的**弱化副本**：同一批数据，丢掉三态（`Verdict::Unknown`
+        // 在布尔图里就是 `false`，与"确认没装"无法区分）。留着它只有一个后果——
+        // **谁都可以再写一个只读布尔图的新消费者，把"查不了"说成"没有"**。
+        // 这个仓库为那个错修过两次（规则层一次、`snapshot.rs` 一次），所以第三次直接掐掉来源。
         "depsDetail": facts.project.deps_detail,
+        // 一句话指南（形状见 `Guide::to_json`）。**与 `jingwei guide --json` 同源。**
+        "guide": guide.to_json(),
         // 传递依赖图（Rust：Cargo.lock 里写着）
         "depsTree": {
             "edges": deps_tree.0.iter().map(|e| json!({"from": e.from, "to": e.to})).collect::<Vec<_>>(),

@@ -62,9 +62,14 @@ pub mod detect {
 
 /// L3 · 项目理解：从事实里得出结论。（同样是层名避让模块名）
 pub mod understand {
+    pub mod container;
     pub mod contract;
     pub mod diag;
     pub mod fix;
+    /// **项目指南**：一句话回答"现在能不能跑、卡在哪、下一步敲什么"。
+    /// 与 `rules` 的分工：那边是**清单**（我知道的都告诉你），这边是**排序**
+    /// （按你现在该做的下一步）。见那个文件的头。
+    pub mod guide;
     pub mod project;
     pub mod projects;
     pub mod rules;
@@ -77,6 +82,10 @@ pub mod graph {
     pub mod imports;
     pub mod index;
     pub mod parse;
+    /// Python 的语法树遍历。**第二门语言**（2026-10-16）。
+    /// 与 `parse` 分开是因为"什么算符号"两门语言根本不是一回事——见那个文件的头。
+    pub mod parse_python;
+    pub mod query;
     pub mod resolve;
     pub mod store;
 }
@@ -140,9 +149,18 @@ fn move_dir(from: &std::path::Path, to: &std::path::Path) {
     }
 }
 
+/// 项目里的图谱库路径：`.jingwei/graph.db`。
+///
+/// **这里是唯一入口。** 这个路径原来在三处各拼了一遍（集成测试、`launch`、
+/// 桌面外壳的 `graph_db()`）——同一事实多个副本，改一处就会有一处对不上，
+/// 而症状是"图谱像是空的"，不报错。设计 §3.2「判断只有一份」。
+pub fn graph_db_path(root: &std::path::Path) -> std::path::PathBuf {
+    data_dir(root).join("graph.db")
+}
+
 pub use contract::Contract;
 pub use facts::{Facts, SCHEMA_VERSION};
 // 外壳（cli / src-tauri）**只该从引擎拿类型**，不该各自去依赖领域层——
 // 那会把"依赖方向单向"这条规矩变成"三条边都通"。
-pub use jingwei_model::{Confidence, Edge, EdgeKind, Node, NodeKind, Source, Verdict};
+pub use jingwei_model::{Confidence, Edge, EdgeKind, Node, NodeKind, Source, Unknown, Verdict};
 pub use rules::{run_all, Finding, Severity};

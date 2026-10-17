@@ -49,8 +49,35 @@ function stubTauri() {
         window.__calls.push({ cmd, args });
         switch (cmd) {
           case 'list_projects':
-            return { projects: [{ name: 'demo', path: 'D:/projects/demo', age_days: 0, markers: ['Cargo.toml'], kinds: ['Rust'] }] };
+            return { projects: [
+              { name: 'demo', path: 'D:/projects/demo', age_days: 0, markers: ['Cargo.toml'], kinds: ['Rust'] },
+              // 第二个是**容器目录**（里面装着好几个项目）。它专门用来验：
+              // 打开它的时候，那一屏**不许**说「环境看着没问题」——
+              // 那句话在字面上没错、在用途上是误导（2026-10-16 真窗口里截出来的）。
+              { name: 'demo-parent', path: 'D:/projects/demo-parent', age_days: 0,
+                markers: [], kinds: ['认不出类型'] },
+            ] };
           case 'inspect':
+            // 容器目录那一支：依赖清单里混着两个不同语言的子项目，
+            // 外加那条 `projects-dir-not-a-project`。
+            if (args && String(args.root || '').includes('demo-parent')) {
+              return {
+                summary: [{ k: '项目类型', v: 'Python' }, { k: '扫描文件', v: '60' }],
+                counts: { error: 0, warn: 0 },
+                findings: [],
+                hygiene: { items: [
+                  { id: 'projects-dir-not-a-project', severity: 'info', group: '依赖清单',
+                    title: '这是个装着 3 个项目的目录，不是一个项目',
+                    evidence: ['里面有：hello_python、hello_rust、messy_service'],
+                    verify: ['Get-ChildItem -Directory'], boundary: '当成一份教学材料看时不用管',
+                    next: '在项目列表里直接点某一个项目' },
+                ] },
+                deps: {}, depsDetail: [], depsTree: { total: 0, edges: [] },
+                depsTreeWeb: { total: 0, edges: [] },
+                web: null, jvm: null, jvmBuild: null,
+                notes: [], runs: [], venvs: [], declared: [],
+              };
+            }
             return {
               summary: [{ k: '项目类型', v: 'Rust' }],
               counts: { error: 1, warn: 1 },
@@ -171,9 +198,38 @@ function stubTauri() {
                 ],
               },
             };
+          // ── 最近运行（M5 那条链的出口）：两种调用形状都要给 ──────
+          // 不带 runId → 列表；带 runId → 某一次的明细。
+          // 桩里**故意让第一次运行失败**（退出码 3）、第二次成功——
+          // 界面上要能一眼分清，所以两条都要有。
+          case 'graph_runs':
+            if (args && args.runId) {
+              return {
+                state: 'yes',
+                data: {
+                  runId: args.runId,
+                  command: 'python main.py',
+                  exitCode: 3,
+                  at: 1792112000000,
+                  diagnostics: [
+                    { title: 'boom', file: { state: 'yes', data: 'file:src/main.py' } },
+                    { title: 'Missing module: requests', file: { state: 'no', reason: '这条问题没有说是哪个文件' } },
+                    { title: 'E0308 mismatched types', file: { state: 'unknown', reason: '它说了是哪个文件，但那个文件不在图谱里' } },
+                  ],
+                },
+              };
+            }
+            return {
+              state: 'yes',
+              data: {
+                runs: [
+                  { runId: 'run:2', command: 'python main.py', exitCode: 3, at: 1792112000000, diagnostics: 3 },
+                  { runId: 'run:1', command: 'python -m unittest', exitCode: 0, at: 1792111000000, diagnostics: 0 },
+                ],
+              },
+            };
           case 'watch_start':
-            return { state: 'yes', data: { watching: 'D:/projects/demo', interval_ms: 1500 } };
-          case 'watch_stop':
+            return { state: 'yes', data: { watching: 'D:/projects/demo', interval_ms: 1500 } };          case 'watch_stop':
             return { state: 'yes', data: { watching: null } };
           case 'open_file':
             return { text: 'fn main() {\n    let n: i32 = 1;\n}\n',
@@ -477,6 +533,109 @@ try {
     st.painted > 20,
     '中心区域非背景像素 ' + st.painted + ' 个',
   );
+
+  // 6b. 最近运行：M5 那条链的出口。
+  //     **这是这一页最容易被"看起来做了"骗过去的地方**——列表出来了不等于点得开，
+  //     点得开不等于三态分得清。所以三段都验：列表、明细、三态。
+  st = await page.evaluate(() => {
+    const box = document.getElementById('ghRuns');
+    const rows = Array.from(document.querySelectorAll('#ghRunsList .gr'));
+    return {
+      hidden: box.hidden,
+      n: rows.length,
+      // 失败那一条的退出码要带 bad 类（一眼分得出成功与失败）
+      bad: rows.filter((r) => r.querySelector('.gr-code.bad')).length,
+      cmd: rows[0] ? rows[0].querySelector('.gr-cmd').textContent : '',
+      diag: rows[0] ? rows[0].querySelector('.gr-n').textContent : '',
+    };
+  });
+  check(
+    '最近运行：两条都列出来了，失败那条标了出来',
+    !st.hidden && st.n === 2 && st.bad === 1,
+    JSON.stringify(st),
+  );
+  check(
+    '最近运行：一行要有命令和问题条数',
+    st.cmd.includes('python') && st.diag.includes('3'),
+    JSON.stringify({ cmd: st.cmd, diag: st.diag }),
+  );
+
+  await page.evaluate(() => document.querySelector('#ghRunsList .gr').click());
+  await page.waitForTimeout(500);
+  const det = await page.evaluate(() => {
+    const gs = Array.from(document.querySelectorAll('#ghRunsList .gd'));
+    const txt = gs.map((g) => g.textContent).join(' | ');
+    return {
+      n: gs.length,
+      hasFile: txt.includes('src/main.py'),
+      noPos: txt.includes('没有位置'),
+      unk: txt.includes('没索引到'),
+    };
+  });
+  check(
+    '最近运行：点开能看到每条问题',
+    det.n === 3,
+    JSON.stringify(det),
+  );
+  check(
+    '最近运行：三种落点分得开（有文件 / 没说位置 / 没索引到）',
+    det.hasFile && det.noPos && det.unk,
+    JSON.stringify(det),
+  );
+
+  // 6c. **容器目录**：打开一个"装着好几个项目"的目录时，那一屏不许说「环境看着没问题」。
+  //
+  //     这条是 2026-10-16 在真窗口里截图时抓出来的：界面上写着「项目类型 Python」
+  //     和「✓ 环境看着没问题」，而同一屏的依赖清单里躺着 hello_rust/Cargo.toml——
+  //     一个"项目"的体检里混着两个别的项目。**跑测试和 CLI 都不会暴露它。**
+  await page.evaluate(() => load('D:\\projects\\demo-parent'));
+  await page.waitForTimeout(900);
+  await page.evaluate(() => switchTab('home'));
+  await page.waitForTimeout(400);
+  st = await page.evaluate(() => ({
+    head: document.querySelector('#statusCard h2').textContent,
+    cls: document.getElementById('statusCard').className,
+    finding: document.getElementById('findings').textContent.slice(0, 40),
+  }));
+  check(
+    '容器目录：首屏说的是「这里装着好几个项目」',
+    st.head.includes('好几个项目'),
+    JSON.stringify(st),
+  );
+  check(
+    '容器目录：**不许**说「环境看着没问题」',
+    !st.head.includes('环境看着没问题'),
+    st.head,
+  );
+  check(
+    '容器目录：诊断区改成「先选一个项目」',
+    st.finding.includes('先选一个项目'),
+    st.finding,
+  );
+  // 这两条是**同一个坑的第二次**：`renderHome` 的提前 return 只挡住了首次渲染，
+  // 后台刷新（`refreshQuiet`）会直接调 `renderCardNotes` / `renderChanges`，
+  // 绕过那个判断——真窗口里就是这么漏出「怎么跑：还没有契约」和变更卡的。
+  // 所以断言要盯住"那两片区域是空的"，而不是只盯首屏那张卡。
+  st = await page.evaluate(() => ({
+    notes: (document.getElementById('cardNotes') || {}).textContent || '',
+    chg: (document.getElementById('changeCard') || {}).textContent || '',
+    star: document.querySelector('#statusCard').textContent.includes('**'),
+  }));
+  check(
+    '容器目录：小字那几行不出现（不把子项目的事算在父目录头上）',
+    st.notes.trim() === '',
+    st.notes.slice(0, 60),
+  );
+  check('容器目录：变更卡不出现', st.chg.trim() === '', st.chg.slice(0, 60));
+  check(
+    '容器目录：卡片里不许有字面星号（HTML 不是 Markdown）',
+    st.star === false,
+    String(st.star),
+  );
+
+  // 回到正常项目，后面的界面还原与设置那几条要接着在普通项目上跑
+  await page.evaluate(() => load('D:\\projects\\demo'));
+  await page.waitForTimeout(800);
 
   // 7. 新建项目弹窗
   await page.evaluate(() => document.getElementById('btnNew2').click());

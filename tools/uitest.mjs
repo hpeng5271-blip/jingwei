@@ -78,6 +78,32 @@ function stubTauri() {
                 notes: [], runs: [], venvs: [], declared: [],
               };
             }
+            // **指南说"跑不起来"、而体检条目不报警**的那一屏（2026-10-17 加）。
+            //
+            // 这不是编出来的：`messy_service` 演示项目上实测就是这样——
+            // `#guideCard` 写「✗ 现在跑不起来 · 4 个依赖没装」，
+            // 而 `#statusCard` 写「✓ 环境看着没问题」、`#cardNotes` 写「没有挡路的问题」。
+            // 因为"依赖没装"在体检里是 info，而这两张卡原来自己读 `d.counts`。
+            //
+            // 桩里把这两件事拆开摆：**counts 全 0、findings 空、guide 说 no**。
+            if (window.__guideNo) {
+              return {
+                summary: [{ k: '项目类型', v: 'Python' }],
+                counts: { error: 0, warn: 0 },
+                findings: [],
+                guide: {
+                  ready: { state: 'no' },
+                  what: 'Python',
+                  headline: '4 个依赖没装：click、flask、numpy、requests',
+                  nextStep: 'jingwei env install',
+                },
+                hygiene: { items: [] },
+                deps: {}, depsDetail: [], depsTree: { total: 0, edges: [] },
+                depsTreeWeb: { total: 0, edges: [] },
+                web: null, jvm: null, jvmBuild: null,
+                notes: [], runs: [], venvs: [], declared: [],
+              };
+            }
             return {
               summary: [{ k: '项目类型', v: 'Rust' }],
               counts: { error: 1, warn: 1 },
@@ -680,6 +706,48 @@ try {
   check('全程无 JS 异常', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '));
   const fatal = await page.evaluate(() => { const f = document.getElementById('fatal'); return f && !f.hidden ? f.textContent : null; });
   check('界面红条未出现', !fatal, fatal || '');
+  // ── 指南 vs 状态卡 vs 小字：**同一个判断，不许三个答案**（2026-10-17 加）──
+  //
+  // 由来：`messy_service` 演示项目实测，同一屏写着
+  //   #guideCard  ✗ 现在跑不起来 · 4 个依赖没装
+  //   #statusCard ✓ 环境看着没问题
+  //   #cardNotes  要处理 没有挡路的问题
+  // 根子是第 26 轮那个病的另一半：退出了码修成问 `make_guide`，**界面这张卡还在自己算**。
+  //
+  // 桩里 counts 全 0、findings 空、guide 说 no —— 所以这三条**不可能空转**：
+  // 只要哪张卡又回去读 `d.counts` 或者自己写死一句"没问题"，立刻红。
+  {
+    await page.evaluate(() => { window.__guideNo = true; });
+    await page.evaluate(() => document.querySelector('#projList .banner').click());
+    await page.waitForTimeout(1200);
+    const g = await page.evaluate(() => ({
+      guide: (document.getElementById('guideCard') || {}).textContent || '',
+      status: (document.querySelector('#statusCard h2') || {}).textContent || '',
+      notes: (document.getElementById('cardNotes') || {}).textContent || '',
+    }));
+    check('指南说跑不起来时，指南卡本身必须这么说', g.guide.includes('跑不起来'), g.guide.slice(0, 60));
+    check(
+      '指南说跑不起来时，状态卡**不许**说「环境看着没问题」',
+      !g.status.includes('环境看着没问题'),
+      g.status,
+    );
+    // **必须正向确认小字也换过了**，不能只验"没有那句错话"。
+    // 第一版只写了 `!includes('没有挡路的问题')`，它绿了——因为小字里还是**上一份桩**的内容
+    // （「要处理 2 件：未找到 cargo」），于是这条断言**验的是一个没刷新的旧屏**。
+    // **绿对了原因不算数。**
+    check(
+      '指南说跑不起来时，小字换成了同一个结论（而不是没刷新）',
+      g.notes.includes('跑不起来'),
+      g.notes.slice(0, 120),
+    );
+    check(
+      '指南说跑不起来时，小字**不许**说「没有挡路的问题」',
+      !g.notes.includes('没有挡路的问题'),
+      g.notes.slice(0, 120),
+    );
+    await page.evaluate(() => { window.__guideNo = false; });
+  }
+
 } catch (e) {
   check('测试脚本自身异常', false, String(e).slice(0, 160) + ' || 页面异常: ' + pageErrors.slice(0, 2).join(' | '));
 } finally {

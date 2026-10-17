@@ -608,6 +608,21 @@ function renderHome() {
     if (cc) cc.innerHTML = '';
     renderAudit();
     return;
+  } else if (d.guide && d.guide.ready && d.guide.ready.state === 'no') {
+    // **同一个屏幕上只能有一个"能不能跑"的判断**（2026-10-17，演示项目上抓到的）。
+    //
+    // 原来这张卡只读 `d.counts`（诊断条目的 error/warn 数）——
+    // 而"依赖没装"在体检里是 `info`。于是 `messy_service` 那一屏写着：
+    //   `#guideCard`：✗ 现在跑不起来 · 4 个依赖没装
+    //   `#statusCard`：✓ 环境看着没问题 —— 解释器、依赖、契约都对得上
+    // **两张卡说的是同一件事，答案相反。**
+    //
+    // 根子是第 26 轮那个病的另一半：那一轮修的是 `doctor` 的**退出码**要问 `make_guide`，
+    // 而界面这张卡**还在自己算**。判据只有一处（`make_guide`），**三个消费者都要问它**。
+    card.className = 'status warn';
+    card.innerHTML = '<div class="face">✗</div><div><h2>跑不起来</h2>'
+      + '<p>' + esc(d.guide.headline || d.guide.what || '') + '</p>'
+      + '<p>上面那张指南写了卡在哪、下一步敲什么——两处说法以它为准。</p></div>';
   } else if (err || warn) {
     card.className = 'status warn';
     card.innerHTML = '<div class="face">!</div><div>'
@@ -633,6 +648,14 @@ function renderHome() {
       + '<div class="boundary">项目检查没发现问题。要是你总觉得哪里不对，去「运行」那页跑一次，'
       + '它挂掉的时候会把症结直接说出来。</div></div>';
     renderAudit();
+    // **这一句原来漏了**（2026-10-17，外壳测试用桩打出来的）：
+    // 没有**诊断**（`findings` 里 error/warn）的项目走这条提前 return，
+    // 于是下面那行 `renderCardNotes(d)` **一次都没执行**——
+    // 换项目时小字就停在**上一个项目**的内容上。
+    // 典型场景正是"依赖没装"：它在体检里是 `info`，`list` 因此为空，
+    // 于是小字写着别处的「项目类型 Rust · cargo run」，而指南写着「✗ 跑不起来」。
+    renderCardNotes(d);
+    renderChanges();
     return;
   }
   // 按排查链的层分组。这不是排版偏好：顺序本身就是方法——
@@ -709,6 +732,10 @@ function renderCardNotes(d) {
   if (todo.length) {
     rows.push(['要处理', '<span class="bad">' + todo.length + ' 件</span>'
       + (todo[0] ? '：' + esc(todo[0].title) : '')]);
+  } else if (d.guide && d.guide.ready && d.guide.ready.state === 'no') {
+    // 同一条判据的第二个消费者（见上面状态卡那段注释）。
+    rows.push(['要处理', '<span class="bad">跑不起来</span>——'
+      + esc(d.guide.what || '')]);
   } else {
     rows.push(['要处理', '<span class="ok">没有挡路的问题</span>']);
   }

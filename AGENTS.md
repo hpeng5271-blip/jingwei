@@ -57,7 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 单元与集成测试（<!-- fact:tests_total -->343<!-- /fact --> 条：engine <!-- fact:engine_unit -->277<!-- /fact -->
 + 集成 <!-- fact:integration -->48<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
-外壳测试 <!-- fact:shell_tests -->49<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
+外壳测试 <!-- fact:shell_tests -->53<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**
@@ -293,6 +293,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
   这成本要在做"每加一条断言都验"的打算时先算进去。
   **仍然没验的**：`#probList` 存在性、`#cardNotes`、七页签巡查的"该画出来的都画出来了"
   （那条只看 `TAB_EXPECT` 列的元素在不在）。下一轮该挑一条继续。
+
+- **同一屏三张卡，三个答案**（2026-10-17，在 `messy_service` 演示项目上抓到的）：
+  `#guideCard` 写「✗ 现在跑不起来 · 4 个依赖没装」，`#statusCard` 写「✓ 环境看着没问题」，
+  `#cardNotes` 写「要处理 **没有挡路的问题**」。
+  **根子是第 26 轮那个病的另一半**：那一轮把 `doctor` 的**退出码**改成问 `make_guide`，
+  而**界面这两张卡还在自己算**（`#statusCard` 读 `d.counts`，`#cardNotes` 读 `findings`）——
+  而"依赖没装"在体检里是 `info`，两边都数不到。
+  修法：两张卡都改成问 `d.guide.ready.state`——**判据只有一处，三个消费者都问它**。
+  门禁：外壳测试三条（桩里 `counts` 全 0、`findings` 空、`guide` 说 no，**不可能空转**）。
+- **没有诊断的项目，小字永远不刷新**（2026-10-17，被上面那条门禁收紧后打出来的）：
+  第一版断言只写了「小字不许说'没有挡路的问题'」，它**绿了**——因为小字里还是**上一份桩**的内容
+  （「要处理 2 件：未找到 cargo」）。**绿对了原因不算数。**
+  收紧成"小字必须出现'跑不起来'"，立刻红——根因是 `renderHome` 里的提前返回：
+  ```
+  if (!list.length) { box.innerHTML = '没有诊断…'; renderAudit(); return; }
+  ```
+  这条 `return` **跳过了下面那行 `renderCardNotes(d)`**。于是**没有 error/warn 的项目，
+  小字停在上一份数据上**——而"依赖没装"正是这种（info 级 → `list` 为空）。
+  修法：提前返回前也调 `renderCardNotes(d)` / `renderChanges()`。
+  **教训**：一个函数的"正常路径"和"提前返回路径"要产生同样的**副作用**；
+  只想着返回值，就会漏掉渲染。
 
 - **一条判据做了三次、三次负向测试都没红** → 收回，并把"为什么做不出来"写下来。
   **负向测试不红 = 判据不成立**；**一条几乎什么都放过的判据比没有更坏**（它看起来在守）。

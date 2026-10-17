@@ -426,11 +426,16 @@ async function main() {
   // `gitignore-missing` **必然成立**——断言因此有确定的原料，
   // 不是"非空就行"（那种断言几乎什么都放过）。
   //
-  // 判据：① 机器页的体检清单**看得见**；② 里面有**我们已经知道会有的那一条**。
+  // 判据：① **概览页**的体检清单**看得见**；② 里面有**我们已经知道会有的那一条**。
   {
-    const rep = firstPage(runWindow([fixture, '--tab', 'machine']));
+    // **页要对**：`#audit` 在**概览页**（`view-home`），`#probList` 在**笔记页**。
+    // 第一版我拿 `--tab machine` 去量这两个——它们在那一页是隐藏的，
+    // 于是 `rect` 全是 `[0,0,0,0]`，我一度以为是产品把内容折叠了。
+    // **是断言挑错了页，不是产品坏了**（`ui/index.html`：`#audit` 在 `view-home`，
+    // `#probList` 在 `view-note`）。教训：**断言的"在哪一页"也是判据的一部分。**
+    const rep = firstPage(runWindow([fixture, '--tab', 'home']));
     if (!rep) {
-      problems.push('机器页：窗口没交出报告');
+      problems.push('概览页/笔记页：窗口没交出报告');
     } else {
       const audit = pick(rep, '#audit');
       const prob = pick(rep, '#probList');
@@ -442,18 +447,23 @@ async function main() {
       // 所以：**断言内容在**（这条能钉住），**把它记成待查的债**，不假装已解决。
       // 已记进 `AGENTS.md` §5.2。
       ok(
-        '机器页：#audit 里有内容（体检条目真的填进去了）',
+        '概览页：#audit 真的画出来了（正确的页 + 不是 0 尺寸 + 有内容）',
+        audit && audit.exists && !audit.hidden && audit.rect[2] > 0 && audit.rect[3] > 0,
+        audit ? JSON.stringify(audit.rect) : '不存在',
+      );
+      ok(
+        '概览页：#audit 里有内容（体检条目真的填进去了）',
         !!(audit && audit.exists && (audit.text || '').trim().length > 0),
         audit ? JSON.stringify((audit.text || '').slice(0, 60)) : '不存在',
       );
       // 夹具必然产出的那一条：没有 .gitignore，却有 target/
       ok(
-        '机器页：已知会有的体检条目真的出现在 DOM 里（没有 .gitignore + 有 target/）',
+        '概览页：已知会有的体检条目真的出现在 DOM 里（没有 .gitignore + 有 target/）',
         !!(audit && /gitignore|\.gitignore/i.test(audit.text || '')),
         audit ? JSON.stringify((audit.text || '').slice(0, 80)) : '不存在',
       );
       ok(
-        '机器页：#probList 在（诊断列表的容器没丢）',
+        '笔记页：#probList 的容器没丢（它不在概览页，这里只验存在）',
         !!(prob && prob.exists),
         prob ? '在' : '不存在',
       );

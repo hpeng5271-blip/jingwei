@@ -221,15 +221,17 @@ impl DepKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Verdict {
-    /// 装上了（可能带版本号）
-    Yes(Option<String>),
-    /// 明确没装
-    No,
-    /// 这个语言没有可靠的确认手段
-    Unknown,
-}
+// **不再自己定义一份**（2026-10-17）。
+//
+// 这里原来有一个本地 `enum Verdict { Yes(Option<String>), No, Unknown }`——
+// 与 `model::Verdict<T>` 是**同一个概念的两份定义**，两者 derive 完全一样
+// （`Debug, Clone, PartialEq`），连三个变体的注释都同义。
+// 两份定义的风险不是"写得不一样"，而是**以后只改一份**：
+// 这个仓库为此付过很多次账（跳过目录清单写了三遍、项目标记判据写了两份）。
+//
+// 现在直接用 model 那一个：`Verdict<Option<String>>`。
+// `Yes(T)` 里 `T = Option<String>`（有版本号就给，查不到版本就是 `None`）。
+pub use jingwei_model::Verdict;
 
 pub(super) fn read(root: &Path, name: &str) -> Option<String> {
     std::fs::read_to_string(root.join(name)).ok()
@@ -273,7 +275,7 @@ fn find_dir_up(root: &Path, name: &str, max_hops: usize) -> Option<std::path::Pa
 /// 版本从 `node_modules/<名字>/package.json` 的 `version` 读——
 /// 这是"实际装了什么版本"唯一的就地凭据（锁文件说的是"该装什么"）。
 /// pnpm 的隔离布局下 `<名字>` 是指向 `.pnpm/…` 的符号链接，跟着走就对。
-fn node_installed(nm: &Path, name: &str) -> Verdict {
+fn node_installed(nm: &Path, name: &str) -> Verdict<Option<String>> {
     let p = nm.join(name);
     if !p.is_dir() {
         return Verdict::No;
@@ -518,7 +520,12 @@ pub fn why_unknown_web(root: &Path) -> String {
 }
 
 /// 装没装。`py_installed` 是 pip list 的结果（`名字==版本`），只在 Python 下用。
-pub fn installed(root: &Path, lang: Lang, name: &str, py_installed: &[String]) -> Verdict {
+pub fn installed(
+    root: &Path,
+    lang: Lang,
+    name: &str,
+    py_installed: &[String],
+) -> Verdict<Option<String>> {
     // **判据是 `lang`，不是"这个目录里有没有 Cargo.toml"**（2026-10-16 修）。
     //
     // 原来这里写的是 `root.join("Cargo.toml").is_file() && lang != Lang::Python`——

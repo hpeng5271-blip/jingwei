@@ -584,6 +584,9 @@ try {
       edges: document.getElementById('ghEdges').textContent,
       sub: document.getElementById('ghSub').textContent,
       roles: document.getElementById('ghRoles').textContent,
+      // 每条角色把**判据**挂在 title 上：读的人悬停就能问「凭什么」
+      roleTitles: Array.from(document.querySelectorAll('#ghRoles .gr-role'))
+        .map((e) => e.getAttribute('title') || ''),
       dirs: document.getElementById('ghDirs').textContent,
       // 各角色的平均半径：验"入口外圈、底层核心"这条判据
       ring: (function () {
@@ -630,6 +633,20 @@ try {
   );
   // **目录级那一行**：文件级之后再看一层，才叫"模块结构"。
   // 判据不是"有字"，而是**说出哪个目录是入口、哪个是公共底层**。
+  check(
+    '图谱：角色计数带单位（不是光一个数字）',
+    st.roles.includes('个文件'),
+    st.roles,
+  );
+  check(
+    '图谱：每个角色都挂着判据（悬停能问「凭什么」）',
+    st.roleTitles.length > 0 && st.roleTitles.every((s) => s.length > 10
+      // 判据可以写成三种：带阈值（≥ / ×）、带等号（= 0）、或者一句明确的规则
+      // （测试文件那一条是路径规则：`_tests` / `_test` / `/tests/`）。
+      // **但不许写成「它很重要」这种没有边界的话**——那正是误报的来源。
+      && /[≥×]|= 0|不参与/.test(s)),
+    JSON.stringify(st.roleTitles),
+  );
   check(
     '图谱：一条边都没有的文件说成「还没连上」，不混进中间层',
     st.roles.includes('还没连上'),

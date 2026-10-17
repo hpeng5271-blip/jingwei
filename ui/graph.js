@@ -134,14 +134,17 @@ function ghWireRuns() {
  * 图上最"热闹"的会是 `*_tests.rs`，而它们什么都不产出。
  */
 var GROLE = {
-  entry:      { c: '#cc7832', label: '入口' },
-  foundation: { c: '#6897bb', label: '公共底层' },
-  middle:     { c: '#9a8f85', label: '中间层' },
+  // `why` 是**判据本身**，挂在图例的 title 上：读的人悬停就能问"凭什么"。
+  // 三处文字**必须与 `crates/engine/src/graph/roles.rs` 的阈值一致**——
+  // 这里写的是给人看的话，那边是唯一的判据（同一个事实只写一处）。
+  entry:      { c: '#cc7832', label: '入口', why: '跨文件调用：出度 ≥ 3，且 出 ≥ 2×入。它调用别人，几乎没人调用它。' },
+  foundation: { c: '#6897bb', label: '公共底层', why: '跨文件调用：入度 ≥ 3，且 入 ≥ 2×出。很多人用它，它自己很少调别人。' },
+  middle:     { c: '#9a8f85', label: '中间层', why: '两头都有，但都不极端——它既不是入口也不是公共底层。' },
   // **isolated 不是一种角色**：它说的是「我们读不出它跟谁有关系」。
   // 实测本仓库 53 个「中间层」里有 17 个正是这样——把她们叫中间层就是撒谎。
-  isolated:   { c: '#5f5f5f', label: '还没连上' },
-  test:       { c: '#cfc8bd', label: '测试（不参与判断）' },
-  container:  { c: '#8a7f74', label: '项目' }
+  isolated:   { c: '#5f5f5f', label: '还没连上', why: '跨文件调用：出度 = 0 且 入度 = 0 —— 我们读不出它跟谁有关系（不是它没有关系）。' },
+  test:       { c: '#cfc8bd', label: '测试（不参与判断）', why: '测试文件调用一切，出度天然最高——它们不参与角色判断，连到它们的边也不计。' },
+  container:  { c: '#8a7f74', label: '项目', why: '项目节点是容器，不是入口。' }
 };
 
 /** 把角色计数画成一行。**没数据就藏起来**；有数据但一个角色都没有，要**明说**。 */
@@ -150,9 +153,14 @@ function ghRenderRoles(roles) {
   if (!box) return;
   if (!roles) { box.hidden = true; return; }
   var order = ['entry', 'foundation', 'middle', 'test', 'isolated'];
+  // **数字要有单位**（2026-10-17）：原来只写「入口 18」，读的人不知道是
+  // 18 个文件、18 条边、还是 18 个符号。这里是**按文件**数的。
+  var unit = ' 个文件';
   var parts = order.filter(function (k) { return (roles[k] || 0) > 0; }).map(function (k) {
-    return '<span class="gr-role"><i style="background:' + GROLE[k].c + '"></i>'
-      + GROLE[k].label + ' <b>' + roles[k] + '</b></span>';
+    // **凭什么判的**挂在 title 上（悬停才看，不占视觉）——
+    // "每条结论要有来源与自查"在这一页的落法。
+    return '<span class="gr-role" title="' + GROLE[k].why + '"><i style="background:'
+      + GROLE[k].c + '"></i>' + GROLE[k].label + ' <b>' + roles[k] + '</b>' + unit + '</span>';
   });
   if (!parts.length) {
     // **"读不出角色"和"没有角色"是两件事**：一个空框会让人以为是坏的。

@@ -370,14 +370,17 @@ function checkSweep(fixture) {
           if (!rt.includes('测试')) {
             problems.push('页签巡查：角色图例没说明「测试不参与判断」——读的人会把测试当成入口');
           }
-          // **目录级那一行**：文件级说"几层"，目录级才说"哪个模块"。
-          // 有角色就一定先有跨目录的调用，所以它俩该一起出现。
+          // **目录级那一行是三态的**（2026-10-17 修正，我自己写错过一版）：
+          //   ① 有跨目录调用 → 画出「入口 / 公共底层」；
+          //   ② 所有文件都在同一个目录（小项目就是这样）→ **本来就该没有**，藏起来是对的。
+          // 我第一版写的是"有角色就必须有 dirs"，拿**没原料**当**没画**——
+          // 那正是这个仓库反复犯的错：三态当二态用。
           const dirs = (r.items || []).find((i) => i.sel === '#ghDirs');
           const dt = (dirs && dirs.text) || '';
-          if (!dirs || !dirs.exists || dirs.hidden || !dirs.rect[2]) {
-            problems.push('页签巡查：有角色却没画目录级那一行 #ghDirs');
-          } else if (!dt.includes('入口') || !dt.includes('公共底层')) {
-            problems.push('页签巡查：目录级那一行没说清哪个是入口、哪个是公共底层');
+          if (dirs && dirs.exists && !dirs.hidden && dirs.rect[2] > 0) {
+            if (!dt.includes('入口') || !dt.includes('公共底层')) {
+              problems.push('页签巡查：目录级那一行画出来了，却没说清哪个是入口、哪个是公共底层');
+            }
           }
         }
       }
@@ -390,6 +393,48 @@ function checkSweep(fixture) {
   }
 }
 
+/// **角色那几条断言要真的走到**（2026-10-17）。
+///
+/// 原来的夹具没有源文件，图谱页永远走"还没建过"那条分支，
+/// 角色断言一次都跑不到——**绿了，但什么都没验**。
+///
+/// 这个夹具是一个最小的 Rust 项目（util 里三个函数 + main 里 4 次跨文件调用），
+/// 索引之后文件级角色一定能算出来（实测：入口 1 · 公共底层 1）。
+///
+/// **`jingwei index` 收的是 CWD，不是位置参数**——所以用 `cwd` 跑它。
+/// （这一条我先写错过一次，记在 SOP §S24。）
+function makeRolesFixture() {
+  const dir = join(tmpdir(), 'jw-roles-fixture-' + process.pid);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, 'Cargo.toml'), '[package]\nname = "rolesfix"\nversion = "0.1.0"\nedition = "2021"\n', 'utf8');
+  writeFileSync(join(dir, 'src', 'util.rs'), 'pub fn a() -> i32 { 1 }\npub fn b() -> i32 { 2 }\npub fn c() -> i32 { 3 }\n', 'utf8');
+  writeFileSync(join(dir, 'src', 'main.rs'), 'mod util;\nfn main() { util::a(); util::b(); util::c(); util::a(); }\n', 'utf8');
+  const r = spawnSync(CLI, ['index'], { cwd: dir, stdio: 'ignore', timeout: 120000 });
+  notes.push('  ·  角色夹具索引：' + (r.status === 0 ? '成功' : '失败（status ' + r.status + '）'));
+  return dir;
+}
+
+/// 在有图谱的夹具上验：**角色真的点名带数**。
+function checkGraphRoles(fixture) {
+  const before = problems.length;
+  const rep = firstPage(runWindow([fixture, '--tab', 'graph']));
+  if (!rep) { problems.push('角色检查：窗口没交出报告'); return; }
+  const roles = (rep.items || []).find((i) => i.sel === '#ghRoles');
+  const txt = (roles && roles.text) || '';
+  if (!roles || !roles.exists || roles.hidden || !roles.rect[2]) {
+    problems.push('角色检查：#ghRoles 没画出来（夹具索引没成？）');
+    return;
+  }
+  for (const label of ['入口', '公共底层']) {
+    if (!txt.includes(label)) problems.push('角色检查：图例里没有「' + label + '」');
+  }
+  if (!/[0-9]/.test(txt)) problems.push('角色检查：图例里一个数字都没有');
+  // **只在真的一条问题都没出时才打 ok**（这个仓库的老毛病：明明红了还打一行 ok，那是谎报）。
+  if (problems.length === before) {
+    notes.push('  ok   图谱角色在真窗口上画出来了：' + txt.replace(/\s+/g, ' '));
+  }
+}
 /// 概览页：**前六轮最贵的那个缺陷就发生在这里**，而图谱页那一段完全覆盖不到。
 ///
 /// 2026-10-16 打开一个"装着好几个项目"的父目录时，这张卡写着「✓ 环境看着没问题」，
@@ -576,6 +621,11 @@ async function main() {
 
   // 概览页那一段（前六轮最贵的缺陷就发生在那里，图谱页完全覆盖不到）
   checkHome(fixture, containerFixture);
+
+// **角色那几条要真的走到**：用一个能产出跨文件调用的最小 Rust 项目。
+// 原夹具没有源文件，图谱页永远走"还没建过"那条分支——绿了但什么都没验。
+const rolesFixture = makeRolesFixture();
+checkGraphRoles(rolesFixture);
 
   // **六个页签挨个点一遍**——外壳有六页，前面那两段只覆盖了两页。
   checkSweep(fixture);

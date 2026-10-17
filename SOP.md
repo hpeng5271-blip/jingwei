@@ -684,9 +684,15 @@ env.contract.json                    ← 「运行」页自动起草的契约
 两个都踩过，而且都直接导致门禁写了假断言：
 
 ```powershell
-jingwei index <目录>          # 对
-jingwei index --root <目录>   # 错：index 不认 --root，会立刻失败
+cd <目录>; jingwei index       # 对：index 收的是 **CWD**
+jingwei index <目录>           # 错：位置参数被忽略，它索引的是**当前目录**
+jingwei index --root <目录>    # 错：不认 --root
 ```
+
+**这一条我第一版写反了**（说"收位置参数"），实测：在仓库里跑
+`jingwei index $env:TEMP\某夹具` 输出「扫到 96 个」——**96 是仓库自己的文件数**，
+夹具一个都没进。改成 `Push-Location <夹具>; jingwei index` 之后才是「2 个文件 · 5 个符号」。
+**教训**：命令"没报错"不等于"作用在我给的那个对象上"；看它报的**规模**对不对。
 
 **库不在项目里**：跑完 `index` 之后 `Test-Path <目录>\.jingwei\graph.db` 是 **False**——
 图谱库在**全局数据目录**（按项目路径分槽）。所以：

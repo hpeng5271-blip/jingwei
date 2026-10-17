@@ -5,7 +5,7 @@
 //
 // 用法：node tools/gate.mjs
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -213,6 +213,75 @@ function checkDocFacts() {
  * 再加一道就得连着改那三处；而"文档不许自己跟自己矛盾"本来就属于工程门禁这一类。
  * 每次连自测一起跑：自测证明这道门禁**能失败**——不是只会在绿的时候绿。
  */
+/**
+ * **crate 表必须标实现状态**（2026-10-17 加）。
+ *
+ * 由来：`设计.md` §3.1 那张 crate 表把 `store/` 与 `adapters/` 和真存在的 crate
+ * 平铺着写，**读的人会以为六层都在跑**。而事实是那两个目录不存在
+ * （持久化在 `crates/engine/src/graph/store.rs`，适配层根本没做）。
+ *
+ * 这与 `框架.md` 记的同一条：**设计文档 §8.1 的"过滤七步"表没有状态列，
+ * 核实后只有 ⑤ 是完整的——不标实现状态，读的人会以为都在跑。**
+ *
+ * 判据（两条，都能失败）：
+ *   ① 表里提到的每个 `--- name/`，**若 `crates/name` 不存在，该条目必须带 ⚠️**；
+ *   ② **实际存在的 crate 必须在表里出现**（新增 crate 却忘了写 = 文档落后）。
+ */
+function checkCrateTable() {
+  const doc = join(ROOT, '设计.md');
+  if (!existsSync(doc)) { problems.push('没有 设计.md，没法核 crate 表'); return; }
+  const lines = readFileSync(doc, 'utf8').split(/\r?\n/);
+  const fence = /^```/;
+  // 找表头那一行：以 `crates/` 开头、**后面是空白**
+  // （后面可以跟注释——我自己就在那行右边加了「状态」说明，第一版用 `=== 'crates/'`
+  //   于是匹配不到，门禁报「找不到 crate 表」——**判据太脆，是我的写法问题**）
+  let i = lines.findIndex((x) => /^crates\/\s/.test(x.trim()));
+  if (i < 0) { problems.push('设计.md 里找不到 crate 表（第一行应为 crates/）'); return; }
+  while (i > 0 && !fence.test(lines[i])) i--;
+  const block = [];
+  for (let k = i + 1; k < lines.length && !fence.test(lines[k]); k++) block.push(lines[k]);
+  if (!block.length) { problems.push('crate 表是空的'); return; }
+
+  const listed = new Map();
+  const head = /^---\s*([A-Za-z0-9_-]+)\//;
+  for (let k = 0; k < block.length; k++) {
+    const m = block[k].match(head);
+    if (!m) continue;
+    let tail = '';
+    for (let j = k + 1; j < block.length; j++) {
+      if (head.test(block[j])) break;
+      tail += block[j] + '\n';
+    }
+    listed.set(m[1], tail);
+  }
+  if (listed.size === 0) { problems.push('crate 表里一个 --- name/ 都没解析出来'); return; }
+
+  const before = problems.length;
+  // crate 可能住在 `crates/<name>`，也可能住在仓库根（`src-tauri/` 是 Tauri 的约定位置）。
+  // **第一版只查 crates/**，于是 `src-tauri` 被报成"不存在"——判据漏了一条真实形状。
+  const crateExists = (name) => existsSync(join(ROOT, 'crates', name)) || existsSync(join(ROOT, name));
+  for (const [name, tail] of listed) {
+    if (!crateExists(name) && !tail.includes('⚠️')) {
+      problems.push(
+        `设计.md 的 crate 表列了 ${name}/，但 crates/${name} 不存在，而表里没标 ⚠️`
+        + '——不标实现状态，读的人会以为它在跑',
+      );
+    }
+  }
+
+  const cratesDir = join(ROOT, 'crates');
+  if (existsSync(cratesDir)) {
+    for (const e of readdirSync(cratesDir, { withFileTypes: true })) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue;
+      if (listed.has(e.name)) continue;
+      problems.push(`crates/${e.name} 存在，但 设计.md 的 crate 表里没提它`);
+    }
+  }
+  if (problems.length === before) {
+    console.log(`  · crate 表：${listed.size} 个条目，缺的都标了 ⚠️，真存在的都在表里`);
+  }
+}
+
 function checkDocClaims() {
   const r = checkDocs(ROOT);
   for (const p of r.problems) problems.push(p);
@@ -254,6 +323,7 @@ checkFileLength();
 checkMotives();
 checkDocFacts();
 checkDocClaims();
+checkCrateTable();
 checkPageList();
 
 if (problems.length) {

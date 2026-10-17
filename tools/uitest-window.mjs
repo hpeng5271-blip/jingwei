@@ -406,9 +406,13 @@ function checkSweep(fixture) {
 function makeRolesFixture() {
   const dir = join(tmpdir(), 'jw-roles-fixture-' + process.pid);
   rmSync(dir, { recursive: true, force: true });
-  mkdirSync(join(dir, 'src'), { recursive: true });
+  mkdirSync(join(dir, 'src', 'util'), { recursive: true });
   writeFileSync(join(dir, 'Cargo.toml'), '[package]\nname = "rolesfix"\nversion = "0.1.0"\nedition = "2021"\n', 'utf8');
-  writeFileSync(join(dir, 'src', 'util.rs'), 'pub fn a() -> i32 { 1 }\npub fn b() -> i32 { 2 }\npub fn c() -> i32 { 3 }\n', 'utf8');
+  // **`src/util/mod.rs` 而不是 `src/util.rs`**（2026-10-17）：只有子目录模块
+  // 才让两个文件落在**不同目录**里，目录级角色才有原料。
+  // 试过 Python 的 `from util.helpers import f`——那被当成**外部**（0 条调用），
+  // 所以这条判据的夹具只能用 Rust。
+  writeFileSync(join(dir, 'src', 'util', 'mod.rs'), 'pub fn a() -> i32 { 1 }\npub fn b() -> i32 { 2 }\npub fn c() -> i32 { 3 }\n', 'utf8');
   writeFileSync(join(dir, 'src', 'main.rs'), 'mod util;\nfn main() { util::a(); util::b(); util::c(); util::a(); }\n', 'utf8');
   const r = spawnSync(CLI, ['index'], { cwd: dir, stdio: 'ignore', timeout: 120000 });
   notes.push('  ·  角色夹具索引：' + (r.status === 0 ? '成功' : '失败（status ' + r.status + '）'));
@@ -430,9 +434,23 @@ function checkGraphRoles(fixture) {
     if (!txt.includes(label)) problems.push('角色检查：图例里没有「' + label + '」');
   }
   if (!/[0-9]/.test(txt)) problems.push('角色检查：图例里一个数字都没有');
+  // **目录级那一行也要真的量到**（2026-10-17 补）。
+  // 夹具里 `src/main.rs` 与 `src/util/mod.rs` 分属两个目录，所以它必然有原料——
+  // 这里把它当成**必须画出来**的判据，而不是"画了更好"。
+  const dirs = (rep.items || []).find((i) => i.sel === '#ghDirs');
+  const dt = (dirs && dirs.text) || '';
+  if (!dirs || !dirs.exists || dirs.hidden || !dirs.rect[2]) {
+    problems.push('角色检查：目录级那一行 #ghDirs 没画出来（夹具是两个目录，本该有）');
+  } else {
+    for (const label of ['入口', '公共底层']) {
+      if (!dt.includes(label)) problems.push('角色检查：目录级那一行没有「' + label + '」');
+    }
+    if (!/[0-9]/.test(dt)) problems.push('角色检查：目录级那一行一个数字都没有');
+  }
   // **只在真的一条问题都没出时才打 ok**（这个仓库的老毛病：明明红了还打一行 ok，那是谎报）。
   if (problems.length === before) {
-    notes.push('  ok   图谱角色在真窗口上画出来了：' + txt.replace(/\s+/g, ' '));
+    notes.push('  ok   图谱角色在真窗口上画出来了：' + txt.replace(/\s+/g, ' ')
+      + ' ｜ 目录级：' + dt.replace(/\s+/g, ' '));
   }
 }
 /// 概览页：**前六轮最贵的那个缺陷就发生在这里**，而图谱页那一段完全覆盖不到。

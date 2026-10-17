@@ -1,4 +1,4 @@
-﻿//! **项目指南**：一句话回答「这个项目现在能不能跑起来、卡在哪、下一步敲什么」。
+//! **项目指南**：一句话回答「这个项目现在能不能跑起来、卡在哪、下一步敲什么」。
 //!
 //! ## 为什么要有它
 //!
@@ -129,6 +129,10 @@ impl Guide {
                         crate::Unknown::TheirGap => "their_gap",
                         crate::Unknown::OurGap => "our_gap",
                         crate::Unknown::Unclear => "unclear",
+                        // **"不适用"是一个独立的值，不许折进上面任何一个**
+                        // （折进 `their_gap` 就是让用户去补一个他不需要的东西；
+                        //  折进 `our_gap` 就是把"问错了对象"说成"我们的短板"）。
+                        crate::Unknown::NotApplicable => "not_applicable",
                     },
                     "whatToDo": self
                         .what_to_do
@@ -203,7 +207,14 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
 
     // ── 6. 结论：能不能跑 ──
     let ready = decide_ready(&blockers, run_command.as_deref(), facts, contract);
-    let unknown_why = decide_unknown_why(&ready, facts, contract, run_command.as_deref());
+    // **"不像一个项目"要先算**：它决定 `unknown_why` 是不是"不适用"（2026-10-17）。
+    let not_a_project = contract.is_none()
+        && run_command.is_none()
+        && !crate::understand::projects::looks_like_project(std::path::Path::new(
+            &facts.project.root,
+        ));
+    let unknown_why =
+        decide_unknown_why(&ready, facts, contract, run_command.as_deref(), not_a_project);
 
     // ── 6.5 **"这个目录根本不像一个项目"是一条独立的话**（2026-10-16 加）────────
     //
@@ -217,12 +228,13 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     // （`idlelib`/`asyncio`/`site-packages`…）**一个项目标记都没有** → 那条不响。
     // **没有任何规则管"语言安装目录"**。
     //
-    // 这里**不动 `Unknown` 那三支**（加一支要碰 32 处 `matches!`，代价与风险都不对），
-    // 而是**修那句话本身**：不是"你缺了什么"，而是"**这里不是项目，我不该给项目建议**"。
-    // 判据用现成的：拿不到 `run_command` 且根目录没有项目标记 → 它不像一个项目。
-    let not_a_project = contract.is_none()
-        && run_command.is_none()
-        && !crate::understand::projects::looks_like_project(std::path::Path::new(&facts.project.root));
+    // **这里原来写着「不动 `Unknown` 那三支（加一支要碰 32 处 `matches!`，
+    // 代价与风险都不对）」——那个估计是错的**（2026-10-17 改）。
+    //
+    // 实际加第四支只动了 **3 处**（其余是 `_ =>` 兜底）。而为省这 3 处绕的弯更贵：
+    // 用 `what_to_do` 覆盖字段绕过去，`why` 仍是 `their_gap`、**退出码仍是 2**，
+    // 于是 8 个别人写的真 crate 全被说成「补上就能判断」，脚本也全被当成"查不了"拦下。
+    // **估算"改动太大"之前先数一遍**；数完常常是 3 处。
     let what_to_do = if not_a_project {
         "这里不像一个项目（没有任何项目标记文件）——所以「能不能跑」这类问题对它不适用"
     } else {
@@ -306,9 +318,22 @@ fn decide_unknown_why(
     facts: &Facts,
     contract: Option<&Contract>,
     run_command: Option<&str>,
+    not_a_project: bool,
 ) -> Unknown {
     if !matches!(ready, Verdict::Unknown) {
         return Unknown::Unclear;
+    }
+    // **先问"这个问题对它成不成立"，再问"是不是缺东西"**（2026-10-17）。
+    //
+    // 顺序很重要：原来这里直接落到 `TheirGap`，于是两种情况都被说成
+    // 「这一项你这边没有；补上就能判断」：
+    //   · **不是一个项目**（空目录 / Python 标准库 / `site-packages` 里的库）；
+    //   · **库**——拿 8 个别人写的真 crate（anyhow / itoa / log / memchr /
+    //     regex / serde / clap / rand）实测，**8 个全中**。
+    //
+    // 而**库没有"跑"这回事**：它要被别人用。让用户"补上"，补什么？补一个 `main`？
+    if not_a_project || (contract.is_none() && run_command.is_none() && is_library(facts)) {
+        return Unknown::NotApplicable;
     }
     if contract.is_none() || !facts.project.exists || run_command.is_none() {
         return Unknown::TheirGap;
@@ -316,6 +341,39 @@ fn decide_unknown_why(
     // 走到这里说明"未知"来自别处（例如某个我们没实现的检查）。
     // **不硬归**——如实说分不清。
     Unknown::Unclear
+}
+
+/// 这是个**库**（要被别人用）而不是**应用**（自己跑起来）吗？
+///
+/// ## 判据只看**盘上的事实**，不猜
+///
+/// Rust：有 `src/lib.rs` 且**没有** `src/main.rs`——
+/// 这就是 cargo 自己区分 lib/bin 的判据（`src/main.rs` 是 bin 的默认入口）。
+///
+/// ## 为什么必须先判它
+///
+/// 拿 8 个 crate 实测（2026-10-17）：`anyhow` `itoa` `log` `memchr` `regex`
+/// `serde` `clap` `rand` —— `guide` 全说「补上就能判断」，退 2。
+/// **它们都是库**，`cargo run` 对它们没有意义。让用户"补上"是误导。
+///
+/// ## 只做 Rust，不假装通用
+///
+/// Node 的库与应用都能 `npm start`（区别在 `package.json` 的 `bin`/`main`），
+/// Python 的库也可能有 `__main__`——那些判据我**没有实测过**，
+/// 所以**不写**。宁可少认，不可瞎认（`Unclear` 那条的同一道理）。
+///
+/// **而且必须先看语言**（2026-10-17，被一条测试夹具打出来的）：
+/// `src/lib.rs` 只对 Rust 有意义。第一版没看语言，于是任何 `root` 恰好指向
+/// 一个 Rust 库 crate 的场合（比如测试里的 `root: "."`）——
+/// **连"Python 项目"都会被判成库**。夹具照真东西写，就会把这种事打出来。
+fn is_library(facts: &Facts) -> bool {
+    if facts.lang != Lang::Rust {
+        return false;
+    }
+    let root = std::path::Path::new(&facts.project.root);
+    let has_lib = root.join("src").join("lib.rs").is_file();
+    let has_main = root.join("src").join("main.rs").is_file();
+    has_lib && !has_main
 }
 
 /// 项目类型说成人话。**复合项目要有复合的说法**，不能只报第一门语言

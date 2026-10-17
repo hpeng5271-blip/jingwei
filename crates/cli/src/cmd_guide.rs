@@ -44,19 +44,38 @@ pub(crate) fn cmd_guide(root: &Path, json: bool) -> i32 {
         );
         // 退出码：能不能跑得起来。**"查不了"不当成失败**（那是我们的空白，不是他的错），
         // 但也不当成功——用 2，与"用法错"区分开。
-        return exit_code(&g.ready);
+        // **"不适用"（库）是 0**：那是确定地认出来了，不是查不了。
+        return exit_code(&g);
     }
 
     render(&g, prev.is_some());
-    exit_code(&g.ready)
+    exit_code(&g)
 }
 
 /// 三态 → 退出码。**抽出来是为了让"三支都要有"这件事有一个能被断言的地方。**
-fn exit_code(ready: &Verdict<String>) -> i32 {
-    match ready {
+///
+/// ## 第四态（不适用）退出码是 `0`（2026-10-17）
+///
+/// `介绍.md` 的约定：
+///   0 = 成功（含"空结果"这种正常的空）
+///   1 = 跑不起来（**他的问题**）
+///   2 = 查不了（**我们的问题**）
+///
+/// **"不适用"一个都不是**：我们**确定地**认出了"这是个库，没有'跑'这回事"——
+/// 那不是查不了（2 说"我们没查到"，是假话），也不是他的问题（让他补 `main`？）。
+/// 它是**一次成功的判定**，所以是 `0`。
+///
+/// 实测依据：拿 8 个别人写的真 crate（anyhow / itoa / log / memchr / regex /
+/// serde / clap / rand）跑，改之前全是"补上就能判断" + 退 2。
+/// 一个脚本若按退出码决定要不要拦，会把每一个 Rust 库都拦下来。
+fn exit_code(g: &Guide) -> i32 {
+    match &g.ready {
         Verdict::Yes(_) => 0,
         Verdict::No => 1,
-        Verdict::Unknown => 2,
+        Verdict::Unknown => match g.unknown_why {
+            jingwei_engine::Unknown::NotApplicable => 0,
+            _ => 2,
+        },
     }
 }
 
@@ -79,21 +98,18 @@ fn render(g: &Guide, has_prev: bool) {
         Verdict::Unknown => {
             // **但还有一种情况：这个问题对它压根不适用**（2026-10-17）。
             //
-            // 拿空目录 / `site-packages` 里的库跑 `guide` 时抓到的：
-            // `--json` 已经会说「这里不像一个项目——所以「能不能跑」对它不适用」，
-            // 而**文字输出还在说「缺一样你这边的东西」**——
-            // **同一个事实，两个出口说的不一样**（这是这个仓库的第 N 次）。
+            // 三次碰到的同一个洞：**空目录** / `site-packages` 里的库 /
+            // **8 个别人写的真 crate**（`anyhow` `itoa` `log` `memchr` `regex`
+            // `serde` `clap` `rand`）——8 个全是同一句「**补上就能判断**」。
+            // 而它们是**库**：库没有"跑"这回事，让用户"补上"是让他去补一个 `main`。
             //
-            // 判据：引擎给了 `what_to_do`（那意味着它**知道场合**，见 `Guide` 的注释），
-            // 就说明这问题不是"缺东西"，而是"**问错了对象**"。
-            if g.what_to_do.is_some() {
-                "这个问题对它不适用"
-            } else {
-                match g.unknown_why {
-                    jingwei_engine::Unknown::TheirGap => "还查不出来——缺一样你这边的东西",
-                    jingwei_engine::Unknown::OurGap => "还查不出来——是我们没查到，不怪你",
-                    jingwei_engine::Unknown::Unclear => "还查不出来能不能跑",
-                }
+            // 现在这一支是**独立的一态**（`Unknown::NotApplicable`），不是绕过去的措辞。
+            match g.unknown_why {
+                jingwei_engine::Unknown::TheirGap => "还查不出来——缺一样你这边的东西",
+                jingwei_engine::Unknown::OurGap => "还查不出来——是我们没查到，不怪你",
+                jingwei_engine::Unknown::Unclear => "还查不出来能不能跑",
+                // **不加"查不出来"三个字**：它不是查不出来，是**这个问题对它不成立**。
+                jingwei_engine::Unknown::NotApplicable => "这个问题对它不适用",
             }
         }
     };
@@ -174,15 +190,45 @@ fn render(g: &Guide, has_prev: bool) {
 mod tests {
     use super::*;
 
-    /// **退出码要分开三态**：能跑 0 / 跑不起来 1 / 查不了 2。
+    /// **退出码要分开四态**：能跑 0 / 跑不起来 1 / 查不了 2 / **不适用 0**。
     ///
     /// 少第三支的话，"你还没写契约"会在脚本里长得像"你的项目坏了"——
     /// 这与四条线里"没做不许长得像做成了"是同一条，只是方向反过来：
     /// **我们的空白不许长得像用户的问题。**
+    ///
+    /// 第四支（不适用）为什么要单独断言：它**该退 0**。
+    /// 拿 8 个别人写的真 crate 实测过（anyhow / itoa / log / memchr / regex /
+    /// serde / clap / rand），改之前它们全退 2——**每一个 Rust 库都被当成"查不了"**，
+    /// 脚本会把它们全部拦下来。而"这是个库"是我们**确定地认出来**的，不是查不了。
     #[test]
     fn 三态各有各的退出码() {
-        assert_eq!(exit_code(&Verdict::Yes("x".into())), 0);
-        assert_eq!(exit_code(&Verdict::No), 1);
-        assert_eq!(exit_code(&Verdict::Unknown), 2);
+        // `Guide` 没有 `Default`，字段会加——所以用 `..make_guide` 太贵，
+        // 这里只填断言要用的那几个，其余给空值。**字段变了这里会编译报错**（那是对的）。
+        let g = |ready: Verdict<String>, why: jingwei_engine::Unknown| Guide {
+            what: String::new(),
+            ready,
+            blockers: vec![],
+            next_step: String::new(),
+            nice_to_have: vec![],
+            run_command: None,
+            unknown_why: why,
+            what_to_do: None,
+        };
+        use jingwei_engine::Unknown;
+        assert_eq!(
+            exit_code(&g(Verdict::Yes("x".into()), Unknown::TheirGap)),
+            0
+        );
+        assert_eq!(exit_code(&g(Verdict::No, Unknown::TheirGap)), 1);
+        assert_eq!(exit_code(&g(Verdict::Unknown, Unknown::TheirGap)), 2);
+        assert_eq!(exit_code(&g(Verdict::Unknown, Unknown::OurGap)), 2);
+        assert_eq!(exit_code(&g(Verdict::Unknown, Unknown::Unclear)), 2);
+        // **不适用 → 0**
+        assert_eq!(
+            exit_code(&g(Verdict::Unknown, Unknown::NotApplicable)),
+            0,
+            "「不适用」（库 / 不是一个项目）是**确定地认出来了**，不是查不了——\
+             给它 2 会让每个 Rust 库都被脚本当成'失败'"
+        );
     }
 }

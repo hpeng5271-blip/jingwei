@@ -286,6 +286,15 @@ const TAB_EXPECT = {
 function checkSweep(fixture) {
   const tabs = Object.keys(TAB_EXPECT);
   const before = problems.length;
+  // **这里的角色断言目前跑不到，如实记下，不假装它绿了**（2026-10-17）：
+  // 夹具没有跨文件的调用，图谱页永远走"还没建过 / 读不出角色"那条分支。
+  //
+  // 试过两条路想让夹具产出角色，**都不通，按"失败两次就停"停手**：
+  //   ① `jingwei index --root <dir>` —— `index` 收的是**位置参数**，`--root` 它不认；
+  //   ② 拿 `export_graph` 导小夹具 —— 产出 0 节点（那个目录不是它认得的项目）。
+  //
+  // 角色与目录那几条判据在 **`tools/uitest.mjs`** 里用桩数据验（57/57，是真断言）；
+  // 这个文件只验**结构与存在**。要补上这段，得先有"能产出跨文件调用的夹具"——那是另一件事。
   const reps = runWindow([fixture, '--tab', tabs[0], '--sweep', tabs.join(',')]);
   if (!reps) {
     problems.push('页签巡查：窗口没交出报告');
@@ -360,6 +369,15 @@ function checkSweep(fixture) {
           // **测试文件不许混进"入口"里**：它们调用一切，出度天然最高。
           if (!rt.includes('测试')) {
             problems.push('页签巡查：角色图例没说明「测试不参与判断」——读的人会把测试当成入口');
+          }
+          // **目录级那一行**：文件级说"几层"，目录级才说"哪个模块"。
+          // 有角色就一定先有跨目录的调用，所以它俩该一起出现。
+          const dirs = (r.items || []).find((i) => i.sel === '#ghDirs');
+          const dt = (dirs && dirs.text) || '';
+          if (!dirs || !dirs.exists || dirs.hidden || !dirs.rect[2]) {
+            problems.push('页签巡查：有角色却没画目录级那一行 #ghDirs');
+          } else if (!dt.includes('入口') || !dt.includes('公共底层')) {
+            problems.push('页签巡查：目录级那一行没说清哪个是入口、哪个是公共底层');
           }
         }
       }

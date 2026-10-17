@@ -358,6 +358,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **工作方法.md 得在，而且不许空谈**（见 checkWorkMethodDoc 的注释）。
+{
+  const r = checkWorkMethodDoc('.');
+  for (const p of r.problems) problems.push(p);
+  if (r.checked) console.log('  · 工作方法.md：在，行数与适用域都过了');
+}
 // **自检巡查的选择器必须真有对应元素**（2026-10-17 加）。
 // 它守的是一种"看起来在守、其实在量空气"的失效：元素改名后，
 // 自检照报 `exists: false`，而界面门禁不逐条断言 `exists` 就会静默通过。
@@ -433,6 +439,52 @@ export function checkSelfcheckSels(root) {
     } else if (!html.includes('<' + sel)) {
       // 裸标签名（body / main 这类）：查 <tag 在不在
       problems.push('SEL 指向 <' + sel + '>，但 index.html 里没有这个标签');
+    }
+  }
+  return { problems, checked };
+}
+
+/// **`工作方法.md` 得在，而且不许空谈**（2026-10-17 加）。
+///
+/// ## 这份文件是什么
+///
+/// 它是**给 agent 的操作手册**（不是给人看的产品介绍）：开工流程、用户的思维方式、
+/// 我的失败模式、以及 §六/§七 那两版 skill（每条判据带「判据 / 为什么 /
+/// 什么时候不适用 / 实测证据」四项）。
+///
+/// ## 为什么要配门禁
+///
+/// 它**曾经被误删，而且没有任何东西会红**——盘上没有、git 里没有（从没提交过），
+/// 最后是**从会话记录里把 8 次 write/edit 重放回来**才找回来的。
+/// **一份"只存在于会话里"的关键文件，必须至少有一条判据盯着它在不在。**
+///
+/// ## 为什么上限是 400 而不是 350
+///
+/// 文件自己写着「超过 350 行就说明它在空谈」。现在它是 36x 行——
+/// **硬套 350 会逼着删掉有用的话，那比长更糟**（同 `AGENTS.md` 的 120/300 那条：
+/// 120 是目标、300 是上限）。所以：**350 是目标，400 是上限**，到了 400 就必须往下搬。
+export function checkWorkMethodDoc(root) {
+  const problems = [];
+  let checked = 0;
+  const file = join(root, '工作方法.md');
+  if (!existsSync(file)) {
+    problems.push('工作方法.md 不见了——那是 agent 的操作手册 + skill 本体，先把它找回来');
+    return { problems, checked };
+  }
+  checked++;
+  const text = readFileSync(file, 'utf8');
+  const lines = text.split(String.fromCharCode(10)).length;
+  if (lines > 400) {
+    problems.push('工作方法.md = ' + lines + ' 行（上限 400，目标 350）——该往下搬了');
+  }
+  // §六/§七 是 skill 本体：**每条判据必须有"什么时候不适用"**（文件自己立的准入门槛）。
+  const skillPart = text.slice(text.indexOf('## 六、'));
+  if (!skillPart) {
+    problems.push('工作方法.md 里找不到 §六（skill 第一版）——判据失效，不许当成没什么可查而通过');
+  } else {
+    const nBuShiYong = (skillPart.match(/不适用/g) || []).length;
+    if (nBuShiYong < 3) {
+      problems.push('§六/§七 里「不适用」只出现 ' + nBuShiYong + ' 次——每条判据都该写明适用域');
     }
   }
   return { problems, checked };

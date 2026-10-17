@@ -133,7 +133,7 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
           // 所以现在**只在实现时再加回来**，而且加回一项的同时必须有断言读它。
           // `#ghRuns` 是范本：它在清单里，门禁有 4 条断言钉它（列表/失败标记/明细/三态）。
           const SEL = ['#view-home', '#guideCard', '#statusCard', '#cardNotes', '#view-graph', '#graphCv',
-                       '#graphHud', '#ghSub', '#ghRoles', '#ghRuns',
+                       '#graphHud', '#ghSub', '#ghRoles', '#ghDirs', '#ghRuns',
                        // `#cmdRun` = 运行那一步实际要敲的命令。**它必须与首页指南的
                        // `nextStep` 说的是同一件事**——不然首页让人敲 `cargo run`、
                        // 而这里的按钮跑的是另一个东西，用户就不知道该信哪个。

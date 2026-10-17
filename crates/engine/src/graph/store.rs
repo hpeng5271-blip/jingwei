@@ -256,10 +256,13 @@ impl Store {
         // 三种角色：判据与实现都在 `graph/roles.rs`（那里注释写清了为什么
         // 只算 `calls`、为什么要聚到文件、为什么测试文件不参与）。
         let roles = super::roles::annotate(&mut nodes, &edges);
+        // **目录级**：文件级之后再看一层，才叫"模块结构"（`框架.md` §4.8）。
+        let dirs = super::roles::dir_roles(&nodes, &edges);
         Ok(serde_json::json!({
             "nodes": nodes,
             "edges": edges,
             "roles": roles,
+            "dirs": dirs,
             "total_nodes": total_nodes,
             "total_edges": total_edges,
             "truncated": (nodes.len() as i64) < total_nodes || (edges.len() as i64) < total_edges,

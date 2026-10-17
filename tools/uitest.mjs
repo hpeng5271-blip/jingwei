@@ -214,6 +214,8 @@ function stubTauri() {
                 // **角色是内核算好带下来的**（store.rs::dump → graph/roles.rs）：
                 // 桩数据要照真形状给，否则界面读不到 role 只是"看起来画了"。
                 roles: { entry: 1, foundation: 1, middle: 0, test: 1 },
+                // 目录级：照真 payload 给（只放前三名，不堆）
+                dirs: { entry: [{ dir: 'crates/cli/src', out: 48, in: 0 }], foundation: [{ dir: 'crates/engine/src/util', out: 3, in: 50 }], total: 2 },
                 nodes: [
                   { id: 'project:', kind: 'project', name: 'demo', role: 'container' },
                   { id: 'file:src/main.rs', kind: 'file', name: 'main.rs', role: 'entry' },
@@ -581,6 +583,7 @@ try {
       edges: document.getElementById('ghEdges').textContent,
       sub: document.getElementById('ghSub').textContent,
       roles: document.getElementById('ghRoles').textContent,
+      dirs: document.getElementById('ghDirs').textContent,
       // 各角色的平均半径：验"入口外圈、底层核心"这条判据
       ring: (function () {
         const acc = {};
@@ -623,6 +626,14 @@ try {
     '图谱：说明测试不参与判断',
     st.roles.includes('测试'),
     st.roles,
+  );
+  // **目录级那一行**：文件级之后再看一层，才叫"模块结构"。
+  // 判据不是"有字"，而是**说出哪个目录是入口、哪个是公共底层**。
+  check(
+    '图谱：目录级说出了入口与公共底层',
+    st.dirs.includes('入口') && st.dirs.includes('公共底层')
+      && st.dirs.includes('crates/cli/src') && st.dirs.includes('crates/engine/src/util'),
+    st.dirs,
   );
   // **铺开要按角色**，不能按度数：入口在外圈、公共底层在核心，
   // 于是"依赖方向"不用读标签也看得出来。按度数铺会把入口和底层混在一起，

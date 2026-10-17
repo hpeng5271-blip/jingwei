@@ -163,6 +163,30 @@ function ghRenderRoles(roles) {
   box.innerHTML = parts.join('');
 }
 
+/** 目录级那一行。**没有就不画**，有就只说前三名——不堆。
+ *
+ * 带标签（「入口」「公共底层」）不是为了好看：**没有标签的一串路径读不懂**，
+ * 而这两个词正是 §4.8 要说的事。 */
+function ghRenderDirs(dirs) {
+  var box = $('#ghDirs');
+  if (!box) return;
+  if (!dirs || !dirs.total) { box.hidden = true; return; }
+  var groups = [];
+  var mk = function (label, color, list, tail) {
+    if (!list || !list.length) return;
+    var items = list.map(function (d) {
+      return esc(d.dir) + ' <b>' + (tail === 'out' ? d.out : d.in) + '</b>' + (tail === 'out' ? '→' : '←');
+    });
+    groups.push('<span class="gr-role"><i style="background:' + color + '"></i>'
+      + label + ' ' + items.join(' · ') + '</span>');
+  };
+  mk('入口', GROLE.entry.c, dirs.entry, 'out');
+  mk('公共底层', GROLE.foundation.c, dirs.foundation, 'in');
+  if (!groups.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = groups.join('');
+}
+
 async function graphLoad(drawIt) {
   if (!S.root) return;
   const st = unpack(await invoke('graph_stats', { root: S.root }));
@@ -170,6 +194,7 @@ async function graphLoad(drawIt) {
     $('#ghNodes').textContent = '—';
     $('#ghEdges').textContent = '—';
     ghRenderRoles(null);
+    ghRenderDirs(null);
     // **如实说**：没建过图谱 ≠ 建了但为空。这两句话不一样。
     $('#ghSub').textContent = st.state === 'no' ? '还没建过图谱（点「索引一次」）' : (st.reason || '读不到');
     return;
@@ -185,6 +210,7 @@ async function graphLoad(drawIt) {
   GS.data = dp.data;
   graphBuild();
   ghRenderRoles(dp.data.roles);
+  ghRenderDirs(dp.data.dirs);
   // 截断要写在界面上——画不全时得能区分"只有这么多"和"被截了"
   $('#ghSub').textContent = dp.data.truncated
     ? '共 ' + dp.data.total_nodes + ' 节点，画了前 ' + dp.data.nodes.length + ' 个（已截断）'

@@ -15,6 +15,7 @@
 mod java;
 mod node;
 mod python;
+mod rust;
 mod ready;
 pub mod rundiag;
 
@@ -191,6 +192,11 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         java::prepare(&root, opts, &contract, &contract_err, cb)?
     } else if crate::detect::web::is_node_project(&root) {
         node::prepare(&root, opts, &contract, &contract_err, cb)?
+    } else if root.join("Cargo.toml").is_file() {
+        // **Rust 有自己的一条**（2026-10-17 加）。原来它掉进下面那个"其余"分支，
+        // 于是第 1 阶段报的是「Python 3.15.0」——**答非所问**，
+        // 而这个项目 `Cargo.toml` 里写着 `edition`、契约里写着 `cargo run`。
+        rust::prepare(&root, opts, &contract, &contract_err, cb)?
     } else {
         python::prepare(&root, opts, &contract, &contract_err, cb)?
     };

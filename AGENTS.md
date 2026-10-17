@@ -60,8 +60,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
 **<!-- fact:gates -->8<!-- /fact --> 道**：
-单元与集成测试（<!-- fact:tests_total -->356<!-- /fact --> 条：engine <!-- fact:engine_unit -->290<!-- /fact -->
-+ 集成 <!-- fact:integration -->48<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
+单元与集成测试（<!-- fact:tests_total -->358<!-- /fact --> 条：engine <!-- fact:engine_unit -->291<!-- /fact -->
++ 集成 <!-- fact:integration -->49<!-- /fact --> + model <!-- fact:model -->11<!-- /fact -->，另
 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）· 文档测试 · clippy 零警告 · 工程门禁 ·
 外壳测试 <!-- fact:shell_tests -->64<!-- /fact --> 条 · 交付门禁 · 界面门禁（真窗口自报 DOM）·
 真源门禁（现场重采数字，比出 `facts.json` 过没过期）。

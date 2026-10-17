@@ -10,7 +10,10 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 文件名就是判据：出现这些，这个目录就算一个项目根。
-const MARKERS: &[&str] = &[
+///
+/// **这是唯一一份标记表**（`pub(crate)` 是为了让 `project.rs` 的"容器目录"判据复用它）——
+/// 两处各写一份标记表，迟早会出现"这个目录算不算项目"两种答案。
+pub(crate) const MARKERS: &[&str] = &[
     "package.json",
     "pom.xml",
     "build.gradle",
@@ -113,7 +116,15 @@ fn markers_in(dir: &Path) -> Vec<String> {
     out
 }
 
-fn looks_like_project(dir: &Path) -> bool {
+/// 这个目录**看起来像不像一个项目**：有没有项目标记文件（或自己是个 git 仓库）。
+///
+/// 放宽到 `pub(crate)`（2026-10-16）：`guide` 要用它区分两句话——
+/// 「**这里不是一个项目**」与「**这是一个项目、但你还没写契约**」。
+/// 那两句对用户要做的事完全不同：前者他不该动，后者他补一份就有答案。
+/// 原来它是私有的，于是 `guide` 只能一律说"你缺了 env.contract.json"，
+/// **对语言安装目录（Python 的 `Lib/`）就是错的**——照做换来的是
+/// 一个"假项目能跑"的结论，比不判断更坏。
+pub(crate) fn looks_like_project(dir: &Path) -> bool {
     !markers_in(dir).is_empty() || dir.join(".git").is_dir()
 }
 

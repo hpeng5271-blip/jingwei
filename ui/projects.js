@@ -1,4 +1,4 @@
-// 项目那一摊：选中之后的概览、卡片下方的小字、变更卡、项目检查、
+﻿// 项目那一摊：选中之后的概览、卡片下方的小字、变更卡、项目检查、
 // 启动（卡片会留下）、一条龙流水线、清理。
 //
 // 它们是"这个项目现在怎么样、下一步做什么"的答案，所以放在一起。
@@ -500,11 +500,115 @@ async function afterAuto() {
 }
 
 // ── 概览 ───────────────────────────────
+/// **这个目录是不是"装着好几个项目"**（容器）。
+///
+/// 抽成一个函数，是因为这条判据有**三个消费点**：
+///   `renderHome`（首屏）、`renderCardNotes`（小字）、`renderChanges`（变更卡）。
+/// 三处各写一遍就会漏——**同一个坑已经漏过一次**：`renderHome` 的提前 return
+/// 只挡住了首次渲染，后台刷新绕过去，真窗口里就漏出了「怎么跑：还没有契约」。
+function isContainerDir(d) {
+  return ((((d || {}).hygiene || {}).items) || [])
+    .some((i) => i.id === 'projects-dir-not-a-project');
+}
+
+/// **一句话指南**：项目是什么 / 能不能跑 / 卡在哪 / 下一步敲什么。
+///
+/// ## 为什么它占主位，状态卡退到它下面
+///
+/// 人打开一个项目时问的是**一个问题**（"我要怎么把它跑起来？"），
+/// 而状态卡回答的是**一个统计**（"有 3 件事值得看一眼"）。
+/// 统计不出错，但它**把排序工作推回给了用户**——而排序正是工具该替他做的。
+///
+/// 数据与 `jingwei guide` **同源**（引擎的 `Guide::to_json()`，两处不可能各说各的）。
+///
+/// ## 三态在这儿的样子
+///
+/// ✓ 能跑（绿）· ✗ 跑不起来（红）· **? 还查不出来（黄）**
+/// **"查不了"不用红色**——红色是"出错了"，而"我们没查过"不是他的错。
+/// 第三支带 `whatToDo`（**缺什么、谁来补**）：那是**归属**，
+/// 界面只准转述、不准自己判断（SOP §S16）。
+function renderGuide() {
+  const el = $('#guideCard');
+  if (!el) return;
+  const g = (S.data || {}).guide;
+  if (!g) { el.innerHTML = ''; return; }
+  const r = g.ready || {};
+  const face = r.state === 'yes' ? { ch: '✓', cls: 'ok' }
+    : r.state === 'no' ? { ch: '✗', cls: 'warn' }
+      : { ch: '?', cls: 'ask' };
+  const head = r.state === 'yes' ? ('现在就能跑 · ' + esc(g.what || ''))
+    : r.state === 'no' ? ('现在跑不起来 · ' + esc(g.what || ''))
+      : ('还查不出来 · ' + esc(g.what || ''));
+  let html = '<div class="status ' + face.cls + '"><div class="face">' + face.ch + '</div><div>'
+    + '<h2>' + head + '</h2>';
+  // 结论一句话：有挡路的就说第一条（"先做这个"），否则说下一步。
+  if (g.headline) html += '<p>' + esc(g.headline) + '</p>';
+  // **"查不了"要说清是谁的问题**——这一句决定用户该不该动手。
+  if (r.state === 'unknown' && r.whatToDo) {
+    html += '<p class="gd-why">' + esc(r.whatToDo) + '</p>';
+  }
+  // 下一步：一条能直接敲的东西（有才画）
+  if (g.nextStep) {
+    html += '<div class="gd-next"><b>下一步</b><code>' + esc(g.nextStep) + '</code></div>';
+  }
+  // 挡路的逐条：第一条就是"先做这个"
+  const bs = g.blockers || [];
+  if (bs.length) {
+    html += '<div class="gd-blockers"><b>卡在哪</b>'
+      + bs.map((b, i) => '<div class="gd-b"><span class="gd-n">' + (i + 1) + '</span>'
+        + '<div><div>' + esc(b.what || '') + '</div>'
+        + (b.fix ? '<div class="gd-fix">' + esc(b.fix) + '</div>' : '')
+        + (b.verify ? '<div class="gd-verify">怎么确认：<code>' + esc(b.verify) + '</code></div>' : '')
+        + '</div></div>').join('')
+      + '</div>';
+  }
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
 function renderHome() {
+  // 指南先画：它占主位，回答"我要怎么把它跑起来"。
+  renderGuide();
   const d = S.data;
   const { error: err, warn } = d.counts;
   const card = $('#statusCard');
-  if (err || warn) {
+
+  // -- 先问一句：**这是一个项目吗？** ------------------------------------
+  //
+  // 这一段的由来（2026-10-16，真窗口里截出来的）：
+  // 打开一个"装着好几个项目"的父目录时，这张卡写着「✓ 环境看着没问题」，
+  // 而同一屏下面列着两个不同项目的清单——**一个"项目"的体检里混着两个别的项目**。
+  // 那句话**在字面上没错、在用途上是误导**：它把"这个目录没毛病"
+  // 说成了"你的项目没问题"，而用户会照它去放心。
+  //
+  // 所以容器目录要占**主位**：这时候不该出现那张 ✓ 卡。
+  const isContainer = isContainerDir(d);
+
+  if (isContainer) {
+    card.className = 'status warn';
+    card.innerHTML = '<div class="face">?</div><div>'
+      + '<h2>这里装着好几个项目，不是一个项目</h2>'
+      + '<p>下面那些结论会把它们<b>混在一起</b>看（比如同时列出 Rust 的清单和 Python 的）。'
+      + '想看某一个项目的真实状态，在项目列表里直接点它那一行。</p></div>';
+    // **容器目录：到这儿为止**（2026-10-16，真窗口里抓出来的第二轮缺陷）。
+    //
+    // 下面那些东西（事实网格、诊断、变更卡、小字）**都是按"一个项目"的口径**
+    // 算出来的。放在容器目录这一屏上，每一条都在把**子项目的事算在父目录头上**——
+    // 最典型的一句是「怎么跑：还没有契约」，而契约在子项目里明明有。
+    //
+    // ⚠️ 只在这里 return 是不够的：`refreshQuiet` 会**绕过 renderHome**
+    // 直接调 `renderCardNotes` / `renderChanges`——
+    // **同一个坑的第二次**。所以那两处也要各自挡一道（见它们自己的注释）。
+    $('#facts').innerHTML = '';
+    $('#findings').innerHTML = '<div class="finding info"><div class="ftitle">先选一个项目</div>'
+      + '<div class="boundary">这个目录里装着好几个项目。上面那些结论只对"一个项目"成立，'
+      + '所以这里不给。在项目列表里点一个，再看它的真实状态。</div></div>';
+    $('#cardNotes').innerHTML = '';
+    var cc = $('#changeCard');
+    if (cc) cc.innerHTML = '';
+    renderAudit();
+    return;
+  } else if (err || warn) {
     card.className = 'status warn';
     card.innerHTML = '<div class="face">!</div><div>'
       + '<h2>有 ' + (err + warn) + ' 件事值得看一眼</h2>'
@@ -565,6 +669,13 @@ function renderHome() {
 function renderCardNotes(d) {
   const box = $('#cardNotes');
   if (!box) return;
+  // **容器目录：这几行小字一律清空**（2026-10-16）。
+  //
+  // 每一条小字都是按"一个项目"的口径写的，最典型的是「怎么跑：还没有契约」——
+  // 而契约在子项目里明明有。放在父目录这一屏上就是**把子项目的事算在它头上**。
+  // 这道闸必须在这儿：`refreshQuiet` 这类后台刷新会**直接调这个函数**，
+  // 不经过 `renderHome` 的容器判断。**同一个坑的第二次，所以要挡两处。**
+  if (isContainerDir(d)) { box.innerHTML = ''; return; }
   const hy = (d && d.hygiene) || null;
   const todo = (d.findings || []).filter(
     (f) => (f.severity === 'error' || f.severity === 'warn') && !f.group);
@@ -621,6 +732,10 @@ function renderCardNotes(d) {
 function renderChanges() {
   const box = $('#changeCard');
   if (!box) return;
+  // **容器目录：变更卡也不出现**（同上，挡后台刷新那条绕过路）。
+  // 而且它还有第二层理由：父目录的"最近变化"其实是子项目在动，
+  // 那不该算成"这个项目变了"。
+  if (isContainerDir(S.data)) { box.innerHTML = ''; return; }
   const c = S.changes;
   if (!c || c.first_run || c.lines.length === 0) {
     box.innerHTML = '';

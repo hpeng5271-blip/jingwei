@@ -566,6 +566,37 @@ window.addEventListener('DOMContentLoaded', async () => {
     const r = unpack(v);
     if (r.state === 'yes' && r.data) load(r.data).catch((e) => toast(String(e), true));
   });
+  // **深链接：`--tab <页名>`**（2026-10-16 补回）。
+  //
+  // 这条路原来**断过**：`main.rs` 一直在解析 `--tab`、也一直在提供 `initial_tab`
+  // 命令，而**界面里没人调它**——于是 `jingwei-gui.exe <目录> --tab graph`
+  // 只会停在概览页，而界面门禁（靠 `--tab` 逐页巡查）拿到的**每一张报告都是同一页**。
+  //
+  // 那是个很不显眼的坏法：命令有、参数解析有、报告也照样生成，
+  // 只是每页的报告都是概览页。**所以它只能由真窗口门禁守**——单测和 CLI 发现不了。
+  // **深链接要等"项目就位"再切页**（2026-10-16 修，真竞态）。
+  //
+  // `initial_project` 与 `initial_tab` 是**两条独立的 invoke**，
+  // 谁先回来不定。而 `switchTab('graph')` 里那句是
+  // `if (name === 'graph' && S.root) { graphWire(); graphLoad(true) }`——
+  // **`S.root` 还没设上就跳过了**，于是页面切过去了、数据永远不拉：
+  // `#ghSub` 永远停在「正在读取…」。
+  //
+  // 症状（自检报告里原样可见）：`activeView=view-graph` 而 `#ghSub="正在读取…"`。
+  // 判定为"页切过去了但数据没拉"那个竞态——**而根因是切页早于项目加载**。
+  //
+  // 修法：把"切页"挂到项目加载之后；项目一直没来就 8 秒后再切
+  // （那时候切过去至少界面是对的，只是没数据）。
+  (async function deepLink() {
+    const tabR = unpack(await invoke('initial_tab'));
+    const tab = tabR.state === 'yes' ? tabR.data : null;
+    if (typeof tab !== 'string' || !tab) return;
+    const t0 = Date.now();
+    while (!S.root && Date.now() - t0 < 8000) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    switchTab(tab);
+  })().catch(() => { /* 没有深链接就用默认页，不打扰人 */ });
 });
 
 // ── 底部状态栏：数据由 Rust 推，前端只负责画 ─────────────

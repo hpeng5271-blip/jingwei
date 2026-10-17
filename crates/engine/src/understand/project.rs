@@ -3,7 +3,7 @@
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
 //! 每条结论都带一条自己能跑的自查命令——这是「不误报」的底线。
-use jingwei_model::{Finding, Severity};
+use jingwei_model::{Confidence, Finding, Severity, Source};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -60,6 +60,10 @@ pub const HYGIENE_IDS: &[&str] = &[
     "large-file",
     "scan-truncated",
     "py-requires-unmet",
+    // 这一条是 2026-10-16 打开 D:\projects\jingwei-demo（三个项目的父目录）时抓出来的：
+    // 界面上"项目类型 Python"，而依赖清单里混着 hello_rust/Cargo.toml——
+    // 一个"项目"的体检里混着两个别的项目。
+    "projects-dir-not-a-project",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -285,10 +289,27 @@ struct Walk {
 }
 
 fn walk(dir: &Path, root: &Path, depth: usize, w: &mut Walk) {
+    // ⚠️ **两个限度，两个都要标记**（2026-10-16 修，这是拿 Python 标准库跑出来的）。
+    //
+    // 原来只标了 `FILE_BUDGET` 那一条，**深度超限什么都不说**——
+    // 于是 `ext_counts`（`"有 N 个 .py 文件"`）报的是"深度 ≤4 的和"，
+    // 却被当成全量说出去。
+    //
+    // 实测（Python 3.15 的 `Lib\`，1677 个 .py）：
+    //   深度 0..4 累计 = **1610**，而工具报的就是 1610；真实的数是 1677。
+    //   同一个截断还影响"77 个产物目录"（真 90）与 `audit.all_files`
+    //   （最深 5 层，而真实有 6 层——`sys/machine/*` 整个模块不在表里）。
+    //
+    // **最狠的一点**：那条结论自己给用户的自查命令
+    // （`Get-ChildItem -Recurse -Filter *.py | Measure-Object`）数出来是 1677——
+    // **自查命令当场否证了它自己**。而"无自查不报错"这条线本来就是为了防这个。
+    //
+    // 判据（`AGENTS.md` §2）：**`unknown` 永远不许显示成"没有"**。
+    // 这里是把「**至少** N」显示成了「N」——同一族错的第三种形态。
+    //
+    // 深度超限与文件数超限都是"**我没走完**"，都该置位。
     if depth > MAX_DEPTH || w.files.len() >= FILE_BUDGET {
-        if w.files.len() >= FILE_BUDGET {
-            w.truncated = true;
-        }
+        w.truncated = true;
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else {
@@ -304,6 +325,19 @@ fn walk(dir: &Path, root: &Path, depth: usize, w: &mut Walk) {
                 if depth > 0 {
                     w.nested_git.push(rel_of(root, &p));
                 }
+                continue;
+            }
+            // **工具自己的数据目录不当成项目内容。**
+            //
+            // 2026-10-16 对演示项目跑 `audit --json` 时发现：`longest_file` 报的是
+            // `.jingwei/notes/20261015115010-….md`——**我们自己的笔记文件成了"这个项目最长的路径"**。
+            // 三个演示项目个个如此，而 `files_scanned` 也跟着虚高。
+            // 这不是"忽略规则"那一类建议，是**把自己算进了被观察的对象**：
+            // 一旦打开过某个项目，我们对它的描述就变了。
+            //
+            // 放最深一层判断是因为它必须在**所有**深度生效——
+            // 不只在根目录（Tauri 那种 `src-tauri/.jingwei` 也要挡）。
+            if n == ".jingwei" {
                 continue;
             }
             if let Some(kind) = artifact_kind(&p, dir, &name) {
@@ -355,7 +389,7 @@ fn walk(dir: &Path, root: &Path, depth: usize, w: &mut Walk) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn it(
+pub(crate) fn it(
     id: &str,
     sev: Severity,
     group: &str,
@@ -377,11 +411,17 @@ fn it(
         boundary: boundary.into(),
         next: next.into(),
         excluded: vec![],
+        // 与 `rules.rs` 的 `f` 同一套默认：**最保守**（非权威 + 推测）。
+        // 想过 `enforce_evidence` 的权威闸，得显式声明来源。
+        // 这里如实标 `Meta` 也行——体检规则读的是文件系统与清单，那是直接观测；
+        // 但**先保守，等真有规则要报 Error 时再逐个声明**，
+        // 免得"默认就是权威"把这道闸变成橡皮筋。（2026-10-16）
+        source: Source::User,
+        confidence: Confidence::Guessed,
     }
 }
 
-fn sev_rank(s: &Severity) -> u8 {
-    match s {
+fn sev_rank(s: &Severity) -> u8 {    match s {
         Severity::Error => 0,
         Severity::Warn => 1,
         Severity::Info => 2,
@@ -544,10 +584,40 @@ fn scan_inner(root: &Path, deep: bool) -> ProjectScan {
 
     // ── 生成条目 ──
     let mut items = Vec::new();
+    // 容器目录那条放最前：它是**关于"这个目录是什么"的结论**，
+    // 比"里面有什么毛病"更上层——用户先要知道自己看错了对象，
+    // 才不会把子项目的问题当成自己的。
+    if let Some(f) = crate::understand::container::projects_dir_item(root) {
+        items.push(f);
+    }
     ignore_items(&mut items, &s, &entries);
-    deps_items(&mut items, &s, root);
+    deps_items(&mut items, &s, root, w.truncated);
     habit_items(&mut items, &s, &w);
-    size_items(&mut items, &s, deep, w.truncated);
+    size_items(&mut items, &s, deep);
+    // **"我没走完"这件事，不管 `--deep` 都要说**（2026-10-16）。
+    //
+    // 原来它长在 `size_items` 里，而 `size_items` 只在深扫时才产出体积项——
+    // 于是**浅扫时截断一声不响**。可截断会影响所有计数（`.py 文件数`、
+    // `产物目录数`、`files_scanned`），**每一条都在浅扫里就会说出去**。
+    // 这就是「至少 N 被说成 N」的成因：**那句话压根没机会出现**。
+    if w.truncated {
+        items.push(it(
+            "scan-truncated",
+            Severity::Info,
+            G_SIZE,
+            "这次没走完：下面的计数是「至少这么多」，不是总数".to_string(),
+            vec![
+                format!(
+                    "扫到 {} 个文件就停了（两个限度：目录深过 {} 层，或文件数到上限）",
+                    s.files_scanned, MAX_DEPTH
+                ),
+                "所以「有 N 个 .py 文件」这类说法要读成「至少有 N 个」".into(),
+            ],
+            vec!["(Get-ChildItem -Recurse -File | Measure-Object).Count".into()],
+            "只要没出现「没找到」的结论，就说明关键文件都在扫描范围里。",
+            "要完整分布就用专门工具（WizTree 之类）看；或者把项目里的深层目录摊平。",
+        ));
+    }
     items.sort_by(|a, b| {
         sev_rank(&a.severity)
             .cmp(&sev_rank(&b.severity))
@@ -923,9 +993,19 @@ fn ignore_items(out: &mut Vec<Finding>, s: &ProjectScan, entries: &[String]) {
     }
 }
 
-fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path) {
+fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path, truncated: bool) {
     let has = |k: &str| s.manifests.iter().any(|m| m.kind == k);
     let py_files = *s.ext_counts.get("py").unwrap_or(&0);
+    // **截断时这个数是"至少"，不是总数**（2026-10-16）。
+    // 它原来直接报 `py_files`——而扫描有深度上限，`1610` 是"深度≤4 的和"（真值 1677）。
+    // **把"至少 N"说成"N"**，与 `AGENTS.md` §2 那条线直接冲突。
+    // 注意：**数的口径要跟着话走**——只加一句"下面的计数要读成至少"是不够的
+    // （第一版就是这么半修的，实测那条标题仍写着"有 1610 个"）。
+    let py_n = if truncated {
+        format!("至少 {py_files}")
+    } else {
+        py_files.to_string()
+    };
     let py_locks: Vec<&String> = s
         .lockfiles
         .iter()
@@ -944,7 +1024,7 @@ fn deps_items(out: &mut Vec<Finding>, s: &ProjectScan, root: &Path) {
             "py-manifest-missing",
             Severity::Info,
             G_DEPS,
-            format!("有 {} 个 .py 文件，但没有任何依赖清单", py_files),
+            format!("{py_n} .py 文件，但没有任何依赖清单"),
             vec!["找不到 pyproject.toml / requirements.txt / Pipfile / setup.py".into()],
             vec!["Get-ChildItem -Recurse -Filter *.py | Measure-Object".into()],
             "如果只用了标准库，或者在写单文件脚本，那确实不需要清单。",
@@ -1444,7 +1524,12 @@ fn habit_items(out: &mut Vec<Finding>, s: &ProjectScan, w: &Walk) {
     }
 }
 
-fn size_items(out: &mut Vec<Finding>, s: &ProjectScan, deep: bool, truncated: bool) {
+/// 体积项（**只在深扫时产出**）。
+///
+/// `truncated` 这个参数**删掉了**（2026-10-16）：那条 `scan-truncated` 结论搬去了 `scan()`——
+/// 截断会影响**所有**计数（`.py 文件数`、`产物目录数`、`files_scanned`），不只是体积。
+/// 原来它长在这里，于是**浅扫时一声不响**，那正是"至少 N 被说成 N"的成因。
+fn size_items(out: &mut Vec<Finding>, s: &ProjectScan, deep: bool) {
     if deep && !s.artifacts.is_empty() {
         let total: f64 = s.artifacts.iter().map(|a| a.size_mb).sum();
         out.push(it(
@@ -1486,18 +1571,8 @@ fn size_items(out: &mut Vec<Finding>, s: &ProjectScan, deep: bool, truncated: bo
             "先确认它有没有进过仓库：git log --oneline -- 文件名。进过的话，删掉文件也救不回历史体积。",
         ));
     }
-    if truncated {
-        out.push(it(
-            "scan-truncated",
-            Severity::Info,
-            G_SIZE,
-            format!("这次只扫了前 {} 个文件", s.files_scanned),
-            vec!["目录太大时工具会主动收手，避免一次体检卡住你的编辑器".into()],
-            vec!["(Get-ChildItem -Recurse -File | Measure-Object).Count".into()],
-            "只要没出现「没找到」的结论，就说明关键文件都在扫描范围里。",
-            "需要完整的体积分布时，用 WizTree 这类专门工具看。",
-        ));
-    }
+    // `scan-truncated` **搬走了**（2026-10-16）：它原来长在这里，于是浅扫时不出现。
+    // 截断会影响所有计数，所以它现在在 `scan()` 里无条件加，不归深扫管。
 }
 
 fn truncate_mid(s: &str, n: usize) -> String {
@@ -1539,264 +1614,5 @@ impl ProjectScan {
 }
 
 #[cfg(test)]
-mod tests {
-    // 测试里的临时目录清理失败不影响断言，也不能改变结论——这里显式豁免，
-    // 而不是让 lint 在整个 crate 里静默失声。
-    #![allow(clippy::let_underscore_must_use)]
-    use super::*;
-    use std::path::PathBuf;
-
-    fn scratch(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("dd-proj-{}-{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-    fn has(s: &ProjectScan, id: &str) -> bool {
-        s.items.iter().any(|i| i.id == id)
-    }
-
-    #[test]
-    fn unignored_artifacts_are_named() {
-        let d = scratch("basic");
-        std::fs::create_dir_all(d.join("node_modules").join("x")).unwrap();
-        std::fs::write(d.join("node_modules").join("x").join("a.js"), "1").unwrap();
-        std::fs::create_dir_all(d.join("__pycache__")).unwrap();
-        std::fs::write(d.join("__pycache__").join("a.pyc"), "1").unwrap();
-        std::fs::write(d.join(".gitignore"), "node_modules/\n").unwrap();
-        let s = scan(&d);
-        assert!(s.ignored.iter().any(|x| x == "node_modules"));
-        assert!(s.unignored.iter().any(|x| x == "__pycache__"));
-        assert!(has(&s, "gitignore-missing-entry"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn a_plain_directory_named_env_is_not_an_artifact() {
-        let d = scratch("envdir");
-        std::fs::create_dir_all(d.join("env")).unwrap();
-        std::fs::write(d.join("env").join("config.json"), "{}").unwrap();
-        let s = scan(&d);
-        assert!(s.artifacts.is_empty(), "普通 env 目录不该被判成产物");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn a_real_venv_is_an_artifact() {
-        let d = scratch("venv");
-        std::fs::create_dir_all(d.join(".venv").join("Scripts")).unwrap();
-        std::fs::write(d.join(".venv").join("pyvenv.cfg"), "home = x").unwrap();
-        let s = scan(&d);
-        assert!(s.artifacts.iter().any(|a| a.path == ".venv"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn without_gitignore_we_do_not_report_missing_entries() {
-        let d = scratch("nogitignore");
-        std::fs::create_dir_all(d.join("target")).unwrap();
-        std::fs::write(d.join("target").join("a.class"), "1").unwrap();
-        let s = scan(&d);
-        assert!(!s.has_gitignore);
-        assert!(!has(&s, "gitignore-missing-entry"));
-        assert!(has(&s, "gitignore-missing"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn broken_package_json_is_an_error_with_a_verify_command() {
-        let d = scratch("badjson");
-        std::fs::write(d.join("package.json"), "{ \"name\": \"x\", }").unwrap();
-        let s = scan(&d);
-        let item = s
-            .items
-            .iter()
-            .find(|i| i.id == "package-json-broken")
-            .expect("应该报出来");
-        assert_eq!(item.severity, Severity::Error);
-        assert!(!item.verify.is_empty());
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn env_with_secrets_in_a_git_repo_is_flagged() {
-        let d = scratch("env");
-        std::fs::create_dir_all(d.join(".git")).unwrap();
-        std::fs::write(d.join(".env"), "API_KEY=abc\nPORT=8080\n").unwrap();
-        let s = scan(&d);
-        let item = s
-            .items
-            .iter()
-            .find(|i| i.id == "env-file-exposed")
-            .expect("应该报出来");
-        assert_eq!(item.severity, Severity::Warn);
-        assert!(item.evidence.iter().any(|e| e.contains("API_KEY")));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn env_without_secrets_stays_info() {
-        let d = scratch("envplain");
-        std::fs::create_dir_all(d.join(".git")).unwrap();
-        std::fs::write(d.join(".env"), "PORT=8080\n").unwrap();
-        let s = scan(&d);
-        let item = s.items.iter().find(|i| i.id == "env-file-exposed").unwrap();
-        assert_eq!(item.severity, Severity::Info);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn pom_without_source_encoding_is_flagged() {
-        let d = scratch("pom");
-        std::fs::write(
-            d.join("pom.xml"),
-            "<project><dependencies><dependency><artifactId>okhttp</artifactId><version>4.9.3</version></dependency></dependencies></project>",
-        )
-        .unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "maven-encoding-unset"));
-        assert!(!has(&s, "maven-version-conflict"));
-        assert!(!has(&s, "maven-snapshot-dep"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn same_artifact_with_two_versions_is_flagged() {
-        let d = scratch("dupver");
-        std::fs::write(
-            d.join("pom.xml"),
-            "<project>\n<dependencies>\n\
-             <dependency><artifactId>guava</artifactId><version>30.0-jre</version></dependency>\n\
-             <dependency><artifactId>guava</artifactId><version>32.0-jre</version></dependency>\n\
-             </dependencies>\n</project>\n",
-        )
-        .unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "maven-version-conflict"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 管理段里写版本是正常写法，不许被说成冲突。
-    #[test]
-    fn dependency_management_is_not_a_version_conflict() {
-        let d = scratch("mgmt");
-        std::fs::write(
-            d.join("pom.xml"),
-            "<project>\n<dependencyManagement>\n<dependencies>\n\
-             <dependency><artifactId>guava</artifactId><version>32.0-jre</version></dependency>\n\
-             </dependencies>\n</dependencyManagement>\n\
-             <dependencies>\n\
-             <dependency><artifactId>guava</artifactId><version>32.0-jre</version></dependency>\n\
-             </dependencies>\n</project>\n",
-        )
-        .unwrap();
-        let s = scan(&d);
-        assert!(!has(&s, "maven-version-conflict"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn requirements_that_are_not_pinned_are_flagged() {
-        let d = scratch("reqs");
-        std::fs::create_dir_all(d.join("src")).unwrap();
-        for n in ["a", "b", "c"] {
-            std::fs::write(d.join("src").join(format!("{}.py", n)), "x = 1\n").unwrap();
-        }
-        std::fs::write(d.join("requirements.txt"), "requests>=2.0\nflask\nnumpy\n").unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "py-unpinned"));
-        assert!(has(&s, "py-lock-missing"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn node_without_lock_is_a_warning() {
-        let d = scratch("nodelock");
-        std::fs::write(d.join("package.json"), "{\"name\":\"x\",\"version\":\"1.0.0\"}").unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "node-lock-missing"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn deep_scan_measures_artifact_size_and_quick_scan_does_not() {
-        let d = scratch("size");
-        let nm = d.join("node_modules").join("pkg");
-        std::fs::create_dir_all(&nm).unwrap();
-        std::fs::write(nm.join("big.js"), "x".repeat(200_000)).unwrap();
-        let quick = scan(&d);
-        assert!(quick.artifacts.iter().any(|a| a.path == "node_modules"));
-        assert_eq!(quick.artifacts[0].size_mb, 0.0);
-        let deeps = scan_deep(&d);
-        assert!(deeps.artifacts[0].size_mb > 0.1);
-        assert!(has(&deeps, "project-artifacts"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn nested_git_is_noticed() {
-        let d = scratch("nested");
-        std::fs::create_dir_all(d.join("vendor").join("lib").join(".git")).unwrap();
-        std::fs::write(d.join("vendor").join("lib").join("a.txt"), "1").unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "nested-git"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn every_item_has_a_verify_command_and_a_title() {
-        let d = scratch("verify");
-        std::fs::create_dir_all(d.join("node_modules")).unwrap();
-        std::fs::write(d.join("package.json"), "{}").unwrap();
-        std::fs::write(d.join("requirements.txt"), "requests>=2\nflask\nnumpy\n").unwrap();
-        std::fs::write(d.join("pom.xml"), "<project/>").unwrap();
-        std::fs::create_dir_all(d.join(".git")).unwrap();
-        let s = scan_deep(&d);
-        for i in &s.items {
-            assert!(!i.verify.is_empty(), "条目 {} 没有自查命令", i.id);
-            assert!(!i.title.is_empty(), "条目 {} 没有标题", i.id);
-            assert!(
-                HYGIENE_IDS.contains(&i.id.as_str()),
-                "条目 {} 没登记进 HYGIENE_IDS，它会被丢进「其他」层",
-                i.id
-            );
-            assert!(!i.group.is_empty(), "条目 {} 没有分组", i.id);
-        }
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn hygiene_ids_have_no_duplicates() {
-        let uniq: std::collections::BTreeSet<&str> = HYGIENE_IDS.iter().copied().collect();
-        assert_eq!(uniq.len(), HYGIENE_IDS.len());
-    }
-
-    /// PHP / Ruby / Docker 这三类也要有话说，而且说的是事实。
-    #[test]
-    fn php_ruby_and_docker_projects_get_the_right_notes() {
-        let d = scratch("polyglot");
-        std::fs::write(d.join("composer.json"), "{\"require\":{\"monolog/monolog\":\"^3\"}}").unwrap();
-        std::fs::write(d.join("Gemfile"), "source 'https://rubygems.org'\ngem 'rails'\n").unwrap();
-        std::fs::write(d.join("Dockerfile"), "FROM node:20\nCOPY . .\n").unwrap();
-        let s = scan(&d);
-        assert!(has(&s, "php-lock-missing"), "composer.json 没有锁文件该报");
-        assert!(has(&s, "ruby-lock-missing"), "Gemfile 没有锁文件该报");
-        assert!(has(&s, "docker-no-ignore"), "Dockerfile 没有 .dockerignore 该报");
-        assert_eq!(
-            s.manifests.iter().find(|m| m.kind == "php").map(|m| m.note.as_str()),
-            Some("require 1 条")
-        );
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// 有 .dockerignore 时不许再念叨。
-    #[test]
-    fn a_dockerignore_shuts_the_docker_note_up() {
-        let d = scratch("dockerignore");
-        std::fs::write(d.join("Dockerfile"), "FROM scratch\n").unwrap();
-        std::fs::write(d.join(".dockerignore"), "node_modules\n").unwrap();
-        let s = scan(&d);
-        assert!(!has(&s, "docker-no-ignore"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-}
+#[path = "project_tests.rs"]
+mod tests;

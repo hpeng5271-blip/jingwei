@@ -1,0 +1,207 @@
+﻿//! 开发工具：`--report <路径>` 把关键 DOM 元素的**实际状态**写进一个文件。
+//!
+//! ## 它是拿什么换来的
+//!
+//! 2026-10-16 用 `--tab graph` 深链接拉起窗口，截图里图谱页**只有画布、没有浮层卡片**。
+//! 而外壳测试是过得去的——因为它读的是 `textContent`，**元素隐藏时照样读得到**。
+//! 也就是说：那一整类"元素在不在、看不看得见、多大、画在哪"的问题，
+//! 测试**一条都验不了**，只能靠人拉窗口看——而人看容易漏、也没法回归。
+//!
+//! 加了这个之后，同一个问题一眼看清：`#ghSub` 停在初始文案「正在读取…」、
+//! `#ghRuns` 是 `hidden`——于是根因（切页与打开项目并行，`S.root` 还没赋值）当场现形。
+//!
+//! ## 它是工具，不是产品功能
+//!
+//! 只有显式传 `--report` 才跑；不传时这一段代码一次都不执行。
+
+use jingwei_engine::envelope::Envelope;
+use serde_json::Value;
+use tauri::{AppHandle, Manager};
+
+/// `--report <路径>`：启动后把关键 DOM 元素的**实际状态**写进一个文件。
+///
+/// ## 为什么要它
+///
+/// 2026-10-16 用 `--tab graph` 深链接拉起窗口截图，发现图谱页**只有画布、没有浮层卡片**。
+/// 而外壳测试是过得去的——因为它读的是 `textContent`，**元素隐藏时照样读得到**。
+/// 也就是说：那一整类"元素在不在、看不看得见、多大、画在哪"的问题，
+/// 现有测试**一条都验不了**，只能靠人拉窗口看——而人看容易漏、也没法回归。
+///
+/// 这个东西让**程序自己把状态报出来**：元素有没有、可不可见、几何多大、
+/// 计算出来的 `display` / `max-width` 是什么。有了它，同一件事就能自动比对。
+///
+/// 它是**开发工具**，不是产品功能：只有显式传 `--report` 才会跑。
+#[tauri::command]
+pub(crate) fn save_report(path: String, json: String) -> Value {
+    match std::fs::write(&path, json) {
+        Ok(()) => Envelope::yes(path).to_value(),
+        Err(e) => Envelope::<Value>::unknown(format!("自检结果写不进去：{e}")).to_value(),
+    }
+}
+
+// ── 已撤掉：`--shot`（截图，2026-10-16）──────────────────────────────
+//
+// 曾经加过：注入脚本里 `canvas.toDataURL()` → Rust 落盘 PNG（含一段手写 base64 解码）。
+// **代码是好的，但它从来没被接通过**——`--shot` 的参数没走到注入脚本里，
+// 而**这个进程里没有任何输出通道能看见为什么**：
+// 这个 crate 是 **Windows GUI 子系统**，`eprintln!` 的 stderr 不存在（输出被静默丢掉），
+// `dlog` 也不落盘。**看不见叠着看不见**，只能"改一行、重跑一遍"，试了 7 次没收敛。
+//
+// 按 SOP「失败 2 次就停」，**整条撤掉**（含 `save_shot` 命令与 base64 解码）。
+// 撤干净而不是留一个没有调用方的函数：**留着会让人以为有截图这条路**——
+// 这个项目为"看起来有、其实没有"付过太多次账（见 `事故账本.md`）。
+//
+// **下次要做它，先做这两件**（顺序不能反）：
+//   ① **先建诊断通道**：GUI 子系统里 stderr 与 dlog 都可能没有，
+//      唯一实测能用的是 `save_report` 那条 invoke 通道 ——
+//      所以**第一件事是让"截图状态"写进报告**，而不是先写截图；
+//   ② 或者走 Tauri 自己的 window 截图 API（不依赖页面里的 JS）。
+//
+// 需要那段实现时，从 git 历史取（`save_shot` + `decode_b64`）。
+
+pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) {
+    std::thread::spawn(move || {
+        // **等一下再注入**：`eval` 打在还没加载完的页面上会落空。
+        // 这是"第一次注入"的等待，不是"等页面就绪"——后者由脚本自己轮询。
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        // 逐页扫（`--sweep`）。空数组 = 只报告当前这一页。
+        let list = sweep
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // `handle.eval` **拿不到脚本的返回值**，所以让脚本把结果回调进来。
+        let js = format!(
+            r#"
+        (async function () {{
+          const pick = (sel) => {{
+            const el = document.querySelector(sel);
+            if (!el) return {{ sel, exists: false }};
+            const cs = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            return {{
+              sel,
+              exists: true,
+              hidden: el.hasAttribute('hidden'),
+              display: cs.display,
+              visibility: cs.visibility,
+              opacity: cs.opacity,
+              maxWidth: cs.maxWidth,
+              rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+              text: (el.textContent || '').trim().slice(0, 600),
+            }};
+          }};
+          // 每页都看这几个：主内容区、它的卡片、以及"有没有东西画出来"。
+          //
+          // **布局容器是 2026-10-16 加的**，理由值得记：
+          // 界面门禁报"画布被挤出窗口"，而**算不出来**——
+          // `100vh` = 996、`--top-h` = 66、`--bar-h` = 30，算式给的 900px
+          // 却渲染在 y=155（本该 y=66）。**算不出来就得量出来。**
+          // 这三个不是"设计要的"，是"为了查一个具体缺陷"加的；
+          // 查完可以删——**但它现在拦得住下一次，所以先留着**。
+          const SEL = ['#view-home', '#guideCard', '#statusCard', '#cardNotes', '#view-graph', '#graphCv',
+                       '#graphHud', '#ghSub', '#ghRuns', '#ghDeps', '#ghDepsList',
+                       // `#cmdRun` = 运行那一步实际要敲的命令。**它必须与首页指南的
+                       // `nextStep` 说的是同一件事**——不然首页让人敲 `cargo run`、
+                       // 而这里的按钮跑的是另一个东西，用户就不知道该信哪个。
+                       '#view-run', '#cmdRun', '#view-editor', '#edFiles',
+                       '#view-note', '#view-machine', '#view-clean',
+                       'body', 'main', '.view.on', '.graph-wrap'];
+          const snapshot = (tab) => ({{
+            tab,
+            viewport: [window.innerWidth, window.innerHeight],
+            activeView: (document.querySelector('.view.on') || {{}}).id || null,
+            navOn: (document.querySelector('#nav button.on') || {{}}).dataset
+              ? document.querySelector('#nav button.on').dataset.tab : null,
+            items: SEL.map(pick),
+          }});
+
+          // 等"页面就绪"，别盲等：主内容区真的画出来了就算就绪。
+          const ready = (tab) => {{
+            const v = document.getElementById('view-' + tab);
+            if (!v || !v.classList.contains('on')) return false;
+            const g = document.getElementById('ghSub');
+            if (tab === 'graph' && g) return !/正在读取/.test(g.textContent || '');
+            const r = v.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          }};
+          const rest = (ms) => new Promise((r) => setTimeout(r, ms));
+          const waitReady = async (tab, capMs) => {{
+            const t0 = Date.now();
+            while (Date.now() - t0 < capMs) {{
+              if (ready(tab)) return true;
+              await rest(120);
+            }}
+            return false;
+          }};
+
+          const tabs = [{list}];
+          if (!tabs.length) {{
+            // **单页路径也要等"这一页就绪"，不能盲等。**
+            //
+            // 这里原来是：1500ms 之后直接拍一张。而"1500ms"对
+            // `--tab graph` 是**不够的**——图谱页要等 `graph_stats` 回来、
+            // 要等力导向收敛，那可能超过 1.5 秒。于是报告拍到的是
+            // 「— 节点 · — 边 / 正在读取…」，而**报告只写一次**，
+            // 那个"还没画好"的状态就永久留在文件里。
+            //
+            // 症状极具欺骗性：**门禁读到"正在读取…"，看起来像产品坏了，
+            // 其实是取证工具拍早了**。实测：同一条命令第二次跑就全过（时序运气）。
+            // 而一个"跑两次里过一次"的判据**不是判据**。
+            const cur = (document.querySelector('.view.on') || {{}}).id || '';
+            const tab = cur.replace(/^view-/, '');
+            // ⚠️ **没有活动页就先别拍**（2026-10-16 修，真缺陷）。
+            //
+            // 原来这里是 `if (tab) await waitReady(tab, 8000);`——
+            // 页面还没切到任何一页时 `tab` 是空串，于是**整句跳过、立刻拍**，
+            // 拍到的就是「— 节点 · — 边 / 正在读取…」。而**报告只写一次**，
+            // 那个"还没画好"的状态就永久留在文件里，门禁读到它就判产品坏了。
+            //
+            // 深链接（`--tab graph`）现在要等 `initial_project` 回来才切页，
+            // 所以 1.5 秒的固定等待**不够稳**。改成两步：先等"有活动页"，
+            // 再等"这页就绪"，各有上限。**这是取证工具修自己，不是产品修。**
+            const waitAnyView = async (capMs) => {{
+              const t0 = Date.now();
+              while (Date.now() - t0 < capMs) {{
+                const v = document.querySelector('.view.on');
+                if (v && v.id) return v.id.replace(/^view-/, '');
+                await rest(100);
+              }}
+              return '';
+            }};
+            const realTab = tab || (await waitAnyView(10000)); // 空串 = 10 秒内都没有活动页
+            if (realTab) await waitReady(realTab, 12000);
+            window.__TAURI__.core.invoke('save_report',
+              {{ path: {path:?}, json: JSON.stringify([snapshot(realTab)]) }});
+            return;
+          }}
+
+          const out = [];
+          for (const tab of tabs) {{
+            // **点真的导航按钮**：走用户那条路（按钮的 dataset + 事件处理器都过一遍）。
+            // 直接调 `switchTab` 会漏掉"按钮本身没接上"这类问题。
+            const btn = document.querySelector('#nav button[data-tab="' + tab + '"]');
+            if (btn) btn.click();
+            else if (typeof switchTab === 'function') switchTab(tab);
+            await waitReady(tab, 3000);
+            out.push(snapshot(tab));
+          }}
+          // 扫完回到第一页——**别把窗口留在最后一页**，那不是它启动时的样子。
+          const first = document.querySelector('#nav button[data-tab="' + tabs[0] + '"]');
+          if (first) first.click();
+          window.__TAURI__.core.invoke('save_report',
+            {{ path: {path:?}, json: JSON.stringify(out) }});
+        }})()
+        "#
+        );
+        // `eval` 在**窗口**上，不在 AppHandle 上（Tauri v2）。
+        let Some(win) = handle.get_webview_window("main") else {
+            jingwei_engine::dlog::w("7002", "找不到主窗口，自检跳过");
+            return;
+        };
+        match win.eval(&js) {
+            Ok(()) => jingwei_engine::dlog::i("7000", "自检脚本已发出"),
+            Err(e) => jingwei_engine::dlog::w("7001", &format!("自检脚本发不出去：{e}")),
+        }
+    });
+}

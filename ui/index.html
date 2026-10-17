@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -174,6 +174,10 @@
     </div>
 
     <div id="homeBody" hidden>
+      <!-- **一句话指南**：项目是什么 / 能不能跑 / 卡在哪 / 下一步敲什么。
+           它是概览页主位——人打开一个项目问的是一个**问题**，不是一份清单。
+           数据与 `jingwei guide` 同源（引擎的 `Guide::to_json()`），不可能各说各的。 -->
+      <div id="guideCard"></div>
       <div id="statusCard" class="status"></div>
       <div id="autoLine" class="autoLine" hidden></div>
       <div id="cardNotes" class="cardNotes"></div>
@@ -396,6 +400,14 @@
           <button class="btn ghost sm" id="ghIndex">索引一次</button>
           <button class="btn ghost sm" id="ghLive">跟着变</button>
           <button class="btn ghost sm" id="ghFit">复位</button>
+        </div>
+        <!-- **最近运行**：跑过几次、各出了什么问题、挂在哪。
+             它是 M5 那条链的出口——**图谱自己记着"这个项目跑起来是什么样"**。
+             判据（测试在守）：两行要分得出成功与失败；点开要看到每条问题；
+             而每条问题的**落点三态**要分得开（有文件 / 没说位置 / 没索引到）。 -->
+        <div class="gh-runs" id="ghRuns" hidden>
+          <div class="gh-runs-head"><b>最近运行</b><span class="hint" id="ghRunsSub"></span></div>
+          <div id="ghRunsList"></div>
         </div>
       </div>
     </div>

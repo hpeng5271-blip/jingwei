@@ -399,6 +399,28 @@ main{grid-area:main;overflow:auto;padding:var(--s5) 0 64px}
 .status h2{margin:0 0 4px;font-size:var(--fs-lg);font-weight:700;letter-spacing:-.1px}
 .status p{margin:0;color:var(--muted);font-size:var(--fs)}
 
+/* **三态的第三支**（`?` 还查不出来）用黄色，不用红色。
+   红色是"出错了"，而"我们没查过"不是用户的错——**颜色也在替三态说话**。 */
+.status.ask .face{background:var(--warn-soft);color:var(--warn)}
+
+/* ── 一句话指南（`#guideCard`，概览页主位）────────────────────
+   它比状态卡多一点东西：下一步能敲的命令、挡路的逐条、以及
+   "查不了"时**该谁去补**。那些都需要自己的样式，不然挤成一坨。 */
+#guideCard .gd-why{margin-top:6px;color:var(--fg);font-size:var(--fs)}
+#guideCard .gd-next{margin-top:10px;display:flex;gap:var(--s2);align-items:baseline}
+#guideCard .gd-next b{font-size:var(--fs-sm);color:var(--muted);flex:none}
+#guideCard .gd-next code{background:var(--inset);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:2px 7px;font-size:var(--fs-sm);user-select:all}
+#guideCard .gd-blockers{margin-top:10px}
+#guideCard .gd-blockers > b{font-size:var(--fs-sm);color:var(--muted)}
+#guideCard .gd-b{display:flex;gap:var(--s2);margin-top:6px;align-items:flex-start}
+#guideCard .gd-n{flex:none;width:18px;height:18px;border-radius:var(--r-full);background:var(--inset);
+  border:1px solid var(--line);display:grid;place-items:center;font-size:11px;color:var(--muted)}
+#guideCard .gd-fix{margin-top:2px;color:var(--muted);font-size:var(--fs-sm)}
+#guideCard .gd-verify{margin-top:2px;color:var(--muted);font-size:var(--fs-sm)}
+#guideCard .gd-verify code{background:var(--inset);border-radius:var(--r-sm);
+  padding:1px 5px;user-select:all}
+
 /* 事实网格 */
 .facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--s3)}
 .fact{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:13px 15px}

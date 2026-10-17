@@ -58,6 +58,62 @@ use super::*;
         );
         let _ = std::fs::remove_dir_all(&d);
     }
+    /// **中文路径：Rust 只提示，C/C++ 才警告**（2026-10-17 量的）。
+    ///
+    /// 原来 `C/C++ 或 Rust` 一律 Warn。实测：纯 Rust 项目放到中文路径下，
+    /// `cargo build` 退出码 0（真的调了 rustc）、产物也能跑。
+    /// 真正翻车的是**要 C 编译器**的那条路（MinGW 的 make / 部分 MSVC 组件）——
+    /// 而"项目是 Rust"不等于"它走 cc"。
+    ///
+    /// 这个测试钉两头：**Rust → Info；C → Warn**。
+    #[test]
+    fn 中文路径里_rust_只是提示_c_才警告() {
+        // ① 纯 Rust 放在中文目录下
+        let d = scratch("zh-rust");
+        let zh = d.join("中文项目");
+        std::fs::create_dir_all(zh.join("src")).unwrap();
+        std::fs::write(
+            zh.join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(zh.join("src/lib.rs"), "pub fn f(){}").unwrap();
+        let s = scan(&zh);
+        let item = s
+            .items
+            .iter()
+            .find(|i| i.id == "project-path-unsafe")
+            .expect("路径里有中文，这条必须出现");
+        assert_eq!(
+            item.severity,
+            Severity::Info,
+            "纯 Rust 放中文路径下实测能编能跑，不该吓人：{:?}",
+            item
+        );
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ② 同一个中文目录里塞一个 C 文件 → 警告
+        let d = scratch("zh-c");
+        let zh = d.join("中文项目");
+        std::fs::create_dir_all(&zh).unwrap();
+        // **要有项目标记**：只有 main.c 的目录不算项目，habit 那一步不会跑。
+        std::fs::write(zh.join("main.c"), "int main(void){return 0;}").unwrap();
+        std::fs::write(zh.join("Makefile"), "all:\n\tgcc main.c -o app\n").unwrap();
+        let s = scan(&zh);
+        let item = s
+            .items
+            .iter()
+            .find(|i| i.id == "project-path-unsafe")
+            .expect("有 C 文件的路径里也必须有这一条");
+        assert_eq!(
+            item.severity,
+            Severity::Warn,
+            "MinGW 的 make / 部分 MSVC 组件在中文路径下确实会翻车，这条要真的警告：{:?}",
+            item
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// **多 bin 且没有 `src/main.rs` 且没写 `default-run` → `cargo run` 会报错**。
     ///
     /// ## 拿什么换的（全量跑 466 个 registry crate 换的）

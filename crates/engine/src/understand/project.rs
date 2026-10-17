@@ -1,4 +1,4 @@
-﻿//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
+//! 项目体检：这个项目自己长什么样——结构、依赖清单、忽略规则、体积。
 //!
 //! 和 doctor 的分工：doctor 查「机器和运行环境」，这里查「项目文件本身」。
 //! 两边都不猜：这里只报能从文件里读出来的事实，读不出来的一律不说。
@@ -1624,7 +1624,11 @@ fn habit_items(out: &mut Vec<Finding>, s: &ProjectScan, w: &Walk) {
     let non_ascii = !p.is_ascii();
     let has_space = p.contains(' ');
     if non_ascii || has_space {
-        let cc = s.langs.iter().any(|l| l == "C/C++" || l == "Rust");
+        // 判据：**有 C/C++ 才 Warn**。原来写成 `C/C++ 或 Rust`，量过之后发现 Rust 言过其实
+        // （纯 Rust 放中文路径下 cargo 能编能跑）；而且原来的比较串 `"C/C++"` 少了空格，
+        // 跟 `lang.rs` 里的 `"C / C++"` **永远不相等**——真正的 C/C++ 项目反而只拿到 Info。
+        let c_tool = s.langs.iter().any(|l| l == "C / C++");
+        let rust_only = !c_tool && s.langs.iter().any(|l| l == "Rust");
         let title = if has_space && non_ascii {
             "项目路径里既有中文又有空格"
         } else if non_ascii {
@@ -1634,13 +1638,15 @@ fn habit_items(out: &mut Vec<Finding>, s: &ProjectScan, w: &Walk) {
         };
         out.push(it(
             "project-path-unsafe",
-            if cc { Severity::Warn } else { Severity::Info },
+            if c_tool { Severity::Warn } else { Severity::Info },
             G_HABIT,
             title,
             vec![
                 format!("当前路径：{}", p),
-                if cc {
+                if c_tool {
                     "这个项目用到了 C/C++ 工具链：MinGW 的 make、部分 MSVC 组件最容易在这里报「找不到文件」".into()
+                } else if rust_only {
+                    "纯 Rust 一般能忍：实测 cargo 在中文路径下能编译也能运行（2026-10-17 量的）。但如果你有依赖需要 C 编译器（cc / 构建脚本），那条路仍然可能翻车".into()
                 } else {
                     "纯 Python / Node / Java 一般能忍，但 shell 脚本和一部分命令行工具会需要额外加引号".into()
                 },

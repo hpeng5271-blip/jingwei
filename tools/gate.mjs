@@ -129,8 +129,10 @@ const KNOWN_LONG = new Map([
   // "老债还清了、又冒出来四个新的"。
   //
   // 1803：P10 补 `should_skip` 闸门（+7）——必要修改，不是膨胀。
+  // 1807：路径规则修死分支——比较串 "C/C++" 少空格（与 lang.rs 的 "C / C++" 永不相等），
+  // 顺带把 Rust 降为 Info（实测中文路径下 cargo 能编能跑）。必要修改，不是膨胀。
   // 以后每次调大这个数都要在这一行留一句为什么，否则这条规矩就成橡皮筋了。
-  ['crates/engine/src/understand/project.rs', 1803],
+  ['crates/engine/src/understand/project.rs', 1807],
   ['crates/engine/src/sys/clean.rs', 1523],
   // machine.rs 已拆（mod 889 / disk 219 / ram 144 / settings 121）——**债还清了，登记表就删掉**。
   // 这条规矩的意义就在这儿：登记不是豁免，是"记着要还"。

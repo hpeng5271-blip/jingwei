@@ -215,7 +215,13 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
               return '';
             }};
             const realTab = tab || (await waitAnyView(10000)); // 空串 = 10 秒内都没有活动页
-            if (realTab) await waitReady(realTab, 12000);
+            // **上限要晚于看门狗的 20 秒**（2026-10-18 抓到抖动后改）：
+            // 图谱页数据卡住时，`ui/graph.js` 的看门狗会在 20 秒把「正在读取…」
+            // 改成「读不到（20 秒还没回来）」。
+            // 而这里原来只等 12 秒就拍——**拍得比改得早**，拍到的仍是「正在读取…」，
+            // 而报告只写一次 → 门禁拿到一份"永远没准备好"的报告，干等 90 秒。
+            // 现在等 22 秒：要么数据回来了、要么看门狗已经改成"读不到"（那也是终端状态）。
+            if (realTab) await waitReady(realTab, 22000);
             window.__TAURI__.core.invoke('save_report',
               {{ path: {path:?}, json: JSON.stringify([snapshot(realTab)]) }});
             return;
@@ -228,7 +234,10 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             const btn = document.querySelector('#nav button[data-tab="' + tab + '"]');
             if (btn) btn.click();
             else if (typeof switchTab === 'function') switchTab(tab);
-            await waitReady(tab, 3000);
+            // **图谱页要等数据回来，3 秒不够**（2026-10-18）：卡住时看门狗 20 秒
+            // 才把「正在读取…」改成「读不到」，所以这里给 22 秒——要么数据到了，
+            // 要么已经是终态。**拍早了，那份报告就永远停在"没准备好"。**
+            await waitReady(tab, tab === "graph" ? 22000 : 3000);
             out.push(snapshot(tab));
           }}
           // 扫完回到第一页——**别把窗口留在最后一页**，那不是它启动时的样子。

@@ -295,7 +295,22 @@ function runWindow(args) {
     // **抖动的次数本身是数据。** 所以还要落盘记一行（见下面 appendFlake）。
     if (!rep) {
       console.log('  · 窗口第 1 次没交报告（90 秒）——重试一次（120 秒）');
-      appendFlake(`第 1 次超时（90s），参数：${args.join(' ')}`);
+      // **把"为什么读不出"记下来**（2026-10-18）：只记"超时"没法查根因。
+      // 记三样：文件在不在 / 大小 / 解析报什么错 + 头 200 字。
+      // 这一条不是修复，是**给下一次留下证据**——已经猜错过两次，不再盲改。
+      let why = '';
+      if (existsSync(REPORT)) {
+        const raw = readFileSync(REPORT, 'utf8').replace(/^\uFEFF/, '');
+        try {
+          const parsed = JSON.parse(raw);
+          why = `能解析但不算就绪（类型 ${Array.isArray(parsed) ? '数组' : typeof parsed}）`;
+        } catch (e) {
+          why = `解析失败：${String(e.message).slice(0, 80)}｜头 200 字：${raw.slice(0, 200).replace(/\s+/g, ' ')}`;
+        }
+      } else {
+        why = '报告文件不存在';
+      }
+      appendFlake(`第 1 次超时（90s），参数：${args.join(' ')}｜${why}`);
       rep = waitReport(120_000);
     }
     if (!rep) {

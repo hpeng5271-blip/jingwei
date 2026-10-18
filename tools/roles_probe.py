@@ -77,6 +77,19 @@ def roles_of(db):
     return collections.Counter(r[0] for r in rows), rows, cross, same
 
 
+def suspicious_foundation(names):
+    """**可疑的"公共底层"**：crate 根文件（main.rs / lib.rs / 根上的 mod.rs）不该是底层。
+
+    为什么：它们是被别人*引用*的入口，不是被别人*调用*的工具；
+    如果它们进了底层，说明"入度"把"被 use"也算进来了，或者根本没接上。
+    """
+    bad = []
+    for n in names:
+        if n in ('main.rs', 'lib.rs', 'mod.rs'):
+            bad.append(n)
+    return bad
+
+
 def default_samples():
     """默认样本：3 个真应用（真入口 = src/main.rs）。"""
     home = os.environ['USERPROFILE']
@@ -124,6 +137,12 @@ def main():
               f'{counts.get("entry", 0):>5}{counts.get("foundation", 0):>5}  {mark}')
         if ents:
             print(f'    入口名单: {", ".join(ents)}')
+        founds = [r[3] for r in rows if r[0] == 'foundation']
+        if founds:
+            print(f'    底层名单: {", ".join(founds)}')
+            bad = suspicious_foundation(founds)
+            if bad:
+                print(f'    ⚠ 可疑底层（crate 根文件不该是底层）: {", ".join(bad)}')
         if is_app:
             apps += 1
             entries += len(ents)

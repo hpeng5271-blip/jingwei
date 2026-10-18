@@ -1808,3 +1808,17 @@ body{background:var(--bg)}
 .gh-roles .gr-role { display: inline-flex; align-items: center; gap: 4px; }
 .gh-roles .gr-role i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .gh-roles .gr-role b { font-weight: 600; color: var(--fg, #3a3229); }
+
+/* **这台机器缺什么**：运行失败时只多这一块，四行，不堆。 */
+.missing {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: rgba(255, 193, 7, 0.06);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.missing .miss-head { margin-bottom: 4px; }
+.missing .miss-line { color: var(--dim); line-height: 1.6; }
+.missing .miss-line span { display: inline-block; min-width: 64px; color: var(--dim); }
+.missing code { color: var(--fg); word-break: break-all; }

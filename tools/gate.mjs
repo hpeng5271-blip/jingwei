@@ -361,6 +361,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **「缺哪个件」的链路要真接上**（见 checkRunMissingWiring 的注释）。
+{
+  const r = checkRunMissingWiring(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log("  · 缺件提示：" + r.checked + " 段链路都在");
+}
 // **下载来源的链接表也是受检数据**（`框架.md` §4.10）。
 // 先证明校验器自己会红（自测），再查真表——**校验器坏了却报"表没问题"，比没有门禁更坏**。
 {
@@ -494,6 +500,55 @@ export function checkSelfcheckSels(root) {
 /// 文件自己写着「超过 350 行就说明它在空谈」。现在它是 36x 行——
 /// **硬套 350 会逼着删掉有用的话，那比长更糟**（同 `AGENTS.md` 的 120/300 那条：
 /// 120 是目标、300 是上限）。所以：**350 是目标，400 是上限**，到了 400 就必须往下搬。
+// **「缺哪个件」这条链必须真的接上**（2026-10-18）。
+//
+// 为什么要有这一道：这一天里同一个形状出现了三次——
+//   ① `isolated` 加进了颜色表却没进画序；② `missing_tool` 进 `Outcome` 却没人显示；
+//   ③ 现在轮到界面。**名字存在 ≠ 接上线**，而名字是查得到的、接线查不到。
+//
+// 判据（四段链，缺一段就红）：
+//   1. `ui/projects.js` 必须从 `out.missing_tool` 取（**不许自己再扫输出**）
+//   2. 取到之后必须存进记录（`final.missing`）
+//   3. 失败分支必须**调用**渲染函数（`missingHtml(` 出现在 bad verdict 那一段里）
+//   4. `ui/style.css` 必须有 `.missing` 的样式（否则渲染出来是裸字）
+export function checkRunMissingWiring(root) {
+  const problems = [];
+  let checked = 0;
+  const jsPath = join(root, "ui", "projects.js");
+  const cssPath = join(root, "ui", "style.css");
+  if (!existsSync(jsPath)) return { problems: ["ui/projects.js 不见了"], checked };
+  const js = readFileSync(jsPath, "utf8");
+
+  checked++;
+  if (!js.includes("out.missing_tool")) {
+    problems.push("ui/projects.js 没有从 `out.missing_tool` 取——引擎算出来了但没人读");
+  }
+
+  checked++;
+  if (!js.includes("final.missing")) {
+    problems.push("ui/projects.js 没有把缺件存进记录（`final.missing`）——渲染时会读到 undefined");
+  }
+
+  checked++;
+  // 失败分支里必须真的调用渲染函数。**在整文件里搜 `missingHtml(` 不够**——
+  // 定义处自己也算一次，那正是"加了名字没接线"的样子。
+  const badBlock = js.slice(js.indexOf("verdict = '<div class=\"verdict bad\""));
+  const badEnd = badBlock.indexOf("</div>';");
+  const inBad = badEnd > 0 ? badBlock.slice(0, badEnd) : badBlock;
+  if (!inBad.includes("missingHtml(")) {
+    problems.push("失败分支里没有调用 `missingHtml(...)`——函数写了但没接在渲染路径上");
+  }
+
+  checked++;
+  if (!existsSync(cssPath)) {
+    problems.push("ui/style.css 不见了");
+  } else if (!readFileSync(cssPath, "utf8").includes(".missing {")) {
+    problems.push("ui/style.css 里没有 `.missing` 样式——渲染出来会是裸字");
+  }
+
+  return { problems, checked };
+}
+
 export function checkWorkMethodDoc(root) {
   const problems = [];
   let checked = 0;

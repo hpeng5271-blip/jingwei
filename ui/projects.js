@@ -963,6 +963,20 @@ function stageRows(plan, stages) {
   }).join('');
 }
 
+/// **这台机器缺什么**（来自引擎的 `missing_tool`）。
+///
+/// 只有四样：缺什么 / 为什么"光有本体不够" / 装配形态 / **自己能验的命令**。
+/// 认不出缺什么时 `m` 是 null——**那时候一个字都不加**（不猜）。
+function missingHtml(m) {
+  if (!m || !m.what) return '';
+  return '<div class="missing">'
+    + '<div class="miss-head">这台机器缺 <b>' + esc(m.what) + '</b></div>'
+    + '<div class="miss-line"><span>为什么</span>' + esc(m.why || '') + '</div>'
+    + '<div class="miss-line"><span>怎么装</span>' + esc(m.shape || '') + '</div>'
+    + '<div class="miss-line"><span>怎么自己验</span><code>' + esc(m.verify || '') + '</code></div>'
+    + '</div>';
+}
+
 function runCardHtml(rec, live) {
   const plan = rec.kind === 'run' ? PLAN_RUN : PLAN_TASK;
   let pill, verdict = '';
@@ -976,6 +990,7 @@ function runCardHtml(rec, live) {
     pill = '<span class="pill bad">失败</span>';
     verdict = '<div class="verdict bad"><b>✗ 没跑起来（退出码 ' + rec.exit_code + '）</b>'
       + (rec.crux ? '<div class="crux">症结 · ' + esc(rec.crux) + '</div>' : '')
+      + missingHtml(rec.missing)
       + '</div>';
   }
   const when = String(rec.at || '').slice(0, 16).replace('T', ' ');
@@ -1091,6 +1106,8 @@ async function doRun(kind) {
       stages: rec.stages, tail: rec.tail,
     };
     final.hint = out.diagnosis ? out.diagnosis.hint : null;
+    // **缺哪个件**：直接来自引擎的 `Outcome.missing_tool`（外壳不许自己再扫一遍输出）。
+    final.missing = out.missing_tool || null;
     final.memory = out.memory || null;
     card.outerHTML = runCardHtml(final, false);
     $('#runs').firstElementChild.querySelector('.rc-body').classList.remove('hide');

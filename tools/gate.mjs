@@ -604,6 +604,24 @@ export function checkTrialKit(root) {
   checked++;
   if (!existsSync(maker)) problems.push("tools/make-trial.ps1 不见了——试用包打不出来，就递不出去");
 
+  // **入口必须提到它**（2026-10-18）：否则试用包沉在 dist/ 里，
+  // 和"写了但没人知道"是同一种失效。**能被找到才算存在。**
+  checked++;
+  const readme = join(root, "README.md");
+  if (!existsSync(readme)) {
+    problems.push("README.md 不见了");
+  } else if (!readFileSync(readme, "utf8").includes("make-trial.ps1")) {
+    problems.push("README.md 没提 make-trial.ps1——试用包沉在 dist/ 里，没人会知道");
+  }
+
+  checked++;
+  const usage = join(root, "使用说明.md");
+  if (!existsSync(usage)) {
+    problems.push("使用说明.md 不见了");
+  } else if (!readFileSync(usage, "utf8").includes("make-trial.ps1")) {
+    problems.push("使用说明.md 没提怎么打试用包——使用者不会去翻 tools/");
+  }
+
   return { problems, checked };
 }
 

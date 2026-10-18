@@ -89,6 +89,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 后两个阶段（拉起进程、等待就绪）三种语言共用同一套实现。
 还没做的都带触发条件记在 [设计.md](设计.md) §1.2，不写无条件的 TODO。
 
+**有一条验证从来没发生过：一个真人用一次。**
+在那之前所有"好用"都是自证的。要推进它只需要一步——把 [试用包](试用脚本.md) 递给一个人：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-trial.ps1   # → dist\trial\
+```
+
+递出去时只说一句「打开它，选一个你自己的项目，然后告诉我这个项目能不能跑」，**别提示**。
+判定提前写死在 [试用脚本.md](试用脚本.md) §4，记录表填回来改名 `试用记录-日期-谁.md` 放根目录。
+
 ## 文档怎么读
 
 - [总稿.md](总稿.md) —— **从这里开始**。把「为什么做它、它现在是什么、每个决定凭什么」

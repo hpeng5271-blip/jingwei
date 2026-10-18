@@ -360,6 +360,31 @@ fn civil_from_days(z: i64) -> (i64, i64) {
 ///      （只报一个"关系总数"的话，看的人分不清"图很全"和"图漏了一半"）
 ///   ③ 写了 use 却没接上、名字在但命名空间不符 —— "**我们自己漏了多少**"
 ///      （这两句是回答"那堆'外部'里混没混着我们自己漏接的"）
+/// **覆盖度不够时，必须提醒"角色判断会偏多"**（2026-10-18，真项目打出来的）。
+///
+/// 判据从 fd（sharkdp/fd，24 个 .rs）实测来：120 条 calls 里 **93 条是同文件**，
+/// 跨文件只接上 27 条，另有 141 条名字拿不准。结果按 `roles.rs` 的阈值算出来
+/// **5 个「入口」**——其中只有 `main.rs` 是真的；另外 4 个（filetypes / walk /
+/// output / 某个 mod）只是"调用别人多、没人调用它"，因为**入边漏了**。
+///
+/// 所以：拿不准比连上还多的时候，那句话必须带上这个提醒，否则用户会把它当事实。
+/// 给测试用的转发（`coverage_caveat` 本身是私有的，测试在 main.rs 那边）。
+///
+/// **`#[cfg(test)]` 是必须的**：非测试构建里没人调它，否则 clippy 报 dead_code。
+#[cfg(test)]
+pub(crate) fn coverage_caveat_for_test(resolved: usize, unresolved: usize) -> Option<String> {
+    coverage_caveat(resolved, unresolved)
+}
+
+fn coverage_caveat(resolved: usize, unresolved: usize) -> Option<String> {
+    if unresolved <= resolved {
+        return None;
+    }
+    Some(format!(
+        "跨文件调用只接上 {resolved} 条、{unresolved} 条拿不准——图谱页的「入口 / 公共底层」会比实际偏多"
+    ))
+}
+
 fn cmd_index(root: &Path, json: bool) -> i32 {
     let db = jingwei_engine::graph_db_path(root);
     if let Some(d) = db.parent() {
@@ -474,6 +499,9 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             rep.unmapped_imports.len(),
             rep.namespace_mismatch.len()
         );
+    }
+    if let Some(tip) = coverage_caveat(rep.resolved, rep.ambiguous.len()) {
+        println!("    {} {}", c(YELLOW, "!"), tip);
     }
     if rep.truncated {
         println!("    {} 撞到文件数上限，这次没索引完", c(YELLOW, "!"));

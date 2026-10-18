@@ -552,6 +552,26 @@ pub(crate) fn setup_console() {
 
 #[cfg(test)]
 mod tests {
+
+    /// **覆盖度不够时，必须提醒"角色判断会偏多"**（2026-10-18，fd 实测换的）。
+    ///
+    /// 真数据：24 个 .rs、120 条 calls 里跨文件只接上 27 条、141 条拿不准，
+    /// 结果判出 **5 个"入口"**，只有 `main.rs` 是真的。
+    /// 所以这条判据是：**拿不准比连上还多 → 就要说那句话**；够就不说（不吵）。
+    #[test]
+    fn 覆盖度不够时要提醒角色判断会偏多() {
+        // 拿不准 > 连上 → 必须提醒
+        let tip = cmd_graph::coverage_caveat_for_test(32, 141);
+        assert!(tip.is_some(), "拿不准 141 比连上 32 多，必须提醒");
+        let t = tip.unwrap();
+        assert!(t.contains("偏多"), "要说出后果：{t}");
+        assert!(t.contains("141"), "要把数说出来：{t}");
+
+        // 连上更多 → 不许吵
+        assert!(cmd_graph::coverage_caveat_for_test(200, 10).is_none());
+        // 一样多 → 不吵（边界：等于不算不够）
+        assert!(cmd_graph::coverage_caveat_for_test(50, 50).is_none());
+    }
     use super::*;
 
     /// **子命令层也要"认不出就报错"，不许静默当成默认行为。**

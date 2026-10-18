@@ -186,13 +186,23 @@ pub(crate) fn prepare(
 
     // ---- 4 准备工具链 ----
     let t = std::time::Instant::now();
-    // **只有"跑"这件事才认契约里的 run 命令**（2026-10-18 真跑抓到的 bug）：
-    // 冒烟问的是"能不能构建"，而契约里写的是 run——照它跑就成了"跑了一次程序"，
-    // 退出码 0 也只证明程序能起，不证明编得出来。
+    // **按用途认契约**（2026-10-18 两处真跑抓到的 bug 修的）：
+    //
+    // ① 只有"跑"才认契约的 `run`——冒烟问的是"能不能构建"，照 run 跑只证明程序能起；
+    // ② 但"构建"要认契约的 **`build`**：`hello_rust` 的契约里明明写着 `cargo build`，
+    //    原来这里直接按用途推（"cargo build"），于是输出说"这条是按用途推的，不是契约里写的"
+    //    ——**和文件内容直接矛盾**（codex 当第一视角试用时抓到的）。
+    let from_contract_build = contract
+        .as_ref()
+        .and_then(|c| c.commands.build.clone());
     let (run_cmd, guessed_this) = match opts.purpose {
         Purpose::Run => match opts.run_override.clone().or(from_contract.clone()) {
             Some(c) => (c, false),
             None => (guessed(Purpose::Run).to_string(), true),
+        },
+        Purpose::Build => match from_contract_build {
+            Some(c) => (c, false),
+            None => (guessed(Purpose::Build).to_string(), true),
         },
         other => (guessed(other).to_string(), true),
     };

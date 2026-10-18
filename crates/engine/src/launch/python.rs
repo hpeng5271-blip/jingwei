@@ -141,10 +141,21 @@ pub(crate) fn prepare(
         ms: t.elapsed().as_millis(),
     });
 
-    // **Python 没有"构建"这一步**（2026-10-18）：冒烟问的是"能不能编出来"，
-    // 而 Python 是解释型——硬跑一遍程序只会得到"程序能起"，那不回答构建问题。
+    // **Python 的"构建"这一支要看契约**（2026-10-18 修）：
+    //
+    // 原来这里一律返回「Python 没有单独的构建这一步」。**这是错的**：
+    // `hello_python` 的契约里明明写着 `build: "python -m compileall -q ."`，
+    // 而工具告诉用户"没有构建这一步"——**把"我们没跑"说成"你不需要"**
+    // （codex 当第一视角试用时抓到的，同一类错今天第二次）。
+    //
+    // 现在：契约声明了 build 就跑它；没声明才说"没有这一步"（那才是真的没有）。
     if opts.purpose == Purpose::Build {
-        return Err(anyhow!("Python 没有单独的构建这一步（解释型，没有构建产物）"));
+        let declared = contract
+            .as_ref()
+            .and_then(|c| c.commands.build.clone());
+        if declared.is_none() {
+            return Err(anyhow!("契约里没有声明构建命令（Python 解释型，通常没有构建这一步）"));
+        }
     }
 
     // ---- 5 启动进程 ----

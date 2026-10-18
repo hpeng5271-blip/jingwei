@@ -280,4 +280,71 @@ mod tests {
         }
         let _ = fs::remove_dir_all(&d);
     }
+
+    /// **契约里写了 `build`，就必须跑它**（2026-10-18，codex 当第一视角试用时抓到的）。
+    ///
+    /// 两个真 bug：
+    /// - `hello_rust` 契约写 `cargo build`，输出却说"这条是按用途推的，不是契约里写的"；
+    /// - `hello_python` 契约写 `python -m compileall -q .`，输出却说"Python 没有构建这一步"。
+    ///
+    /// 这条测试用一条**明显不是默认值**的命令（`cargo --version`）钉住：
+    /// 如果实现又退回"按用途推"，`cmd` 里就不会出现它。
+    #[test]
+    fn 契约里的构建命令必须被用上() {
+        if !has_cargo() {
+            eprintln!("跳过：这台机器上没有 cargo");
+            return;
+        }
+        let d = scratch("contract-build");
+        fs::write(
+            d.join("Cargo.toml"),
+            "[package]\nname = \"cb\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(d.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            d.join("env.contract.json"),
+            r#"{"schema_version":1,"name":"cb","language":"Rust",
+               "runtime":{"kind":"Rust"},"deps":[],
+               "commands":{"build":"cargo --version","run":"cargo run"},
+               "ready_when":{"exit_code":0}}"#,
+        )
+        .unwrap();
+
+        match smoke(&d, Duration::from_secs(120)) {
+            SmokeVerdict::Passed(done) => {
+                assert!(
+                    done.cmd.contains("cargo --version"),
+                    "契约里写了构建命令就必须用它，实际跑了：{}",
+                    done.cmd
+                );
+            }
+            other => panic!("该通过，实际：{:?}", other.headline()),
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **契约没有 `build` 时，Python 才可以说"没有这一步"**。
+    ///
+    /// 反过来也一样重要：没有声明 ≠ 我们没跑——要说"契约里没声明"，
+    /// 而不是"Python 没有构建"（后者是替用户下结论）。
+    #[test]
+    fn 没有声明构建时说不适用而不是没跑() {
+        let d = scratch("no-build");
+        fs::write(d.join("main.py"), "print(1)\n").unwrap();
+        fs::write(
+            d.join("env.contract.json"),
+            r#"{"schema_version":1,"name":"nb","language":"Python",
+               "runtime":{"kind":"Python"},"deps":[],
+               "commands":{"run":"python main.py"},"ready_when":{"exit_code":0}}"#,
+        )
+        .unwrap();
+        match smoke(&d, Duration::from_secs(60)) {
+            SmokeVerdict::NotApplicable { why } => {
+                assert!(why.contains("契约里没有声明"), "该说清是契约没写：{why}");
+            }
+            other => panic!("该是「不适用」，实际：{:?}", other.headline()),
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
 }

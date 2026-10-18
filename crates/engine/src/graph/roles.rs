@@ -51,7 +51,12 @@ use std::collections::{HashMap, HashSet};
 ///   而这两格读的是"谁在用这个模块"，测试文件一进来就把结论带偏。
 fn is_test_file(f: &str) -> bool {
     let l = f.replace('\\', "/");
-    if l.ends_with("_tests.rs") || l.ends_with("_test.rs") || l.contains("/tests/") {
+    // **根级 `tests/` 也要认**（2026-10-18，`fd` 的 `tests/tests.rs` 抓到的）：
+    // 原来只认 `"/tests/"`（带前导斜杠），路径以 `tests/` 开头时匹配不上。
+    if l.ends_with("_tests.rs") || l.ends_with("_test.rs") {
+        return true;
+    }
+    if l.starts_with("tests/") || l.contains("/tests/") {
         return true;
     }
     let name = l.rsplit('/').next().unwrap_or(&l);
@@ -846,5 +851,21 @@ mod tests {
         // 两个文件都不该是「还没连上」：它们之间有一条真实的跨文件调用。
         assert_eq!(c["isolated"].as_i64().unwrap(), 0, "{c}");
         assert_eq!(c["middle"].as_i64().unwrap(), 2, "{c}");
+    }
+
+    /// **根级 `tests/` 目录也要算测试**（2026-10-18，`fd` 抓到的）。
+    ///
+    /// `fd` 里有个 `tests/tests.rs`：它的路径**以 `tests/` 开头**、没有前导斜杠，
+    /// 而判据原来只查 `"/tests/"` → 匹配不上 → 它被当成普通模块算进角色，
+    /// 于是**七格之和比文件数多 1**（守恒判据一量就露）。
+    #[test]
+    fn 根级tests目录也算测试文件() {
+        assert!(is_test_file("tests/tests.rs"));
+        assert!(is_test_file("tests/cli.rs"));
+        // 子目录里的 tests/ 必须照旧认。
+        assert!(is_test_file("crates/engine/tests/m5.rs"));
+        // 只是名字里带 test 的普通文件不算。
+        assert!(!is_test_file("src/testing.rs"));
+        assert!(!is_test_file("src/main.rs"));
     }
 }

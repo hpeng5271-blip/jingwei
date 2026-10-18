@@ -62,7 +62,7 @@ def is_test(path):
     来源是 `pallets/flask`：`test_cli.py` 当时被算成「入口候选」。
     """
     p = path.replace('\\', '/').lower()
-    if '/tests/' in p or p.endswith('_test.rs') or p.endswith('tests.rs'):
+    if p.startswith('tests/') or '/tests/' in p or p.endswith('_test.rs') or p.endswith('tests.rs'):
         return True
     name = p.rsplit('/', 1)[-1]
     return name.startswith('test_') or name.endswith('_test.py')

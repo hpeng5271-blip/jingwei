@@ -26,6 +26,8 @@ pub mod launch;
 
 /// L0 · 纯工具：不涉及任何业务概念，谁都该能用，而它谁都不依赖。
 pub mod util {
+    /// **读用户文件先去掉 UTF-8 BOM**（Windows 上记事本/PowerShell 默认写它）。
+    pub mod bom;
     pub mod dlog;
     pub mod jobobj;
     pub mod parallel;

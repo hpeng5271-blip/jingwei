@@ -66,7 +66,7 @@ pub fn web_tree(root: &Path) -> WebTree {
             ..Default::default()
         };
     };
-    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) else {
         return WebTree {
             note: Some(format!("{file} 不是合法的 JSON")),
             ..Default::default()
@@ -88,7 +88,7 @@ pub fn web_tree(root: &Path) -> WebTree {
 
     // 根项目的名字（边的一端要用它）
     let root_name = read(root, "package.json")
-        .and_then(|t: String| serde_json::from_str::<serde_json::Value>(t.as_str()).ok())
+        .and_then(|t: String| serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(t.as_str())).ok())
         .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
         .unwrap_or_else(|| "（根项目）".to_string());
 

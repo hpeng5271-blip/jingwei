@@ -81,7 +81,7 @@ pub fn is_node_project(root: &Path) -> bool {
 /// 那是两拨人用两套工具装过的现场，报出来比替用户做决定有用。
 pub fn package_manager(root: &Path) -> (Option<String>, Option<String>, Option<String>) {
     if let Some(text) = read(root, "package.json") {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) {
             if let Some(s) = json.get("packageManager").and_then(|v| v.as_str()) {
                 let (name, ver) = split_pm(s);
                 if !name.is_empty() {
@@ -231,7 +231,7 @@ pub fn node_pins(root: &Path) -> Vec<Pin> {
         }
     }
     if let Some(text) = read(root, "package.json") {
-        if let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Ok(j) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) {
             if let Some(v) = j
                 .get("volta")
                 .and_then(|v| v.get("node"))
@@ -361,7 +361,7 @@ fn scripts(root: &Path) -> Vec<(String, String)> {
     let Some(text) = read(root, "package.json") else {
         return Vec::new();
     };
-    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) else {
         return Vec::new();
     };
     let Some(obj) = j.get("scripts").and_then(|v| v.as_object()) else {
@@ -393,7 +393,7 @@ fn frameworks(root: &Path) -> Vec<String> {
     let Some(text) = read(root, "package.json") else {
         return Vec::new();
     };
-    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -574,5 +574,36 @@ mod tests {
         assert!(f.workspaces.is_some());
         let names: Vec<&str> = f.scripts.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(names, vec!["dev", "build", "test", "typecheck"], "顺序固定");
+    }
+
+    /// **`package.json` 带 BOM 也要读得出依赖**（2026-10-18 实测换的）。
+    ///
+    /// Windows 上记事本、PowerShell 的 `Set-Content -Encoding utf8` 默认写 BOM。
+    /// 实测同一个 Node 项目：
+    ///
+    /// ```text
+    /// 带 BOM → 「还查不出来 / their_gap」        ← 错
+    /// 无 BOM → 「1 个依赖没装：left-pad」        ← 对
+    /// ```
+    ///
+    /// **一个 BOM 就能让工具从"说准"退化成"查不了"。**
+    #[test]
+    fn 带bom的package_json也能读出依赖() {
+        let d = tmp("bom");
+        // 用 `scripts` 钉：它也是从 package.json 读的，BOM 会让它变空。
+        let body = r#"{"name":"bomapp","scripts":{"build":"node build.js","start":"node index.js"}}"#;
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(body.as_bytes());
+        std::fs::write(d.join("package.json"), &bytes).unwrap();
+
+        assert!(is_node_project(&d), "有 package.json 就是 Node 项目");
+        let f = probe_web(&d).expect("该读得出事实");
+        // BOM 不许让 scripts 变空——它就是用户读得懂的那几个命令。
+        assert!(
+            f.scripts.iter().any(|(k, _)| k == "build"),
+            "BOM 不许让 scripts 变空：{:?}",
+            f.scripts
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

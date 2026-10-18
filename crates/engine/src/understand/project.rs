@@ -752,7 +752,7 @@ fn covers(entries: &[String], name: &str) -> bool {
 /// 读一份清单，抠出「这个项目自己说要什么」。顺带把结构化事实存进 s。
 fn describe_manifest(kind: &str, text: &str, base: &str, s: &mut ProjectScan) -> String {
     match kind {
-        "node" => match serde_json::from_str::<serde_json::Value>(text) {
+        "node" => match serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(text)) {
             Err(e) => format!(
                 "这份 package.json 不是合法 JSON：{}",
                 first_line(&e.to_string())
@@ -843,7 +843,7 @@ fn describe_manifest(kind: &str, text: &str, base: &str, s: &mut ProjectScan) ->
             }
         }
         "dotnet" => format!("{} 行", text.lines().count()),
-        "php" => match serde_json::from_str::<serde_json::Value>(text) {
+        "php" => match serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(text)) {
             Err(e) => format!("这份 composer.json 不是合法 JSON：{}", first_line(&e.to_string())),
             Ok(v) => {
                 let req = v

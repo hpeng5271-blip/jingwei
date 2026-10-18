@@ -177,7 +177,7 @@ pub fn draft(root: &Path) -> (Contract, Vec<String>) {
         let text = read("package.json");
         c.commands.install = Some("npm install".into());
         why.push("有 package.json：装依赖用 npm install".into());
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) {
             let scripts = v.get("scripts").and_then(|s| s.as_object());
             if scripts.map(|s| s.contains_key("build")).unwrap_or(false) {
                 c.commands.build = Some("npm run build".into());

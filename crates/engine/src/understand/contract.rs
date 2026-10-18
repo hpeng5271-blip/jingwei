@@ -131,7 +131,7 @@ impl Contract {
                 // 完全对不上**，用户会以为契约写错了。
                 //
                 // BOM 不是语义错误（UTF-8 的签名），我们自己的打包与文档也被它坑过三次。
-                let text = text.trim_start_matches('\u{feff}');
+                let text = crate::util::bom::strip_bom(&text);
                 match serde_json::from_str::<Contract>(text) {
                     Ok(c) => (Some(c), None),
                     // 解析失败时把"第一行长什么样"带上——BOM/编码问题一眼能看出来。

@@ -388,7 +388,7 @@ fn node_decls(root: &Path) -> Vec<Decl> {
     let Some(text) = read(root, "package.json") else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(crate::util::bom::strip_bom(&text)) else {
         return Vec::new();
     };
     let mut out = Vec::new();

@@ -362,6 +362,14 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **`verify` 的字段也得有人读**（见 checkVerifyWiring 的头）。
+{
+  const r = checkVerifyWiring(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) {
+    console.log(`  · 字段接线：verify 的 ${r.checked} 个字段都有消费方`);
+  }
+}
 // **`guide` 的字段都得有人读**（见 checkGuideWiring 的头）。
 {
   const r = checkGuideWiring(ROOT);
@@ -794,6 +802,41 @@ export function checkGuideWiring(root) {
     checked++;
     if (!all.includes(k)) {
       problems.push(`guide 产出了 \`${k}\`，但 ui/ 与 cli/ 里一处都没读它——要么接上，要么写进 allowed 说明理由`);
+    }
+  }
+  return { problems, checked, keys };
+}
+
+// **`verify` 的每个输出字段都得在界面上有人读**（2026-10-18，与 `checkGuideWiring` 同一判据）。
+//
+// 为什么单独再加一条：`verify` 的 payload 是**手写 json!**（`src-tauri/src/verify.rs`），
+// 加字段最便宜、也最容易加完就忘。而它是昨天才做的四态功能——正是"看着有、其实没用上"的高危区。
+//
+// 判据：`verify.rs` 里 `"键":` 形式出现的每个键，必须在 `ui/*.js` 里出现过。
+// 确实只是给 CLI / 测试用的，写进 `allowed` 并说明理由。
+export function checkVerifyWiring(root) {
+  const problems = [];
+  let checked = 0;
+  const rs = join(root, "src-tauri", "src", "verify.rs");
+  if (!existsSync(rs)) return { problems: ["src-tauri/src/verify.rs 不见了"], checked };
+  const src = readFileSync(rs, "utf8");
+  const keys = [...new Set([...src.matchAll(/"([a-z][a-z0-9_]*)":/g)].map((m) => m[1]))];
+
+  const ui = [];
+  for (const f of readdirSync(join(root, "ui"))) {
+    if (f.endsWith(".js")) ui.push(readFileSync(join(root, "ui", f), "utf8"));
+  }
+  const all = ui.join("\n");
+
+  const allowed = new Map([
+    // `kind` 只用于"签名状态"那一行的内部判断，界面读的是它的中文，不是这个键本身。
+  ]);
+
+  for (const k of keys) {
+    if (allowed.has(k)) continue;
+    checked++;
+    if (!all.includes(k)) {
+      problems.push(`verify 产出了 \`${k}\`，但 ui/ 里一处都没读它——要么接上，要么写进 allowed 说明理由`);
     }
   }
   return { problems, checked, keys };

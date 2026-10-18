@@ -64,7 +64,7 @@ function checkMotives() {
       }
       const [name, phrase] = m.landing.includes('#')
         ? m.landing.split('#')
-        : ['设计.md', m.landing];
+        : ['docs/design/设计.md', m.landing];
       const text = textOf(name);
       if (text === null) {
         problems.push(`动机「${m.id}」的落点指向一个读不到的文件：${name}`);
@@ -232,7 +232,7 @@ function checkDocFacts() {
  *   ② **实际存在的 crate 必须在表里出现**（新增 crate 却忘了写 = 文档落后）。
  */
 function checkCrateTable() {
-  const doc = join(ROOT, '设计.md');
+  const doc = join(ROOT, 'docs/design/设计.md');
   if (!existsSync(doc)) { problems.push('没有 设计.md，没法核 crate 表'); return; }
   const lines = readFileSync(doc, 'utf8').split(/\r?\n/);
   const fence = /^```/;
@@ -658,8 +658,8 @@ export function checkRunMissingWiring(root) {
 export function checkTrialKit(root) {
   const problems = [];
   let checked = 0;
-  const script = join(root, "试用脚本.md");
-  const sheet = join(root, "试用记录表.md");
+  const script = join(root, 'docs/trial/试用脚本.md');
+  const sheet = join(root, 'docs/trial/试用记录表.md');
   const maker = join(root, "tools", "make-trial.ps1");
 
   checked++;
@@ -709,7 +709,7 @@ export function checkTrialKit(root) {
       const a = join(trialDir, name);
       if (!existsSync(a)) {
         problems.push(`dist\\trial\\ 里缺 ${name}`);
-      } else if (readFileSync(a, "utf8") !== readFileSync(join(root, name), "utf8")) {
+      } else if (readFileSync(a, "utf8") !== readFileSync(join(root, "docs/trial", name), "utf8")) {
         problems.push(
           `dist\\trial\\${name} 与仓库里那份不一致（旧拷贝）——重跑 tools\\make-trial.ps1`,
         );
@@ -735,7 +735,7 @@ export function checkTrialKit(root) {
 export function checkPortableDoc(root) {
   const problems = [];
   let checked = 0;
-  const p = join(root, "工具链-便携与安装.md");
+  const p = join(root, 'docs/reference/工具链-便携与安装.md');
   if (!existsSync(p)) {
     return { problems: ["工具链-便携与安装.md 不见了——便携边界就没人说清了"], checked };
   }
@@ -912,7 +912,7 @@ export function checkVerifyWiring(root) {
 export function checkWorkMethodDoc(root) {
   const problems = [];
   let checked = 0;
-  const file = join(root, '工作方法.md');
+  const file = join(root, 'docs/reference/工作方法.md');
   if (!existsSync(file)) {
     problems.push('工作方法.md 不见了——那是 agent 的操作手册 + skill 本体，先把它找回来');
     return { problems, checked };

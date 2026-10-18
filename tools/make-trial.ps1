@@ -30,7 +30,7 @@ Copy-Item $exe (Join-Path $out 'jingwei-gui.exe') -Force
 
 # ② 两份文档：脚本 + 空白记录表
 foreach ($doc in @('试用脚本.md', '试用记录表.md')) {
-    $src = Join-Path $root $doc
+    $src = Join-Path $root (Join-Path 'docs\trial' $doc)
     if (-not (Test-Path $src)) {
         Write-Host "  ✗ 缺 $doc" -ForegroundColor Red
         exit 1

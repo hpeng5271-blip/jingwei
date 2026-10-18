@@ -16,7 +16,7 @@
     { "id": "core", "want": "终端与 IDE 之间的理解层：信息过滤 + 信息反馈", "landing": "信息管线", "state": "landed" },
     { "id": "lines", "want": "四条不许破的线（数据正确 / 不生成修复命令 / 无自查不报错 / 关系必有来源）", "landing": "四条不许破的线", "state": "landed" },
     { "id": "model", "want": "领域模型：实体与关系，两端合法矩阵在构造期生效", "landing": "两端合法矩阵", "state": "landed" },
-    { "id": "datastore", "want": "数据层：SQLite + FTS5 + 索引 + 迁移 + 保留策略", "landing": "数据层设计.md#访问路径 → 索引", "state": "landed" },
+    { "id": "datastore", "want": "数据层：SQLite + FTS5 + 索引 + 迁移 + 保留策略", "landing": "docs/design/数据层设计.md#访问路径 → 索引", "state": "landed" },
     { "id": "parse", "want": "解析：tree-sitter 为主力，遇错误不建关系", "landing": "错误门控", "state": "landed" },
     { "id": "incremental", "want": "增量更新：三级检测 + 符号级双哈希", "landing": "三级变更检测", "state": "landed" },
     { "id": "onestop", "want": "一条龙：契约 → 跑 → 记录，并接进图谱", "landing": "契约与一条龙接图谱", "state": "landed" },

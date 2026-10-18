@@ -7,7 +7,7 @@
   "claims": [
     {
       "id": "zonggao-1.3-four-lines",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 1.3 四条不许破的线",
       "declared": 4,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*条不许破)",
@@ -18,7 +18,7 @@
     },
     {
       "id": "zonggao-2.2-engine-layers",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 2.2 engine 的分层",
       "declared": 7,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
@@ -29,7 +29,7 @@
     },
     {
       "id": "zonggao-2.4-entities",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 2.4 领域模型",
       "declared": 13,
       "declaredPattern": "([\\d.]+\\s*实体)",
@@ -40,7 +40,7 @@
     },
     {
       "id": "zonggao-2.4-relations",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 2.4 领域模型",
       "declared": 16,
       "declaredPattern": "([\\d.]+\\s*关系)",
@@ -51,7 +51,7 @@
     },
     {
       "id": "zonggao-3.2-tables",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 3.2 六张表",
       "declared": 6,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*张表)",
@@ -62,7 +62,7 @@
     },
     {
       "id": "zonggao-3.3-drift-tests",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 3.3 四条守漂移的测试",
       "declared": 4,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*条守漂移)",
@@ -73,7 +73,7 @@
     },
     {
       "id": "zonggao-3.4-write-steps",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 3.4 写入",
       "declared": 4,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
@@ -84,7 +84,7 @@
     },
     {
       "id": "zonggao-5.1-pipeline-steps",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 5.1 五步",
       "declared": 5,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
@@ -95,7 +95,7 @@
     },
     {
       "id": "zonggao-5.2-filter-steps",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 5.2 过滤七步",
       "declared": 7,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*步)",
@@ -106,7 +106,7 @@
     },
     {
       "id": "zonggao-5.3-four-parts",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 5.3 四要素",
       "declared": 4,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*要素)",
@@ -117,7 +117,7 @@
     },
     {
       "id": "zonggao-5.4-diagnosis-chain",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 5.4 排查链",
       "declared": 9,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
@@ -128,7 +128,7 @@
     },
     {
       "id": "zonggao-8.2-test-layers",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 8.2 四层测试",
       "declared": 4,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*层)",
@@ -139,7 +139,7 @@
     },
     {
       "id": "zonggao-10.2-handwritten-lines",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 10.2 规模",
       "declared": 35000,
       "declaredPattern": "约\\s*([\\d.]+\\s*万)",
@@ -151,7 +151,7 @@
     },
     {
       "id": "zonggao-11.2-measured",
-      "doc": "总稿.md",
+      "doc": "docs/design/总稿.md",
       "heading": "## 11.2 本版实测过的三件事",
       "declared": 3,
       "declaredPattern": "([零〇一二三四五六七八九十百千两\\d.]+\\s*件事)",

@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "jingwei"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "jingwei-engine",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "jingwei-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jingwei-engine",
  "serde",
@@ -1624,7 +1624,7 @@ dependencies = [
 
 [[package]]
 name = "jingwei-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "jingwei-model",
@@ -1639,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "jingwei-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",

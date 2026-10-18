@@ -1,7 +1,7 @@
 {
   "name": "jingwei-shell",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "jingwei 的桌面外壳（Tauri）。前端是静态页面，没有打包器。",
   "scripts": {
     "dev": "tauri dev",

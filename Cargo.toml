@@ -8,7 +8,7 @@ members = ["crates/model", "crates/engine", "crates/cli", "src-tauri"]
 default-members = ["crates/model", "crates/engine", "crates/cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # 设计 §11：架构约束写进编译期，而不是靠自觉。

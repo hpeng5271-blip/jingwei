@@ -484,6 +484,20 @@ fn check_toolchain(facts: &Facts, lang: Lang, blockers: &mut Vec<Blocker>) {
 }
 
 /// 依赖：三态。**Unknown 不进 blockers**，它进 nice_to_have 并说清"没查到"。
+/// **"装依赖"该敲什么**——按生态给原生命令（2026-10-18，真 Spring petclinic 换的）。
+///
+/// 原来对所有语言都写 `jingwei env install`，而它走契约里的 `commands.install`——
+/// **Maven 项目没有那份契约**，用户敲下去只得到「契约里没有声明 install 命令」，一条死路。
+fn deps_install_hint(lang: crate::lang::Lang) -> &'static str {
+    match lang {
+        crate::lang::Lang::Python => "jingwei env install（或 python -m pip install -r requirements.txt）",
+        crate::lang::Lang::Java => "mvn dependency:go-offline（没装 Maven 就先装 mvn）",
+        crate::lang::Lang::Rust => "cargo fetch",
+        crate::lang::Lang::Web => "npm install",
+        _ => "按这个项目的生态装依赖",
+    }
+}
+
 fn check_deps(facts: &Facts, blockers: &mut Vec<Blocker>, nice: &mut Vec<String>) {
     let mut missing: Vec<&str> = Vec::new();
     let mut unknown: Vec<&str> = Vec::new();
@@ -499,7 +513,7 @@ fn check_deps(facts: &Facts, blockers: &mut Vec<Blocker>, nice: &mut Vec<String>
         blockers.push(Blocker {
             what: format!("{} 个依赖没装：{}", missing.len(), list),
             why: "声明了却没装，跑起来会在 import 那一行炸".to_string(),
-            fix: "jingwei env install".to_string(),
+            fix: deps_install_hint(facts.lang).to_string(),
             verify: "jingwei doctor".to_string(),
         });
     }
@@ -962,5 +976,17 @@ mod tests {
         assert!(!w.contains("清单"), "树里不许让他去补清单：{w}");
         assert!(w.contains("不适用"), "该说的是不适用：{w}");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **装依赖的提示不能对所有语言都一样**（2026-10-18）：petclinic 被告知跑
+    /// `jingwei env install`，而 Maven 项目没有契约，那是死路。
+    #[test]
+    fn 装依赖的提示要按语言给() {
+        assert!(deps_install_hint(crate::lang::Lang::Java).contains("mvn"));
+        assert!(deps_install_hint(crate::lang::Lang::Python).contains("pip"));
+        assert!(deps_install_hint(crate::lang::Lang::Rust).contains("cargo"));
+        assert!(deps_install_hint(crate::lang::Lang::Web).contains("npm"));
+        // 认不出来的语言不装懂。
+        assert!(deps_install_hint(crate::lang::Lang::Unknown).contains("按这个项目的生态"));
     }
 }

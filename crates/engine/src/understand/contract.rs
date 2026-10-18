@@ -122,10 +122,25 @@ impl Contract {
             return (None, None);
         }
         match std::fs::read_to_string(&p) {
-            Ok(text) => match serde_json::from_str::<Contract>(&text) {
-                Ok(c) => (Some(c), None),
-                Err(e) => (None, Some(format!("JSON 解析失败：{}", e))),
-            },
+            Ok(text) => {
+                // **先去掉 UTF-8 BOM**（2026-10-18 实测换的）：
+                //
+                // Windows 上记事本、PowerShell 5.1 的 `Set-Content -Encoding utf8`
+                // 默认都写 BOM，而 `serde_json` 见到 BOM 报的是
+                // 「expected value at line 1 column 1」——**这个提示跟"文件里多了三个字节"
+                // 完全对不上**，用户会以为契约写错了。
+                //
+                // BOM 不是语义错误（UTF-8 的签名），我们自己的打包与文档也被它坑过三次。
+                let text = text.trim_start_matches('\u{feff}');
+                match serde_json::from_str::<Contract>(text) {
+                    Ok(c) => (Some(c), None),
+                    // 解析失败时把"第一行长什么样"带上——BOM/编码问题一眼能看出来。
+                    Err(e) => {
+                        let head: String = text.chars().take(40).collect();
+                        (None, Some(format!("JSON 解析失败：{e}（开头是：{head:?}）")))
+                    }
+                }
+            }
             Err(e) => (None, Some(format!("读取失败：{}", e))),
         }
     }
@@ -389,6 +404,49 @@ mod tests {
                 ("rich".to_string(), ">=13.0.0".to_string()),
             ]
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **带 UTF-8 BOM 的契约要能读**（2026-10-18 实测换的）。
+    ///
+    /// Windows 上记事本、PowerShell 5.1 的 `Set-Content -Encoding utf8` **默认写 BOM**。
+    /// 而 `serde_json` 见到 BOM 报的是「expected value at line 1 column 1」——
+    /// 用户看到这句会以为是自己契约写错了，其实只是**文件头多了三个字节**。
+    ///
+    /// 实测来源：我拿 PowerShell 造夹具去测"契约里的构建命令有没有被执行"，
+    /// 结果产品报"读不了契约"，查了半天才发现是 BOM——**夹具的错，但它暴露了产品该容忍这件事**。
+    #[test]
+    fn 带bom的契约也能读() {
+        let d = std::env::temp_dir().join(format!("dd-contract-bom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let body = r#"{"schema_version":1,"name":"b","runtime":{"python":null,"python_exe":null},"deps":{"required":[],"optional":[]},"commands":{"build":"cargo build"},"ready_when":{"exit_code":0}}"#;
+        // 手写 BOM：EF BB BF
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(body.as_bytes());
+        std::fs::write(d.join("env.contract.json"), &bytes).unwrap();
+
+        let (c, err) = Contract::load(&d);
+        assert!(err.is_none(), "带 BOM 不该报错：{:?}", err);
+        let c = c.expect("带 BOM 的契约要能读出来");
+        assert_eq!(c.commands.build.as_deref(), Some("cargo build"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **真读不了的时候，要把"开头长什么样"带上**（2026-10-18）。
+    ///
+    /// 光一句「expected value at line 1 column 1」，用户和我们自己都不知道发生了什么。
+    #[test]
+    fn 读不了的时候要说清开头() {
+        let d = std::env::temp_dir().join(format!("dd-contract-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("env.contract.json"), "这不是 JSON").unwrap();
+
+        let (c, err) = Contract::load(&d);
+        assert!(c.is_none());
+        let err = err.expect("该报错");
+        assert!(err.contains("开头是"), "要把开头带上：{err}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -708,6 +708,19 @@ async function main() {
       cvs ? `roles=${cvs.roles} r=${cvs.radiusMin}..${cvs.radiusMax}` : '',
     );
 
+    // **画布要"铺满"这个界面，不是卡片里的一张图**（2026-10-18 用户明确要求）。
+    // 判据用比例：侧栏与顶栏占掉一部分，所以不求 100%，但必须**大部分**是画布。
+    ok(
+      '画布铺满内容区（宽高都占窗口的大部分）',
+      // 实测 96% / 90%；旧实现（卡片里一张图）只有 ~73% / 很小 —— 阈值定在两者之间。
+      !!cv && cv.rect[2] >= vw[0] * 0.85 && cv.rect[3] >= vw[1] * 0.78,
+      cv ? `canvas=${cv.rect[2]}x${cv.rect[3]} viewport=${vw[0]}x${vw[1]}` : '',
+    );
+    if (cv) {
+      console.log(`  · 画布实测：${cv.rect[2]}x${cv.rect[3]} / 窗口 ${vw[0]}x${vw[1]}`
+        + `（宽 ${Math.round(cv.rect[2] / vw[0] * 100)}% · 高 ${Math.round(cv.rect[3] / vw[1] * 100)}%）`);
+    }
+
     const hud = pick(rep, '#graphHud');
     ok('图上那张状态卡在且可见', visible(hud), hud ? JSON.stringify(hud.rect) : '不存在');
     ok('状态卡没有被挤出窗口', hud && inView(hud), hud ? JSON.stringify(hud.rect) : '');

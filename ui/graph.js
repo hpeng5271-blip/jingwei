@@ -176,6 +176,17 @@ function ghCoverageTip(stats) {
   return "跨文件调用只接上 " + linked + " 条、" + unresolved + " 条拿不准——角色会比实际偏多";
 }
 
+/* **图例卡是否要露出来**（2026-10-18 排版改动）：
+   角色与目录两块内容分别在两张卡里，而外层卡片不能一直显示——
+   一个空框会让人以为"坏了"。所以两块都空的时候，整张卡收起来。 */
+function ghLegendSync() {
+  var card = $('#ghLegend');
+  if (!card) return;
+  var a = $('#ghRoles'), b = $('#ghDirs');
+  var any = (a && !a.hidden) || (b && !b.hidden);
+  card.hidden = !any;
+}
+
 function ghRenderRoles(roles, stats) {
   var box = $('#ghRoles');
   if (!box) return;
@@ -196,6 +207,7 @@ function ghRenderRoles(roles, stats) {
     box.hidden = false;
     box.innerHTML = '<span class="gr-role">这个项目还没有跨文件的调用——'
       + '读不出角色（不是没有模块，是它们之间还没连上）</span>';
+    ghLegendSync();
     return;
   }
   box.hidden = false;
@@ -203,6 +215,7 @@ function ghRenderRoles(roles, stats) {
   // 边只接上一部分时，角色会比实际偏多。不说 = 让人把猜当事实。
   var tip = ghCoverageTip(stats);
   box.innerHTML = parts.join('') + (tip ? '<span class="gr-tip">' + tip + '</span>' : '');
+  ghLegendSync();
 }
 
 /** 一个点画多大。**颜色说角色，大小说规模**——两件事分开，别挤在一列里。
@@ -257,9 +270,10 @@ function ghRenderDirs(dirs) {
     groups.push('<span class="gr-role"><i style="background:' + GROLE.middle.c + '"></i>'
       + '中间层 ' + dirs.middleTotal + ' 个目录</span>');
   }
-  if (!groups.length) { box.hidden = true; return; }
+  if (!groups.length) { box.hidden = true; ghLegendSync(); return; }
   box.hidden = false;
   box.innerHTML = groups.join('');
+  ghLegendSync();
 }
 
 async function graphLoad(drawIt) {

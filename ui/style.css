@@ -1798,6 +1798,37 @@ body{background:var(--bg)}
 #view-machine .fact .v.long summary:hover{color:var(--fg-2)}
 #view-machine .fullval{margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--fg-2);
   word-break:break-all;background:var(--inset);border-radius:var(--r-xs);padding:6px 8px;max-height:180px;overflow:auto}
+/* **四角放信息，中间留给图**（2026-10-18 用户要求：尽量不要留白，但排布要有度）。
+   权重：① 画布（铺满、无边框）② 左上状态（最先读）③ 左下图例（解释颜色）
+   ④ 右下最近运行（偶尔瞟）。四块都贴边、都半透明、都不遮挡画布中心——
+   这样窗口越大，图越大，而信息不会被挤到看不见的地方。 */
+.gh-card {
+  position: absolute; padding: var(--s2) var(--s3);
+  border-radius: var(--r); background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--line); box-shadow: var(--shadow-2);
+  font-size: var(--fs-sm); max-width: 340px; backdrop-filter: blur(3px);
+}
+.gh-card-head { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.gh-legend { left: var(--s3); bottom: var(--s3); }
+.gh-runs-card { right: var(--s3); bottom: var(--s3); max-width: 380px; }
+/* 图例本身在卡里，就不该再自带外边距 */
+.gh-legend .gh-roles { margin: 2px 0; }
+
+/* HUD 只留"读数 + 按钮"，且贴在左上角 —— 解释性的东西已经搬去左下卡 */
+.graph-hud { left: var(--s3); right: auto; top: var(--s3); max-width: 300px; }
+
+/* **图谱页的画布铺满整个内容区**（2026-10-18 用户明确要求，之前的实现不合格）：
+   以前它只是"一张卡片里的画布"——`main` 有内边距、`.view` 还被 max-width:1240px 限宽居中，
+   所以窗口越大，画布两侧留白越多。**画布是这个界面本身，不是卡片里的一张图。**
+   信息窗（节点/边、角色图例、目录、最近运行、按钮）仍然浮在画布上，靠右。
+   边界：**只有图谱页这样**，别的页是文档流，铺满反而难读。 */
+main:has(#view-graph.on) { padding: 0; overflow: hidden; }
+#view-graph.on {
+  display: flex; flex-direction: column;
+  max-width: none; margin: 0; padding: 0; height: 100%;
+}
+#view-graph .graph-wrap { flex: 1 1 auto; min-height: 0; border-radius: 0; }
+
 /* ── 图谱：画布是主体（和编辑器同一条规矩：画布不是卡片）──────── */
 .graph-wrap { position:relative; width:100%; height:100%; overflow:hidden; background:var(--sunken); }
 #graphCv { display:block; width:100%; height:100%; cursor:grab; }

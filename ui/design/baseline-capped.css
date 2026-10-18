@@ -1,0 +1,22 @@
+/* **基线：图谱页"卡片里一张图"**（2026-10-18 之前的实现，留作对照用）。
+ *
+ * 这个文件不参与构建——它只在 `tools/uidesign.mjs` 做 A/B 时被临时拷到 `ui/style.css`。
+ * 它的作用只有一个：**让"改动更好"这句话可以被量出来**，而不是靠我说。
+ *
+ * 基线是什么样（当时的真实规则）：
+ *   - `main` 有 `padding: var(--s5) 0 64px`；
+ *   - `.view` 被 `max-width: 1240px` 限宽并居中；
+ *   - `#view-graph` 没有铺满规则 → 画布高度由内容决定（实测只有 100px 高）。
+ * 实测：画布 1192×100 / 窗口 1707×996 → **宽 70% · 高 10%**。
+ */
+
+/* 覆盖掉"铺满"那几条，回到限宽 + 自适应高度 */
+main:has(#view-graph.on) { padding: var(--s5) 0 64px; overflow: auto; }
+#view-graph.on {
+  display: block;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 var(--s5);
+  height: auto;
+}
+#view-graph .graph-wrap { flex: none; min-height: 0; }

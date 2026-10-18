@@ -1,4 +1,4 @@
-﻿//! 这个目录是什么项目。
+//! 这个目录是什么项目。
 //!
 //! 判据只看文件，不解析内容——每多花一毫秒都在打开项目的第一帧上。
 //! 知道是哪门语言，后续探测才能只做该做的：打开 Python 项目不该去 spawn java。
@@ -118,7 +118,10 @@ fn detect_one(root: &Path) -> Lang {
     if has(root, &["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle"]) {
         return Lang::Java;
     }
-    if has(root, &["CMakeLists.txt", "Makefile", "makefile", "meson.build"]) {
+    // **`Makefile` 不是语言标记**（2026-10-18，真 `psf/requests` 抓到的）：它放在这里，
+    // 于是**所有带 Makefile 的 Python 项目都被判成 C/C++**（requests 的`make test`就是）。
+    // 只有 `CMakeLists.txt` 留在强标记里——那才是 C/C++ 的清单文件。
+    if has(root, &["CMakeLists.txt"]) {
         return Lang::Cpp;
     }
     if has(
@@ -154,6 +157,10 @@ fn detect_one(root: &Path) -> Lang {
     }
     if has_ext(root, &["js", "ts", "vue", "jsx", "tsx"]) {
         return Lang::Web;
+    }
+    // **弱标记放最后**：没有别的语言清单、只有 Makefile/meson，才当 C/C++。
+    if has(root, &["Makefile", "makefile", "meson.build"]) {
+        return Lang::Cpp;
     }
     Lang::Unknown
 }
@@ -222,6 +229,34 @@ mod tests {
         std::fs::write(d.join("helper.py"), "print(1)").unwrap();
         assert_eq!(detect(&d), Lang::Java, "有 pom.xml 就该认成 Java 项目");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **`Makefile` 不是语言标记**（2026-10-18，真 `psf/requests` 抓到的）。
+    ///
+    /// 修之前：`detect_one` 把 `Makefile` 和 `CMakeLists.txt` 并列当 C/C++ 强标记，
+    /// 于是**所有带 `make test` 的 Python 项目都被判成「C / C++ + Python（混合项目）」**。
+    /// 后果不只是标签难看：主语言错 → 依赖/规则全按 C++ 走。
+    #[test]
+    fn makefile不是语言标记() {
+        // ① Python 清单 + Makefile → Python（requests 的形状）
+        let d = scratch("make-py");
+        std::fs::write(d.join("Makefile"), "test:\n\tpython -m pytest").unwrap();
+        std::fs::write(d.join("pyproject.toml"), "[project]\nname=\"x\"\n").unwrap();
+        assert_eq!(detect(&d), Lang::Python, "有 pyproject 就是 Python，Makefile 只是构建工具");
+        let _ = std::fs::remove_dir_all(&d);
+
+        // ② 只有 Makefile + C 源码 → C/C++（弱标记兜底）
+        let e = scratch("make-c");
+        std::fs::write(e.join("Makefile"), "all:\n\tcc main.c").unwrap();
+        std::fs::write(e.join("main.c"), "int main(){}").unwrap();
+        assert_eq!(detect(&e), Lang::Cpp);
+        let _ = std::fs::remove_dir_all(&e);
+
+        // ③ `CMakeLists.txt` 仍是强标记
+        let f = scratch("cmake");
+        std::fs::write(f.join("CMakeLists.txt"), "project(x)").unwrap();
+        assert_eq!(detect(&f), Lang::Cpp);
+        let _ = std::fs::remove_dir_all(&f);
     }
 
     #[test]

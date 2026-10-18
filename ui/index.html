@@ -402,16 +402,7 @@
       <div class="graph-hud" id="graphHud">
         <div class="gh-row"><b id="ghNodes">—</b> 节点 · <b id="ghEdges">—</b> 边</div>
         <div class="gh-sub" id="ghSub">正在读取…</div>
-        <!-- **一张图要读得出三种角色**（`框架.md` §4.8）。
-             入口 = 出多入少；公共底层 = 入多出少；中间层 = 其余。
-             测试文件**不参与这个判断**（它们调用一切，出度天然最高，
-             会给真入口戴错帽子）——这一行要把它说清，不能混在一起算。
-             判据（界面门禁在守）：这一行真的有数字，四种角色都点了名。 -->
-        <div class="gh-roles" id="ghRoles" hidden></div>
-        <!-- **目录级**：文件级之后再看一层，才叫"模块结构"（§4.8）。
-             只放每一层前三名——这一行只够说这么多，堆满所有目录就违背了那一条。
-             判据（界面门禁在守）：有目录角色时这一行必须说出「入口」与「公共底层」。 -->
-        <div class="gh-roles" id="ghDirs" hidden></div>
+
         <div class="gh-btns">
           <button class="btn ghost sm" id="ghIndex">索引一次</button>
           <button class="btn ghost sm" id="ghLive">跟着变</button>
@@ -421,9 +412,24 @@
              它是 M5 那条链的出口——**图谱自己记着"这个项目跑起来是什么样"**。
              判据（测试在守）：两行要分得出成功与失败；点开要看到每条问题；
              而每条问题的**落点三态**要分得开（有文件 / 没说位置 / 没索引到）。 -->
+        
+      </div>
+
+      <!-- **左下：图例（角色 + 目录）**。画布铺满窗口，信息放四角，中间留给图。
+           搬出 HUD 的理由：HUD 里塞六七行会把"读数"与"解释"混在一起，
+           而读图的人**先看颜色再看数字**——图例该贴着画布下沿。 -->
+      <div class="gh-card gh-legend" id="ghLegend" hidden>
+        <div class="gh-card-head"><b>这一页怎么读</b></div>
+        <div class="gh-roles" id="ghRoles" hidden></div>
+        <div class="gh-roles" id="ghDirs" hidden></div>
+      </div>
+
+      <!-- **右下：最近运行**（M5 那条链的出口）。放右下：它最常被瞟一眼、最少被点开；
+           左上留给人最先读的状态。 -->
+      <div class="gh-card gh-runs-card">
         <div class="gh-runs" id="ghRuns" hidden>
-          <div class="gh-runs-head"><b>最近运行</b><span class="hint" id="ghRunsSub"></span></div>
-          <div id="ghRunsList"></div>
+        <div class="gh-runs-head"><b>最近运行</b><span class="hint" id="ghRunsSub"></span></div>
+        <div id="ghRunsList"></div>
         </div>
       </div>
     </div>

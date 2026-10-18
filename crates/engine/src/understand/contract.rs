@@ -164,9 +164,12 @@ impl Contract {
     /// 从 requirements.txt 读声明（没有就是空）
     pub fn declared_deps(root: &Path) -> Vec<String> {
         let p = root.join("requirements.txt");
-        let Ok(text) = std::fs::read_to_string(&p) else {
+        let Ok(raw_text) = std::fs::read_to_string(&p) else {
             return Vec::new();
         };
+        // **先去掉 BOM**（2026-10-18 实测）：带 BOM 的 requirements.txt，
+        // 第一条依赖会变成 `\u{feff}flask`——**永远匹配不上已安装**，长期误报"缺 flask"。
+        let text = crate::util::bom::strip_bom(&raw_text);
         let mut out = Vec::new();
         for raw in text.lines() {
             let line = raw.split('#').next().unwrap_or("").trim();
@@ -193,9 +196,12 @@ impl Contract {
     /// 「装上的是什么」对得上对不上，名字单独拎出来什么都说明不了。
     pub fn declared_deps_spec(root: &Path) -> Vec<(String, String)> {
         let p = root.join("requirements.txt");
-        let Ok(text) = std::fs::read_to_string(&p) else {
+        let Ok(raw_text) = std::fs::read_to_string(&p) else {
             return Vec::new();
         };
+        // **先去掉 BOM**（2026-10-18 实测）：带 BOM 的 requirements.txt，
+        // 第一条依赖会变成 `\u{feff}flask`——**永远匹配不上已安装**，长期误报"缺 flask"。
+        let text = crate::util::bom::strip_bom(&raw_text);
         let mut out: Vec<(String, String)> = Vec::new();
         for raw in text.lines() {
             let line = raw.split('#').next().unwrap_or("").trim();
@@ -447,6 +453,26 @@ mod tests {
         assert!(c.is_none());
         let err = err.expect("该报错");
         assert!(err.contains("开头是"), "要把开头带上：{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **带 BOM 的 `requirements.txt`，第一条依赖不许带上不可见字符**（2026-10-18 实测）。
+    ///
+    /// 实测：带 BOM 时第一条读成 `\u{feff}flask`，**永远匹配不上已安装**，
+    /// 于是工具长期误报"缺 flask"（界面上那个 BOM 是看不见的）。
+    #[test]
+    fn 带bom的requirements也读得出干净的依赖名() {
+        let d = std::env::temp_dir().join(format!("dd-req-bom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"flask==2.0.0\nrequests>=2.25\n");
+        std::fs::write(d.join("requirements.txt"), &bytes).unwrap();
+
+        let deps = Contract::declared_deps(&d);
+        assert_eq!(deps, vec!["flask".to_string(), "requests".to_string()], "依赖名要干净：{deps:?}");
+        let spec = Contract::declared_deps_spec(&d);
+        assert!(spec.iter().any(|(n, _)| n == "flask"), "名字+版本那条也要干净：{spec:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

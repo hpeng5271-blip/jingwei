@@ -35,7 +35,7 @@ cd D:\projects\jingwei
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
-**8 道**：单测+集成（<!-- fact:tests_total -->417<!-- /fact --> 条：engine <!-- fact:engine_unit -->347<!-- /fact --> /
+**8 道**：单测+集成（<!-- fact:tests_total -->418<!-- /fact --> 条：engine <!-- fact:engine_unit -->348<!-- /fact --> /
 集成 <!-- fact:integration -->51<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->78<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 

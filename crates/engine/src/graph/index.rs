@@ -362,12 +362,30 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 ///
 /// 三级（变更日志 / watcher）不在这里：那是外壳的事，它把改动事件喂进来，
 /// 这里只管"给我一个目录，我把图谱对齐"。
+/// **解析器版本**：解析/抽取语义一改就 +1。
+///
+/// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
+/// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
+/// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
+pub const EXTRACTOR_VERSION: &str = "parse@2";
+
+/// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
+pub fn extractor_changed(stored: Option<&str>) -> bool {
+    stored != Some(EXTRACTOR_VERSION)
+}
+
 pub fn index_source(
     root: &Path,
     store: &mut crate::graph::store::Store,
 ) -> Result<IndexReport> {
     let now = now_ms();
     let mut rep = IndexReport::default();
+    // 解析器版本变了：所有"跳过"都作废，重解析一遍（这是复用层的失效判据）
+    let version_changed = store
+        .get_meta("extractor_version")
+        .ok()
+        .flatten()
+        .as_deref() != Some(EXTRACTOR_VERSION);
 
     let project_name = root
         .file_name()
@@ -426,7 +444,7 @@ pub fn index_source(
 
         // 一级：大小与时间都没动 → 连读都不读
         if let Some(k) = &known {
-            if k.size == size && k.mtime_ns == mt {
+            if k.size == size && k.mtime_ns == mt && !version_changed {
                 rep.skipped_unchanged += 1;
                 continue;
             }
@@ -447,7 +465,7 @@ pub fn index_source(
         // 二级：内容哈希。`touch` 一下会让一级判"变了"，这里把它挡回去。
         let sha = crate::facts::stable_hash([&file.text]);
         if let Some(k) = &known {
-            if k.content_sha.as_deref() == Some(sha.as_str()) {
+            if k.content_sha.as_deref() == Some(sha.as_str()) && !version_changed {
                 rep.skipped_same_content += 1;
                 continue;
             }
@@ -614,6 +632,8 @@ pub fn index_source(
     store.set_meta("index_unresolved", &rep.ambiguous.len().to_string()).ok();
     store.set_meta("index_external", &rep.external.to_string()).ok();
     store.set_meta("index_at_ms", &now_ms().to_string()).ok();
+    // 解析成功后记下版本：下次只有"解析器语义变了"才会再全量重算
+    store.set_meta("extractor_version", EXTRACTOR_VERSION).ok();
 
     Ok(rep)
 }
@@ -743,5 +763,18 @@ mod to_json_tests {
         assert_eq!(v["ambiguous"], 2);
         assert_eq!(v["external"], 4613);
         assert_ne!(v["resolved"], v["external"], "这两个数不是一件事");
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    /// **复用层的失效判据**：文件没变、但解析语义变了，也必须重解析。
+    #[test]
+    fn 版本变了才重解析() {
+        assert!(extractor_changed(None), "没存过版本 = 必须重解析一次");
+        assert!(!extractor_changed(Some(EXTRACTOR_VERSION)), "版本一致 = 可以复用");
+        assert!(extractor_changed(Some("parse@1")), "老版本 = 必须重解析");
     }
 }

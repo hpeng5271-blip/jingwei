@@ -35,6 +35,15 @@ pub struct MissingTool {
     pub shape: &'static str,
     /// **自己能验的**：粘进终端就能跑，输出能判断到底装没装。
     pub verify: &'static str,
+    /// **固定的官方链接**（2026-10-18 加）：只放官方分发页，不放教程/博客/网盘。
+    ///
+    /// 为什么必须有：`shape` 只说"官方安装器"，用户还得自己搜——
+    /// 而搜出来的第一个结果经常是第三方打包站，**那比不装更危险**。
+    pub url: &'static str,
+    /// **预期输出**：照 `verify` 跑完之后，看到什么才算装上了。
+    ///
+    /// 没有这一句，`verify` 只是"跑了个命令"——用户看着满屏输出不知道好不好。
+    pub expect: &'static str,
 }
 
 struct Rule {
@@ -53,6 +62,8 @@ fn rules() -> &'static [Rule] {
                     what: "MSVC 生成工具（C++ 编译器 + Windows SDK）",
                     why: "Python 的 C 扩展和 node-gyp 都要现编 C 代码，光有解释器编不了",
                     shape: "官方安装器（只能安装，不能解压就位）",
+                    url: "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+                    expect: "vswhere 的输出里能看到 `installationPath`；同一个目录下有 `VC\\Tools\\MSVC\\*\\bin\\Hostx64\\x64\\cl.exe`",
                     verify: "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
                 },
             },
@@ -62,6 +73,8 @@ fn rules() -> &'static [Rule] {
                     what: "MSVC 生成工具（C++ 编译器 + Windows SDK）",
                     why: "带 C 扩展的 wheel 要现编；没有编译器就只剩报错",
                     shape: "官方安装器（只能安装，不能解压就位）",
+                    url: "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+                    expect: "vswhere 的输出里能看到 `installationPath`；`cl.exe` 在它下面的 VC\\Tools\\MSVC\\*\\bin里",
                     verify: "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
                 },
             },
@@ -71,6 +84,8 @@ fn rules() -> &'static [Rule] {
                     what: "Visual Studio Build Tools（node-gyp 要它）",
                     why: "Node 的原生模块不是 JS，装的时候要编译 C/C++",
                     shape: "官方安装器",
+                    url: "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+                    expect: "vswhere 输出了 `installationPath`，且里面含 `BuildTools`",
                     verify: "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -latest -property installationPath",
                 },
             },
@@ -80,6 +95,8 @@ fn rules() -> &'static [Rule] {
                     what: "MSVC 链接器（link.exe）",
                     why: "rustup 只装 rustc/cargo，不装链接器；没有它 cargo 编不出可执行文件",
                     shape: "官方安装器（Build Tools）；或改用 gnu 工具链 + MinGW",
+                    url: "https://rust-lang.github.io/rustup/installation/windows-msvc.html",
+                    expect: "`cargo -Vv` 的 host 是 `x86_64-pc-windows-msvc`，且 `rustc --print target-libdir` 指向真实存在的目录",
                     verify: "rustc --print target-libdir; cargo -Vv",
                 },
             },
@@ -89,6 +106,8 @@ fn rules() -> &'static [Rule] {
                     what: "MSVC 链接器 / 库路径（LIB）",
                     why: "编译器在，但链接阶段找不到库——通常是 Build Tools 没装全，或环境变量没注入",
                     shape: "官方安装器",
+                    url: "https://learn.microsoft.com/cpp/build/reference/lib-reference",
+                    expect: "同一份工程换到「开发者命令提示符」里能编过——说明缺的是环境变量，不是文件",
                     verify: "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
                 },
             },
@@ -98,6 +117,8 @@ fn rules() -> &'static [Rule] {
                     what: "C 编译器 + Windows SDK（头文件）",
                     why: "编译器与 CRT/SDK 是两套东西；只有编译器而没有头文件，照样编不了",
                     shape: "解压（MinGW-w64 / w64devkit）或 官方安装器（MSVC）",
+                    url: "https://github.com/skeeto/w64devkit/releases",
+                    expect: "`where.exe gcc` 有一行；`gcc --version` 打印 `gcc (GCC)`",
                     verify: "where.exe gcc; where.exe cl",
                 },
             },
@@ -107,6 +128,8 @@ fn rules() -> &'static [Rule] {
                     what: "JDK（而不是 JRE），以及 JAVA_HOME",
                     why: "Maven / Gradle 找的是 JAVA_HOME；只装运行时装不出 `javac`",
                     shape: "解压（Adoptium Temurin zip）或 官方安装器",
+                    url: "https://adoptium.net/temurin/releases/",
+                    expect: "`java -version` 打印 `openjdk version 21`（或你装的版本）；`$env:JAVA_HOME` 非空；`where.exe javac` 有一行",
                     verify: "java -version; echo $env:JAVA_HOME; where.exe javac",
                 },
             },
@@ -116,6 +139,8 @@ fn rules() -> &'static [Rule] {
                     what: "Java 运行时 / JDK",
                     why: "PATH 里没有任何 java；项目声明的版本再对也没用",
                     shape: "解压或 官方安装器",
+                    url: "https://adoptium.net/temurin/releases/",
+                    expect: "`java -version` 打印 `openjdk version` 或 `java version`——只有这一行才算装了运行时",
                     verify: "where.exe java; java -version",
                 },
             },
@@ -125,6 +150,8 @@ fn rules() -> &'static [Rule] {
                     what: "pip（embeddable 版 Python 不带它）",
                     why: "embeddable 包是给「嵌进别人程序」用的，本来就没有包管理器",
                     shape: "换官方安装包，或自己 get-pip",
+                    url: "https://pip.pypa.io/en/stable/installation/",
+                    expect: "`python -m pip --version` 打印 `pip 2x.y` 并给出 python 路径",
                     verify: "python -m pip --version",
                 },
             },
@@ -134,6 +161,8 @@ fn rules() -> &'static [Rule] {
                     what: "Python（node-gyp 要它做构建脚本）",
                     why: "Node 的原生模块构建脚本是 Python 写的",
                     shape: "官方安装包（不要 Microsoft Store 版）",
+                    url: "https://www.python.org/downloads/windows/",
+                    expect: "`python -V` 打印 `Python 3.`；`where.exe python` 指到你**自己装的那个**（不是 WindowsApps 别名）",
                     verify: "python -V; where.exe python",
                 },
             },
@@ -143,6 +172,8 @@ fn rules() -> &'static [Rule] {
                     what: "C 链接器（cc / gcc）",
                     why: "这条通常出现在非 Windows 目标或交叉编译上",
                     shape: "系统包管理器",
+                    url: "https://github.com/skeeto/w64devkit/releases",
+                    expect: "`where.exe gcc`（或 `which cc`）有一行，且 `gcc --version` 能打印版本",
                     verify: "which cc; which gcc",
                 },
             },
@@ -169,6 +200,10 @@ pub struct MissingToolOut {
     pub why: String,
     pub shape: String,
     pub verify: String,
+    /// 固定的官方链接（见 `MissingTool::url`）。
+    pub url: String,
+    /// 预期输出（见 `MissingTool::expect`）。
+    pub expect: String,
 }
 
 impl From<&MissingTool> for MissingToolOut {
@@ -178,6 +213,8 @@ impl From<&MissingTool> for MissingToolOut {
             why: t.why.to_string(),
             shape: t.shape.to_string(),
             verify: t.verify.to_string(),
+            url: t.url.to_string(),
+            expect: t.expect.to_string(),
         }
     }
 }
@@ -309,5 +346,24 @@ mod tests {
         ];
         let t = first_missing(lines).expect("该认出 node-gyp 那条");
         assert!(t.what.contains("Visual Studio Build Tools"), "{}", t.what);
+    }
+
+    /// **每条规则都要有官方链接与预期输出**（2026-10-18）。
+    ///
+    /// 为什么钉这条：`shape` 只说"官方安装器"，用户还得自己搜；
+    /// 而搜出来的第一个经常是第三方打包站——**那比不装更危险**。
+    /// 而没有 `expect`，"跑了个命令"就不等于"知道装没装上"。
+    #[test]
+    fn 每条缺件规则都给了官方链接与预期输出() {
+        for r in rules() {
+            assert!(
+                r.tool.url.starts_with("https://"),
+                "`{}` 的 url 必须是 https 官方页：{}",
+                r.tool.what,
+                r.tool.url
+            );
+            assert!(!r.tool.expect.trim().is_empty(), "`{}` 没写预期输出", r.tool.what);
+            assert!(!r.tool.verify.trim().is_empty(), "`{}` 没写自查命令", r.tool.what);
+        }
     }
 }

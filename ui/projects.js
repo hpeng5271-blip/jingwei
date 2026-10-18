@@ -993,7 +993,14 @@ function missingHtml(m) {
     + '<div class="miss-head">这台机器缺 <b>' + esc(m.what) + '</b></div>'
     + '<div class="miss-line"><span>为什么</span>' + esc(m.why || '') + '</div>'
     + '<div class="miss-line"><span>怎么装</span>' + esc(m.shape || '') + '</div>'
+    // **官方链接**（2026-10-18）：只放 https 的；别的协议一律不点，宁可只显示文字。
+    // 理由：让用户自己去搜，第一个结果经常是第三方打包站——那比不装更危险。
+    + (m.url && /^https:\/\//.test(m.url)
+      ? '<div class="miss-line"><span>在哪下</span><a href="' + esc(m.url) + '" target="_blank" rel="noreferrer">' + esc(m.url) + '</a></div>'
+      : '')
     + '<div class="miss-line"><span>怎么自己验</span><code>' + esc(m.verify || '') + '</code></div>'
+    // **预期输出**：不给这一句，"跑了个命令"就不等于"知道装没装上"。
+    + (m.expect ? '<div class="miss-line"><span>看着像这样才算装上</span>' + esc(m.expect) + '</div>' : '')
     + '</div>';
 }
 

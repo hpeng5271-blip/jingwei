@@ -414,6 +414,9 @@ main{grid-area:main;overflow:auto;padding:var(--s5) 0 64px}
 /* **建议不是命令**（2026-10-18）：未标记但有源码的目录，nextStep 是一句话。 */
 
 /* **"顺便说一句"不是挡路的**（2026-10-18）：比 blockers 轻，但要说。 */
+/* **官方链接**（2026-10-18）：缺件那块的下载地址 */
+.miss-line a{color:var(--fg);text-decoration:underline;text-underline-offset:2px;}
+.miss-line a:hover{opacity:.8;}
 #guideCard .gd-nice{margin-top:10px;font-size:var(--fs-sm);color:var(--muted);}
 #guideCard .gd-nice ul{margin:4px 0 0 18px;padding:0;}
 #guideCard .gd-nice li{margin:2px 0;line-height:1.45;}

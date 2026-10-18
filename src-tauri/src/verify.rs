@@ -48,7 +48,7 @@ pub fn verify_project(root: String) -> Value {
         }
         if let Some(m) = &d.missing {
             out["missing_tool"] = serde_json::json!({
-                "what": m.what, "why": m.why, "shape": m.shape, "verify": m.verify
+                "what": m.what, "why": m.why, "shape": m.shape, "verify": m.verify, "url": m.url, "expect": m.expect
             });
         }
     }

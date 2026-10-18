@@ -960,12 +960,12 @@ try {
     check('验一下：没验成时是 ask（不是 bad）', vh.ask.includes('verdict ask') && !vh.ask.includes('verdict bad'), vh.ask.slice(0, 80));
     check('验一下：没有结论时一个字都不加', vh.empty === '', vh.empty);
   }
-    // **缺件那块的四行必须齐**（2026-10-18）：这是 `missingHtml()` 的契约，`verifyHtml` 原来又抄了一份。
-    const miss = await page.evaluate(() => verifyHtml({ verdict: 'failed', headline: '构建没过', missing_tool: { what: 'JDK', why: '没有 javac', shape: '装 JDK', verify: 'java -version' } }));
-    check('验一下：缺件要说清"缺什么/为什么/怎么装/怎么自己验"四行', ['这台机器缺', '为什么', '怎么装', '怎么自己验'].every((k) => miss.includes(k)), miss.slice(0, 100));
+    const miss = await page.evaluate(() => verifyHtml({ verdict: 'failed', headline: '构建没过', missing_tool: { what: 'JDK', why: '没有 javac', shape: '装 JDK', verify: 'java -version', url: 'https://adoptium.net/temurin/releases/', expect: 'java -version 打印 openjdk version' } }));
+    check('验一下：缺件要说清"缺什么/为什么/怎么装/在哪下/怎么自己验/预期输出"', ['这台机器缺', '为什么', '怎么装', '在哪下', '怎么自己验', '看着像这样才算装上'].every((k) => miss.includes(k)) && miss.includes('<a href="https://adoptium.net'), miss.slice(0, 110));
+    const bad = await page.evaluate(() => verifyHtml({ verdict: 'failed', headline: 'x', missing_tool: { what: 'JDK', url: 'http://example.com/x' } }));
+    check('验一下：不是 https 的下载地址不画成链接', !bad.includes('<a ') && !bad.includes('example.com'), bad.slice(0, 90));
 
-  // 「不适用」≠「还查不出来」：引擎早有 not_applicable，界面压成一句就是三态压扁；且那支 nextStep 是句子，
-  // 不许画成 `<code>`。⚠️ 必须放最后 + 用 addInitScript（reload 会清掉页面状态与 evaluate 设的标记）。
+  // 「不适用」≠「还查不出来」：界面压成一句就是三态压扁；且那支 nextStep 是句子，不许画成 code。
   await page.addInitScript(() => { window.__guideNA = true; });
   await page.reload();
   await page.waitForTimeout(1500);

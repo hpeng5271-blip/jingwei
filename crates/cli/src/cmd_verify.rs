@@ -73,7 +73,11 @@ pub fn cmd_verify(root: &Path, json: bool) -> i32 {
                 println!("  {} 这台机器缺 {}", c(YELLOW, "!"), c(BOLD, &m.what));
                 println!("    {} {}", c(DIM, "为什么"), m.why);
                 println!("    {} {}", c(DIM, "怎么装"), m.shape);
+                // **官方链接与预期输出是"引导"的另一半**（2026-10-18）：
+                // 只给"官方安装器"四个字，用户还得自己搜——而搜出来的第一个经常是第三方打包站。
+                println!("    {} {}", c(DIM, "在哪下"), m.url);
                 println!("    {} {}", c(DIM, "怎么自己验"), m.verify);
+                println!("    {} {}", c(DIM, "看着像这样才算装上"), m.expect);
             }
             if let Some(e) = &d.first_error {
                 println!("    {} {}", c(DIM, "第一条错误"), e);

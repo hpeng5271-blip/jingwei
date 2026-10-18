@@ -1,0 +1,20 @@
+{
+  "_doc": [
+    "工具链离线包清单（受检数据，不是代码里的字符串）。见 框架.md §4.10。",
+    "每条都必须在 _hosts 白名单里，且 sha256 必须是 64 位十六进制——缺一条就不许用。",
+    "publisher 是 Windows Authenticode 的签名主体；null 表示「没有签名」，界面上必须明说。",
+    "verified_at 是我们最后一次实测这个链接可用的日期；超过 90 天界面上要标「没被最近核对过」。",
+    "**现在 entries 是空的**：先有校验器，再填真链接（填之前必须实测 sha256 / size / 签名）。"
+  ],
+  "_hosts": [
+    { "host": "static.rust-lang.org", "why": "rustup 的官方分发域（toolchain 与 rustup-init）" },
+    { "host": "win.rustup.rs", "why": "rustup 的 Windows 引导页（会 302 到 static.rust-lang.org）" },
+    { "host": "sh.rustup.rs", "why": "rustup 的类 Unix 引导脚本（同一份发布）" },
+    { "host": "nodejs.org", "why": "Node 官方二进制与安装包" },
+    { "host": "www.python.org", "why": "Python 官方安装包（含 embeddable zip）" },
+    { "host": "api.adoptium.net", "why": "Adoptium（Eclipse Temurin）JDK 的官方 API 分发" },
+    { "host": "github.com", "why": "w64devkit / MinGW-w64 的官方 release 页（构建链唯一可便携的来源）" },
+    { "host": "objects.githubusercontent.com", "why": "github.com 的 release 资产实际下载域（一次重定向）" }
+  ],
+  "entries": []
+}

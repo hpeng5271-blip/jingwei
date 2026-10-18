@@ -13,6 +13,7 @@ import { checkFacts, selftest as selftestFacts } from './check_facts.mjs';
 import { checkDocs, selftest as selftestDocs } from './check-docs.mjs';
 import { checkUiDoc } from './check-ui-doc.mjs';
 import { checkDocLinks } from './check-doc-links.mjs';
+import { checkToolchains, selftest as selftestToolchains } from './check-toolchains.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const problems = [];
@@ -360,6 +361,27 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **下载来源的链接表也是受检数据**（`框架.md` §4.10）。
+// 先证明校验器自己会红（自测），再查真表——**校验器坏了却报"表没问题"，比没有门禁更坏**。
+{
+  const st = selftestToolchains();
+  if (st.failed.length) {
+    problems.push(
+      "工具链清单的校验器自测不过（" + st.failed.length + "/" + st.cases.length + "）："
+        + st.failed[0][0] + " ← " + st.failed[0][2][0],
+    );
+  }
+  const r = checkToolchains(ROOT);
+  for (const x of r.problems) problems.push(x);
+  if (!r.problems.length) {
+    // **空表不许说"没问题"**：那是"还没填"，不是"都对了"。
+    console.log(
+      r.checked
+        ? "  · 工具链清单：" + r.hosts + " 个白名单主机，" + r.checked + " 条字段齐全"
+        : "  · 工具链清单：白名单 " + r.hosts + " 个主机，**entries 还没填**（结构对，可下载项 0）",
+    );
+  }
+}
 // **颜色表里有的角色，画序里必须也有**（见 checkGraphRolePaint 的注释）。
 {
   const r = checkGraphRolePaint(".");

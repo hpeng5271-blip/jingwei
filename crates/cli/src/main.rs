@@ -17,6 +17,7 @@ mod cmd_machine;
 mod cmd_project;
 mod cmd_run;
 mod cmd_verify;
+mod cmd_projects;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};
@@ -95,6 +96,9 @@ fn run() -> i32 {
     let mut purpose: Option<String> = None;
     let mut kind: Option<String> = None;
     let mut lang_name: Option<String> = None;
+    // `projects` 用：--depth N（往下几层）与 --all（连嵌套的一起给）
+    let mut depth_arg: usize = 2;
+    let mut show_all = false;
 
     let mut i = 0;
     while i < argv.len() {
@@ -127,6 +131,17 @@ fn run() -> i32 {
             "--permanent" => permanent = true,
             "--diff" => diff_only = true,
             "--deep" => deep = true,
+            "--all" => show_all = true,
+            "--depth" => {
+                i += 1;
+                match argv.get(i).and_then(|v| v.parse::<usize>().ok()) {
+                    Some(n) => depth_arg = n.clamp(1, 6),
+                    None => {
+                        eprintln!("--depth 后面要跟一个 1..6 的数字");
+                        return 2;
+                    }
+                }
+            }
             "--more" => MORE.store(true, Ordering::Relaxed),
             "--recommended" => recommended_only = true,
             "--template" | "-t" => {
@@ -319,6 +334,7 @@ fn run() -> i32 {
         "notes" | "log" => cmd_notes(&root, json),
         "test" => cmd_task(&root, "test", None),
         "verify" | "build" => cmd_verify::cmd_verify(&root, json),
+        "projects" | "list" => cmd_projects::cmd_projects(&root, depth_arg, show_all, json),
         "snap" | "snapshot" => cmd_snap(&root, json, diff_only),
         "run" | "start" => cmd_run(&root, run_override, rest),
         "scan" | "clean-list" => cmd_scan(&root, json),
@@ -402,6 +418,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     ),
     ("run", &["start"], "按契约启动项目：6 阶段进度 + 实时输出 + 就绪判定"),
     ("test", &[], "跑契约里声明的 test 命令"),
+    (
+        "projects",
+        &["list"],
+        "**列出一个目录下的项目**（走目录索引；--all 连嵌套的一起给，--depth 控制往下几层）",
+    ),
     (
         "verify",
         &["build"],

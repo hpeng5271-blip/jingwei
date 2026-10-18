@@ -133,7 +133,17 @@ function assertExeFresh() {
   // 结论是错的（界面 1 条 vs CLI 2 条，差异全是旧 exe）。
   //
   // 教训与"交付门禁 staleness 恒真"同一条：**检查的原料集写窄了，闸就形同虚设**。
-  walk(join(ROOT, 'crates'));
+  // **但 `crates/cli` 要排除**（2026-10-18 误报抓出来的）：
+  // `jingwei-app` 依赖的是 `jingwei-engine` / `jingwei-model`，**不依赖 CLI**。
+  // 改 `crates/cli/src/main.rs` 只是给命令行加了个子命令，GUI 的二进制一个字节都不会变——
+  // 而这条闸会报「exe 比源码旧 3.8 分钟」，逼你去重建一个**本来就不需要重建**的东西。
+  //
+  // 判据：**只算真能影响这个产物的源**。算宽了会误报（噪声），算窄了会放行（假绿）；
+  // 两头都吃过账，所以边界写在这里，别处不许再改一份。
+  for (const crate of readdirSync(join(ROOT, 'crates'))) {
+    if (crate === 'cli') continue;
+    walk(join(ROOT, 'crates', crate));
+  }
   if (exeMs + 60_000 < newest) {
     problems.push(
       `exe 比源码旧 ${((newest - exeMs) / 60000).toFixed(1)} 分钟——先重新构建再测`

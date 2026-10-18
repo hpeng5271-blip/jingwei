@@ -88,6 +88,34 @@ pub struct DiagnosticAnswer {
 ///
 /// 但**条数要带上**："哪次失败、失败了几条"正是选择点开哪一条的依据，
 /// 少了它这张列表就只能按时间盲选。走一跳边很便宜（实测正向 1 跳 0.00ms）。
+/// **库里的全部符号**（file, name, id, class）。
+///
+/// 为什么需要：全局解析要用"整个项目有哪些名字"。增量时没变文件不会被重新解析，
+    /// 于是只靠"这次解析出来的符号"去解析 → **跨文件调用边会丢**。
+/// 这个查询让解析阶段永远看到完整的名字表。
+pub fn symbol_rows(store: &Store) -> Result<Vec<(String, String, String, String)>> {
+    let mut st = store
+    .conn
+        .prepare("SELECT file_path, name, id, data FROM nodes WHERE kind='symbol' AND file_path IS NOT NULL")
+        .context("准备读符号表失败")?;
+    let mut rows = st.query([]).context("读符号表失败")?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().context("读符号行失败")? {
+        let file: String = r.get(0).unwrap_or_default();
+        let name: String = r.get(1).unwrap_or_default();
+        let id: String = r.get(2).unwrap_or_default();
+        let data: Option<String> = r.get(3).unwrap_or_default();
+        // class 存在 nodes.data.sym 里（parse 那边写的）
+        let class = data
+            .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
+            .and_then(|v| v.get("sym").and_then(|s| s.as_str()).map(|s| s.to_string()))
+            .unwrap_or_else(|| "other".to_string());
+        out.push((file, name, id, class));
+    }
+    Ok(out)
+    }
+
+
 pub fn recent_runs(store: &Store, limit: usize) -> Result<Vec<RunSummary>> {
     let nodes = store.list_kind(NodeKind::Run, limit)?;
     let mut out = Vec::with_capacity(nodes.len());

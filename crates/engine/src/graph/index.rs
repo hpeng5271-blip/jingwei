@@ -593,6 +593,26 @@ pub fn index_source(
         rep.edges_expired += w.expired;
     }
 
+    // **符号表从库里读**（2026-10-19，金标准测试"增量 != 全量"抓到的真 bug）：
+    // 增量时没变的文件不会重新解析，只喂本次解析结果 → 它们的符号缺席 →
+    // 跨文件调用边静默丢失。这里用库里的全量符号表补齐。
+    for (file, name, id, class) in crate::graph::query::symbol_rows(store)? {
+        let entry = crate::graph::resolve::SymbolEntry { id, class };
+        let dup = all_names
+            .get(&name)
+            .map(|v| v.iter().any(|e| e.id == entry.id))
+            .unwrap_or(false);
+        if !dup {
+            file_tables
+                .entry(file)
+                .or_default()
+                .entry(name.clone())
+                .or_default()
+                .push(entry.clone());
+            all_names.entry(name).or_default().push(entry);
+        }
+    }
+
     // ── 阶段 2：全局解析 ────────────────────────────────────────────
     //
     // 到这里所有节点都进库了，才有资格回答"这个名字指谁"。

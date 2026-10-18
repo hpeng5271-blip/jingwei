@@ -421,3 +421,27 @@ fn 不是项目时json与文字说同一件事() {
 
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`projects` 说"跳过了 N 个目录"时，必须能核**（2026-10-18）。
+///
+/// 第一视角试用时抓到的：原来只说数量和规则（"node_modules / target / 以 . 开头"），
+/// 读者**无法核对到底跳了哪几个**——那不是"说得准"，是"听起来准"。
+#[test]
+fn 跳过的目录要列名字() {
+    let d = empty_dir("skipped-list");
+    // 一个真项目 + 一个该被跳过的目录
+    std::fs::create_dir_all(d.join("app")).unwrap();
+    std::fs::write(d.join("app").join("package.json"), "{}").unwrap();
+    std::fs::create_dir_all(d.join("node_modules").join("x")).unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    let out = run(&["projects", "--root", &p, "--depth", "2"]);
+    let text = stdout(&out);
+    assert!(text.contains("找到 1 个项目") || text.contains("找到 1 个项目"), "该只找到 app：{text}");
+    assert!(text.contains("跳过了"), "跳过数要报：{text}");
+    assert!(
+        text.contains("node_modules"),
+        "**要列名字**，否则读者无法核对（这条就是为它加的）：{text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

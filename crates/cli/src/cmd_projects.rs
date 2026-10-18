@@ -93,12 +93,29 @@ pub fn cmd_projects(root: &Path, depth: usize, all: bool, json: bool) -> i32 {
             c(DIM, &format!("（{} 个目录的事实来自缓存，{} 个重新读过）", reuse.facts_reused, reuse.facts_read))
         );
     }
-    // **跳过多少要报出来**：不报的话，"没找到"会被读成"这里没有"。
+    // **跳过多少要报出来，而且要能核**（2026-10-18，codex 当第一视角试用时指出）：
+    // 原来只说"跳过了 N 个目录"再列规则，**读者无法核对是哪几个**。
+    // 现在列前 5 个名字 + 原因；剩下的说"还有 M 个"。
     if idx.skipped_count() > 0 {
+        let skipped: Vec<(&std::path::PathBuf, &str)> = idx
+            .rows
+            .iter()
+            .filter_map(|(p, r)| r.skipped.map(|why| (p, why)))
+            .collect();
         println!(
             "    {}",
-            c(DIM, &format!("（跳过了 {} 个目录：node_modules / target / 以 . 开头、系统目录等）", idx.skipped_count()))
+            c(DIM, &format!("（跳过了 {} 个目录）", idx.skipped_count()))
         );
+        for (p, why) in skipped.iter().take(5) {
+            let name = match p.strip_prefix(root) {
+                Ok(rel) => rel.to_string_lossy().to_string(),
+                Err(_) => p.to_string_lossy().to_string(),
+            };
+            println!("      {name}  —— {why}");
+        }
+        if skipped.len() > 5 {
+            println!("      ……还有 {} 个（同一个规则）", skipped.len() - 5);
+        }
     }
     println!();
     0

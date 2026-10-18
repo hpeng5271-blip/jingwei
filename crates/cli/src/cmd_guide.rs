@@ -90,7 +90,10 @@ fn render(g: &Guide, has_prev: bool) {
         Verdict::Unknown => ("?", YELLOW),
     };
     let word = match &g.ready {
-        Verdict::Yes(_) => "现在就能跑",
+        // **"现在就能跑"要说清是哪一种"能"**（2026-10-18，codex 当第一视角试用时指出）：
+        // 它原来的意思是"没发现挡路的问题"，但用户读成"已经验证过能跑"。
+        // 而下面那句后缀又说"跑一次就知道"——**同一屏两句话的确定性不一样**。
+        Verdict::Yes(_) => "现在就能跑（没发现挡路的）",
         Verdict::No => "现在跑不起来",
         // **"查不了"要说清是谁的**——两种情况的说法必须不同，
         // 因为用户能做的事完全不同（一种是"你补上"，一种是"不怪你"）。
@@ -155,7 +158,7 @@ fn render(g: &Guide, has_prev: bool) {
             println!(
                 "    {} {}",
                 c(GREEN, &g.next_step),
-                c(DIM, "（跑一次就知道它到底行不行）")
+                c(DIM, "（这条是启动命令；跑起来才知道有没有运行时问题）")
             );
         } else {
             println!("    {}", c(DIM, &g.next_step));

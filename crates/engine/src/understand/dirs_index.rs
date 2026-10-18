@@ -267,6 +267,179 @@ impl DirsIndex {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 持久化：**第二次启动能复用多少**（2026-10-18）
+//
+// ## 先说清一件做不到的事
+//
+// 判据里写的是"第二次启动**不再全量遍历**"。只用 mtime 做不到：
+// 在 `a/b/c` 里加一个文件，只会改 `a/b/c` 的 mtime——**祖先目录的 mtime 不变**。
+// 所以"祖先没变 → 整棵子树都不用看"是**错的**，会漏掉深层变化。
+// 真要跳过遍历，只有两条路：① 读 NTFS 的 USN 日志（要管理员）；② 常驻监听
+// （`ReadDirectoryChangesW`，要一直跑）。两条都碰"绿色免安装、不提权"的边界，
+// 所以这一版**老实只做能做的**：遍历照走，但**每个目录的"事实"能复用**
+// （省掉一次 `read_dir` 去数标记文件），并且**判定与查询零 IO**。
+//
+// ## 复用判据
+//
+// 目录 mtime 与缓存里一致 → 直接采用缓存里的 markers / has_git / has_contract；
+// 不一致 → 重新读这一层。**文件内容变了但目录项没变**的场合，我们的"事实"本来也不变
+// （我们只关心有没有标记文件），所以按 mtime 复用是安全的。
+/// 缓存复用统计（**要能报出来**，否则"复用了多少"只能靠感觉）。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Reuse {
+    /// 复用缓存事实的目录数
+    pub facts_reused: usize,
+    /// 重新读过的目录数
+    pub facts_read: usize,
+}
+
+fn store_path(root: &Path, depth: usize, store: Option<&Path>) -> PathBuf {
+    let base = match store {
+        Some(s) => s.to_path_buf(),
+        None => std::env::var_os("LOCALAPPDATA")
+            .map(|v| PathBuf::from(v).join("jingwei").join("dirs-index"))
+            .unwrap_or_else(|| std::env::temp_dir().join("jingwei-dirs-index")),
+    };
+    // 文件名 = 根路径 + 层数的哈希（同一台机器上不同根不互相覆盖）
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in format!("{}|{}", root.display(), depth).as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    base.join(format!("{h:016x}.json"))
+}
+
+fn load_rows(path: &Path) -> Option<(BTreeMap<PathBuf, DirRow>, String)> {
+    let txt = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&txt).ok()?;
+    let root = v.get("root")?.as_str()?.to_string();
+    let mut rows = BTreeMap::new();
+    for r in v.get("rows")?.as_array()? {
+        let path = PathBuf::from(r.get("path")?.as_str()?);
+        let markers: Vec<String> = r
+            .get("markers")
+            .and_then(|m| m.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        rows.insert(
+            path,
+            DirRow {
+                mtime: r.get("mtime").and_then(|x| x.as_u64()).unwrap_or(0),
+                markers,
+                has_git: r.get("has_git").and_then(|x| x.as_bool()).unwrap_or(false),
+                has_contract: r.get("has_contract").and_then(|x| x.as_bool()).unwrap_or(false),
+                skipped: None, // 跳过原因不持久化：它由当前规则算，规则改了本就该重判
+            },
+        );
+    }
+    Some((rows, root))
+}
+
+fn save_rows(path: &Path, idx: &DirsIndex) {
+    if let Some(dir) = path.parent() {
+        // 写不进缓存不算失败：索引是加速用的，坏了下次重建即可（但**不许**吞掉真正的错误）
+        let _created = std::fs::create_dir_all(dir).is_ok();
+    }
+    let rows: Vec<serde_json::Value> = idx
+        .rows
+        .iter()
+        .map(|(p, r)| {
+            serde_json::json!({
+                "path": p.to_string_lossy(),
+                "mtime": r.mtime,
+                "markers": r.markers,
+                "has_git": r.has_git,
+                "has_contract": r.has_contract,
+            })
+        })
+        .collect();
+    let v = serde_json::json!({
+        "root": idx.root.to_string_lossy(),
+        "saved_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "rows": rows,
+    });
+    // 同上：缓存写失败只影响"下次能不能复用"，不影响这次的结果
+    std::fs::write(path, serde_json::to_string(&v).unwrap_or_default()).ok();
+}
+
+/// 带缓存的建索引：**遍历照走，但事实能复用**（见上面那段诚实边界）。
+pub fn build_cached(root: &Path, depth: usize, store: Option<&Path>) -> (DirsIndex, Reuse) {
+    let path = store_path(root, depth, store);
+    let cached = load_rows(&path);
+    let mut idx = DirsIndex {
+        root: root.to_path_buf(),
+        ..Default::default()
+    };
+    let mut reuse = Reuse::default();
+    if !root.is_dir() {
+        return (idx, reuse);
+    }
+    let cache = cached.as_ref().map(|(r, _)| r);
+    walk_cached(root, root, 0, depth.max(1), &mut idx, cache, &mut reuse);
+    save_rows(&path, &idx);
+    (idx, reuse)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_cached(
+    root: &Path,
+    dir: &Path,
+    level: usize,
+    max: usize,
+    idx: &mut DirsIndex,
+    cache: Option<&BTreeMap<PathBuf, DirRow>>,
+    reuse: &mut Reuse,
+) {
+    let m = mtime_secs(dir);
+    let hit = cache.and_then(|c| c.get(dir)).filter(|r| r.mtime == m);
+    let row = match hit {
+        Some(r) => {
+            reuse.facts_reused += 1;
+            DirRow {
+                mtime: m,
+                markers: r.markers.clone(),
+                has_git: r.has_git,
+                has_contract: r.has_contract,
+                skipped: None,
+            }
+        }
+        None => {
+            reuse.facts_read += 1;
+            row_for(dir).0
+        }
+    };
+    let readable = dir.read_dir().is_ok();
+    idx.rows.insert(dir.to_path_buf(), row);
+    idx.visited += 1;
+    if !readable || level >= max {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let child = e.path();
+        if let Some(reason) = skip_reason(&child, root) {
+            idx.rows.insert(
+                child.clone(),
+                DirRow {
+                    mtime: mtime_secs(&child),
+                    skipped: Some(reason),
+                    ..Default::default()
+                },
+            );
+            idx.skipped += 1;
+            continue;
+        }
+        walk_cached(root, &child, level + 1, max, idx, cache, reuse);
+    }
+}
 #[cfg(test)]
 #[allow(clippy::let_underscore_must_use)]
 mod tests {
@@ -374,5 +547,56 @@ mod tests {
         );
         assert!(!row.looks_like_project(), "读不到的目录不许被当成项目");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **第二次建索引时，事实全部复用**（判据①的落点）。
+    ///
+    /// 说明：**遍历照走**（mtime 做不到"祖先不变就跳过子树"），但每个目录的
+    /// markers / has_git / has_contract 来自缓存，不再 read_dir 去数。
+    #[test]
+    fn 第二次建索引时事实全部复用() {
+        let d = scratch("reuse");
+        mkproject(&d.join("a"), "Cargo.toml");
+        mkproject(&d.join("b"), "package.json");
+        let store = scratch("reuse-store");
+
+        let (i1, r1) = build_cached(&d, 2, Some(&store));
+        assert!(r1.facts_read >= 1, "第一次必然全是新读：{r1:?}");
+
+        let (i2, r2) = build_cached(&d, 2, Some(&store));
+        assert_eq!(r2.facts_read, 0, "第二次不该再读目录：{r2:?}");
+        assert_eq!(
+            r2.facts_reused, i2.visited,
+            "每个目录的事实都该来自缓存：{r2:?} visited={}",
+            i2.visited
+        );
+        // 结论不变：同一棵树，项目集合一样
+        assert_eq!(i1.top_level_projects(), i2.top_level_projects());
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&store);
+    }
+
+    /// **改一个深层目录，只有它（及其父链上被读到的目录）重读**，别人仍复用。
+    ///
+    /// 这条钉的是"缓存不许把变化吃掉"——如果实现偷懒成"根没变就全复用"，
+    /// 这里会红：新建的项目看不见。
+    #[test]
+    fn 深层新增项目第二次就看得见() {
+        let d = scratch("deep");
+        mkproject(&d.join("a"), "Cargo.toml");
+        let store = scratch("deep-store");
+        let (_, _) = build_cached(&d, 3, Some(&store));
+
+        // 在深层新建一个项目
+        mkproject(&d.join("a").join("inner"), "package.json");
+        let (i2, r2) = build_cached(&d, 3, Some(&store));
+        let all = i2.all_projects();
+        assert!(
+            all.iter().any(|p| p.ends_with("inner")),
+            "深层新建的项目必须看得见（缓存放行就是吃掉了变化）：{all:?}"
+        );
+        assert!(r2.facts_read >= 1, "至少那个新目录是读出来的：{r2:?}");
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&store);
     }
 }

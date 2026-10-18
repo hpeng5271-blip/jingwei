@@ -32,7 +32,9 @@ pub fn cmd_projects(root: &Path, depth: usize, all: bool, json: bool) -> i32 {
     }
 
     let t = std::time::Instant::now();
-    let idx = dirs_index::build(root, depth);
+    // **走带缓存的那条**：遍历照走（诚实边界见 `dirs_index` 的注释），
+    // 但每个目录的"事实"能复用——`--json` 里把复用了多少报出来。
+    let (idx, reuse) = dirs_index::build_cached(root, depth, None);
     let found: Vec<String> = if all {
         idx.all_projects()
     } else {
@@ -51,6 +53,8 @@ pub fn cmd_projects(root: &Path, depth: usize, all: bool, json: bool) -> i32 {
             "projects": found,
             "visited": idx.visited,
             "skipped": idx.skipped_count(),
+            "facts_reused": reuse.facts_reused,
+            "facts_read": reuse.facts_read,
             "ms": ms,
         });
         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
@@ -81,6 +85,13 @@ pub fn cmd_projects(root: &Path, depth: usize, all: bool, json: bool) -> i32 {
             };
             println!("    {}", shown);
         }
+    }
+    // **复用多少也要报出来**：这是"索引有没有起作用"的唯一证据。
+    if reuse.facts_reused > 0 {
+        println!(
+            "    {}",
+            c(DIM, &format!("（{} 个目录的事实来自缓存，{} 个重新读过）", reuse.facts_reused, reuse.facts_read))
+        );
     }
     // **跳过多少要报出来**：不报的话，"没找到"会被读成"这里没有"。
     if idx.skipped_count() > 0 {

@@ -362,6 +362,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **便携边界要有一处说清，且实测/推断分得开**（见 checkPortableDoc 的头）。
+{
+  const r = checkPortableDoc(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log("  · 便携边界：" + r.checked + " 项都在（含实测/推断标注与未验清单）");
+}
 // **试用包要真的能递出去**（见 checkTrialKit 的头）。
 {
   const r = checkTrialKit(ROOT);
@@ -597,6 +603,45 @@ export function checkTrialKit(root) {
 
   checked++;
   if (!existsSync(maker)) problems.push("tools/make-trial.ps1 不见了——试用包打不出来，就递不出去");
+
+  return { problems, checked };
+}
+
+// **"便携版在哪些语言上走不通"必须有一处集中说清**（2026-10-18）。
+//
+// 为什么要有这一道：`取舍记录.md` T-01 定了"绿色免安装、不提权"，
+// 那么"哪些语言在这套边界下根本跑不起来"就是**产品的边界说明**，不是附录。
+// 它最容易出的问题是**含糊**：把推断写成事实、把"没验过"写得像验过。
+//
+// 判据（少一样就红）：
+//   1. `工具链-便携与安装.md` 在；
+//   2. **实测与推断都标了**（`[实测]` 与 `[推断]` 各至少一处）——
+//      混着写是这套东西最熟的病；
+//   3. 有「走不通」的结论（Rust 那行必须明确说不能纯便携）；
+//   4. 有「还没做的」清单（**没验过的事必须列出来**，不许只写好消息）。
+export function checkPortableDoc(root) {
+  const problems = [];
+  let checked = 0;
+  const p = join(root, "工具链-便携与安装.md");
+  if (!existsSync(p)) {
+    return { problems: ["工具链-便携与安装.md 不见了——便携边界就没人说清了"], checked };
+  }
+  const md = readFileSync(p, "utf8");
+
+  checked++;
+  if (!md.includes("[实测]")) problems.push("便携文档里没有一处 [实测]——那全是推断");
+  checked++;
+  if (!md.includes("[推断]")) problems.push("便携文档里没有一处 [推断]——把推断说成事实更难发现");
+
+  checked++;
+  if (!md.includes("不能") || !md.includes("Rust")) {
+    problems.push("便携文档没说清哪门语言「不能」纯便携——那是这一页的核心结论");
+  }
+
+  checked++;
+  if (!md.includes("还没做的")) {
+    problems.push("便携文档缺「还没做的」——只写好消息的边界说明等于广告");
+  }
 
   return { problems, checked };
 }

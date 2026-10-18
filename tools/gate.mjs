@@ -362,6 +362,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **试用包要真的能递出去**（见 checkTrialKit 的头）。
+{
+  const r = checkTrialKit(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log("  · 试用包：" + r.checked + " 样齐全（脚本 / 记录表 / 打包器）");
+}
 // **二级技能树：每条技能都必须有守卫，且守卫名字必须真实存在**（见 check-skills.mjs 的头）。
 {
   const r = checkSkillsTree(ROOT);
@@ -552,6 +558,45 @@ export function checkRunMissingWiring(root) {
   } else if (!readFileSync(cssPath, "utf8").includes(".missing {")) {
     problems.push("ui/style.css 里没有 `.missing` 样式——渲染出来会是裸字");
   }
+
+  return { problems, checked };
+}
+
+// **试用包必须真的存在、且判定写死**（2026-10-18）。
+//
+// 为什么要有这一道：目标里那条硬缺口「一个真人用一次」**从来没发生过**。
+// 文档里写"以后要找人试用"等于没写——这个仓库为"规矩写在文档里没人执行"付过多次账。
+//
+// 判据（少一样就红）：
+//   1. `试用脚本.md` 在，且含 §4「判定」那一节（**通过/部分通过/不通过**三档）
+//   2. `试用记录表.md` 在（空白的也算——它是被填的那一份）
+//   3. `tools/make-trial.ps1` 在（能打出文件夹才算"能递出去"）
+//   4. 脚本里必须写清"递出去只说一句话"——不许提示，否则这次试用作废
+//
+// 诚实边界：这一道只能保证"递得出去"，**保证不了"真的有人试过"**。
+// 有没有人试过，只能看仓库里有没有 `试用记录-*.md`。
+export function checkTrialKit(root) {
+  const problems = [];
+  let checked = 0;
+  const script = join(root, "试用脚本.md");
+  const sheet = join(root, "试用记录表.md");
+  const maker = join(root, "tools", "make-trial.ps1");
+
+  checked++;
+  if (!existsSync(script)) {
+    problems.push("试用脚本.md 不见了——「真人用一次」就没有可执行的东西");
+  } else {
+    const md = readFileSync(script, "utf8");
+    for (const need of ["## 4. 判定", "**通过**", "**部分通过**", "**不通过**", "不许提示"]) {
+      if (!md.includes(need)) problems.push(`试用脚本.md 缺「${need}」——判定没写死，事后就会解释成"其实还行"`);
+    }
+  }
+
+  checked++;
+  if (!existsSync(sheet)) problems.push("试用记录表.md 不见了——没人能记「卡在哪」");
+
+  checked++;
+  if (!existsSync(maker)) problems.push("tools/make-trial.ps1 不见了——试用包打不出来，就递不出去");
 
   return { problems, checked };
 }

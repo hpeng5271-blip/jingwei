@@ -47,6 +47,30 @@ const PKG_TREE: &[&str] = &[
     "/venv/",
 ];
 
+/// **别人的安装树**：这些路径下就算有源码，也不该劝人加清单（2026-10-18 实测后加的）。
+///
+/// 实测（真机 40 个目录）：不加这条时，`C:\Program Files\Application Verifier`、
+/// `D:\VSBT\Common7`、`C:\Users\cjz\AppData\Roaming\Code` 全都被建议"补一个 pyproject.toml"——
+/// 那三个地方没有一个该有 pyproject。**这类目录的清单在安装包/产品仓库里，不在这里。**
+const FOREIGN_TREE: &[&str] = &[
+    "\\program files\\",
+    "\\program files (x86)\\",
+    "\\appdata\\roaming\\",
+    "\\appdata\\local\\programs\\",
+    "\\windows\\",
+    "\\microsoft visual studio\\",
+    "\\windows kits\\",
+];
+
+/// **已安装产品**的判据：目录里 DLL/EXE 多到不像源码夹，就不再劝它加清单。
+///
+/// 实测依据：`Application Verifier` 只有 1 个 `.h`，但它装着整套 exe/dll——
+/// 光看源码数量会把它当成"刚起步的项目"。
+const BINARY_EXT: &[&str] = &["dll", "exe", "pdb", "lib", "obj", "jar"];
+const BINARY_LIMIT: usize = 5;
+/// **至少 3 个**源码文件才开口（实测：临时夹具里 1 个 `.py` 也被劝过加清单）。
+const MIN_FILES: usize = 3;
+
 /// 我们会用来判断"有源码"的扩展名。
 ///
 /// **刻意包含我们解析不了的语言**（ts/js/java）：那句话是"你有源码但没有清单"，
@@ -67,6 +91,13 @@ pub struct UnmarkedSources {
 }
 
 /// 这个目录是不是在**别人管的树**里（包管理器 / 虚拟环境 / 缓存）。
+/// 这个目录是不是在**别人的安装树**里（Program Files / AppData / Windows / VS 安装目录）。
+pub fn in_foreign_tree(root: &Path) -> bool {
+    let p = root.to_string_lossy().replace('/', "\\").to_lowercase();
+    let p = p + "\\";
+    FOREIGN_TREE.iter().any(|k| p.contains(k))
+}
+
 pub fn in_package_tree(root: &Path) -> bool {
     let p = root.to_string_lossy().replace('/', "\\").to_lowercase();
     PKG_TREE
@@ -79,11 +110,14 @@ pub fn in_package_tree(root: &Path) -> bool {
 /// 上限 2000 个目录：这一条只用来决定"要不要给一句建议"，
 /// 不值得为它做全量遍历（真实项目通常几十个目录）。
 pub fn unmarked_sources(root: &Path) -> Option<UnmarkedSources> {
-    if !root.is_dir() || in_package_tree(root) {
+    // **别人的安装树一律沉默**（实测：Program Files / AppData / VS 安装目录会被误报）。
+    if !root.is_dir() || in_package_tree(root) || in_foreign_tree(root) {
         return None;
     }
     let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
     let mut files = 0usize;
+    // **已安装产品**：DLL/EXE 多到这个数，就不是"人在这里写代码"，是"别人装了个东西"。
+    let mut binaries = 0usize;
     let mut dirs = 0usize;
     let mut stack = vec![root.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -110,6 +144,9 @@ pub fn unmarked_sources(root: &Path) -> Option<UnmarkedSources> {
                 stack.push(child);
             } else if let Some(ext) = name.rsplit('.').next() {
                 let ext = ext.to_lowercase();
+                if BINARY_EXT.contains(&ext.as_str()) {
+                    binaries += 1;
+                }
                 if SRC_EXT.contains(&ext.as_str()) {
                     files += 1;
                     *counts.entry(ext).or_insert(0) += 1;
@@ -117,7 +154,10 @@ pub fn unmarked_sources(root: &Path) -> Option<UnmarkedSources> {
             }
         }
     }
-    if files == 0 {
+    // **两条下限**（都是实测换的）：
+    // ① 少于 3 个源码文件：临时夹具里 1 个 `.py` 也被劝过加清单，那是噪声；
+    // ② DLL/EXE 超过 5 个：那是"已安装的产品"，清单在它的安装包里。
+    if files < MIN_FILES || binaries > BINARY_LIMIT {
         return None;
     }
     let mut langs: Vec<(String, usize)> = counts.into_iter().collect();
@@ -195,6 +235,52 @@ mod tests {
         }
         let u = unmarked_sources(&d).expect("ts/java 也算源码");
         assert_eq!(u.files, 3, "{:?}", u);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **别人的安装树里一律沉默**（2026-10-18 真机实测后加的）。
+    ///
+    /// 实测（40 个真目录）：不设这条时 `C:\Program Files\Application Verifier`、
+    /// `D:\VSBT\Common7`、`C:\Users\<名>\AppData\Roaming\Code` 都被劝"补一个清单"——
+    /// 那些地方的"清单"在安装包/产品仓库里，用户在这里补是补错了地方。
+    #[test]
+    fn 安装树里保持沉默() {
+        // **夹具的名字必须是「Program Files」（带空格）**：判据匹配的是这个串。
+        // 第一版我写成 `ProgramFiles`，测试当场红——**夹具照判据写，不是照感觉写**。
+        let base = std::env::temp_dir().join("dd-foreign-tree");
+        let d = base.join("Program Files").join("SomeTool");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&d).unwrap();
+        for n in ["a.py", "b.py", "c.py"] {
+            fs::write(d.join(n), "x=1\n").unwrap();
+        }
+        assert!(in_foreign_tree(&d), "路径里有 Program Files 就该判成安装树");
+        assert!(unmarked_sources(&d).is_none(), "安装树里不许给建议");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// **已安装的产品**（DLL/EXE 一堆）不许劝加清单——它只有 1 个 `.h` 也不该被当成新项目。
+    #[test]
+    fn 装好的产品不给建议() {
+        let d = scratch("installed");
+        fs::write(d.join("only.h"), "// x\n").unwrap();
+        for i in 0..6 {
+            fs::write(d.join(format!("lib{i}.dll")), b"\0").unwrap();
+        }
+        assert!(unmarked_sources(&d).is_none(), "DLL 一堆 = 已安装的产品，不该给建议");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **少于 3 个源码文件不开口**：实测临时夹具里 1 个 `.py` 也被劝过加清单。
+    #[test]
+    fn 太少的源码不开口() {
+        let d = scratch("tiny");
+        fs::write(d.join("one.py"), "x=1\n").unwrap();
+        assert!(unmarked_sources(&d).is_none(), "1 个 .py 不值得劝人加清单");
+        fs::write(d.join("two.py"), "y=1\n").unwrap();
+        assert!(unmarked_sources(&d).is_none(), "2 个也不够");
+        fs::write(d.join("three.py"), "z=1\n").unwrap();
+        assert!(unmarked_sources(&d).is_some(), "3 个才开口");
         let _ = fs::remove_dir_all(&d);
     }
 }

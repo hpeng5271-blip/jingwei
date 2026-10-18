@@ -1,75 +1,15 @@
 {
-  "at": "2026-10-18T15:31:14.510Z",
+  "at": "2026-10-18T15:42:06.103Z",
   "rows": [
     {
-      "name": "fd",
-      "index_ms": 118,
-      "files": 24,
-      "symbols": 451,
-      "calls": 88,
-      "roles": {},
-      "roles_sum_line": "合计         24 个文件（七格之和 = 24 ✓）",
-      "guide": "✓ 现在就能跑（没发现挡路的）",
-      "index_exit": 0,
-      "unsupported": null
-    },
-    {
-      "name": "vite",
-      "index_ms": 71,
-      "files": null,
-      "symbols": null,
-      "calls": null,
-      "roles": {},
-      "roles_sum_line": "合计         0 个文件（七格之和 = 0 ✓）",
-      "guide": "✗ 现在跑不起来",
-      "index_exit": 1,
-      "unsupported": "940 个 .js、586 个 .ts、26 个 .vue、22 个 .mjs"
-    },
-    {
-      "name": "flask",
-      "index_ms": 231,
-      "files": 83,
-      "symbols": 1580,
-      "calls": 202,
-      "roles": {},
-      "roles_sum_line": "合计         83 个文件（七格之和 = 83 ✓）",
-      "guide": "✗ 现在跑不起来",
-      "index_exit": 0,
-      "unsupported": null
-    },
-    {
-      "name": "petclinic",
-      "index_ms": 26,
-      "files": null,
-      "symbols": null,
-      "calls": null,
-      "roles": {},
-      "roles_sum_line": "合计         0 个文件（七格之和 = 0 ✓）",
-      "guide": "✗ 现在跑不起来",
-      "index_exit": 1,
-      "unsupported": "50 个 .java"
-    },
-    {
-      "name": "requests",
-      "index_ms": 151,
-      "files": 37,
-      "symbols": 787,
-      "calls": 152,
-      "roles": {},
-      "roles_sum_line": "合计         37 个文件（七格之和 = 37 ✓）",
-      "guide": "✗ 现在跑不起来",
-      "index_exit": 0,
-      "unsupported": null
-    },
-    {
       "name": "tauri",
-      "index_ms": 31,
+      "index_ms": 4829,
       "files": null,
       "symbols": null,
       "calls": null,
       "roles": {},
-      "roles_sum_line": "合计         0 个文件（七格之和 = 0 ✓）",
-      "guide": "? 还查不出来——缺一样你这边的东西",
+      "roles_sum_line": "合计         208 个文件（七格之和 = 208 ✓）",
+      "guide": "✗ 现在跑不起来",
       "index_exit": 1,
       "unsupported": null
     }

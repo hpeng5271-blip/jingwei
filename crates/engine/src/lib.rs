@@ -1,4 +1,4 @@
-﻿//! jingwei 引擎：全部逻辑在这里，不依赖任何 GUI。
+//! jingwei 引擎：全部逻辑在这里，不依赖任何 GUI。
 //!
 //! 对外唯一接口是 JSON（facts / findings / plan），所以壳（CLI / Tauri）可以随便换。
 //!
@@ -65,6 +65,10 @@ pub mod understand {
     pub mod container;
     pub mod contract;
     pub mod diag;
+    /// **目录级索引**：把"采集"与"判定"拆开（见 `框架.md` §4.9）。
+    ///
+    /// **故意还没接线**：先用回归测试证明"同样输入给同样结果"，再接上去。
+    pub mod dirs_index;
     pub mod fix;
     /// **项目指南**：一句话回答"现在能不能跑、卡在哪、下一步敲什么"。
     /// 与 `rules` 的分工：那边是**清单**（我知道的都告诉你），这边是**排序**

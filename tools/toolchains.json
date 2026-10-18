@@ -38,6 +38,10 @@
     {
       "host": "objects.githubusercontent.com",
       "why": "github.com 的 release 资产实际下载域（一次重定向）"
+    },
+    {
+      "host": "release-assets.githubusercontent.com",
+      "why": "GitHub release 资产的实际落点（2026-10-18 实测：不是 objects.githubusercontent.com，我猜错过一次）"
     }
   ],
   "entries": [
@@ -51,6 +55,17 @@
       "homepage": "https://rustup.rs",
       "verified_at": "2026-10-18",
       "size": 12721664
+    },
+    {
+      "id": "w64devkit-x64",
+      "version": "2.10.1",
+      "url": "https://github.com/skeeto/w64devkit/releases/download/v2.10.1/w64devkit-x64-2.10.1.7z.exe",
+      "host": "github.com",
+      "sha256": "add1edf984ce4d473cfeb7c52e0ab38db73a855bba6c7f564d5e16648eb2896a",
+      "publisher": null,
+      "homepage": "https://github.com/skeeto/w64devkit",
+      "verified_at": "2026-10-18",
+      "size": 67263552
     }
   ]
 }

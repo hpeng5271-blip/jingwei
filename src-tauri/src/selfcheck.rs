@@ -155,6 +155,10 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
           const snapshot = (tab) => ({{
             tab,
             viewport: [window.innerWidth, window.innerHeight],
+            // **画布自证**（2026-10-18）：DOM 说不了 canvas 里画了什么，
+            // 而 `ui/graph.js` 每次画完把 nodes/edges/半径分布挂在 window 上。
+            // 没有就是 null——**"没画"不许伪装成"画了 0 个"**。
+            canvas: window.__graphDrawn || null,
             activeView: (document.querySelector('.view.on') || {{}}).id || null,
             navOn: (document.querySelector('#nav button.on') || {{}}).dataset
               ? document.querySelector('#nav button.on').dataset.tab : null,

@@ -691,6 +691,23 @@ async function main() {
     ok('画布在且可见', visible(cv), cv ? JSON.stringify(cv.rect) : '不存在');
     ok('画布没有被挤出窗口', cv && inView(cv), cv ? JSON.stringify(cv.rect) : '');
 
+    // **画布自证**（2026-10-18）：上面两条只说"画布是块可见的方框"，
+    // **说不了里面画了东西没有**——canvas 的内容不暴露给 DOM。
+    // 现在界面每次画完把 nodes/edges/半径分布挂到 window，自检带进报告。
+    const cvs = rep.canvas || null;
+    ok(
+      '画布真的画了东西（自证：节点与边都 > 0）',
+      !!cvs && cvs.nodes > 0 && cvs.edges > 0,
+      cvs ? `nodes=${cvs.nodes} edges=${cvs.edges}` : '自证为空（说明一帧都没画）',
+    );
+    // **半径区分度这条在小组夹具上不成立**（角色节点少，全画 5）——
+    // 换成能失败的：**有角色的节点真的进画布了吗**。角色画法坏掉时它就是 0。
+    ok(
+      '画布自证：有角色的节点真的进画布了',
+      !!cvs && cvs.roles > 0,
+      cvs ? `roles=${cvs.roles} r=${cvs.radiusMin}..${cvs.radiusMax}` : '',
+    );
+
     const hud = pick(rep, '#graphHud');
     ok('图上那张状态卡在且可见', visible(hud), hud ? JSON.stringify(hud.rect) : '不存在');
     ok('状态卡没有被挤出窗口', hud && inView(hud), hud ? JSON.stringify(hud.rect) : '');

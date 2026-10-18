@@ -43,7 +43,15 @@ def is_library_surface(path):
     它有自己的单测盯着（`库的根文件是公共面不是公共底层`）。
     """
     p = path.replace("\\", "/")
-    return p == "src/lib.rs" or p.endswith("/src/lib.rs")
+    if p == "src/lib.rs" or p.endswith("/src/lib.rs"):
+        return True
+    # **Python 的包根 `__init__.py` 也是公共面**（2026-10-18 与 roles.rs 同步）：
+    # `src/flask/__init__.py` 的出入度都是 0（重导出是 import，不是 call），
+    # 但它才是外面所有 `from flask import Flask` 经过的那个面。
+    if not p.endswith("/__init__.py"):
+        return False
+    slashes = p.count("/")
+    return slashes == 1 or (slashes == 2 and p.startswith("src/"))
 
 
 def is_test(path):

@@ -415,6 +415,24 @@ function graphDraw() {
     }
   }
   ctx.restore();
+  // **画布自证**（2026-10-18）：DOM 只能说明"画布有尺寸"，**说不了里面有没有东西**。
+  // 每次画完把"真的画了什么"挂到 `window.__graphDrawn`，由自检读进报告。
+  // 判据全是**能失败的量**（不是"我调用过 draw"）：
+  //   nodes/edges 真进画布的数量 · roles 有角色的节点数 ·
+  //   radiusMin/Max 半径有没有区分度（全相等说明没算） · ms 这一帧的耗时。
+  (function ghSelfReport() {
+    var radii = (GS.nodes || []).map(function (n) { return n.r != null ? n.r : (n.deg > 12 ? 9 : 5); });
+    window.__graphDrawn = {
+      nodes: (GS.nodes || []).length,
+      edges: (GS.edges || []).length,
+      roles: (GS.nodes || []).filter(function (n) { return !!n.role; }).length,
+      radiusMin: radii.length ? Math.min.apply(null, radii) : 0,
+      radiusMax: radii.length ? Math.max.apply(null, radii) : 0,
+      w: W,
+      h: H,
+      at: Date.now(),
+    };
+  })();
 }
 
 function graphWire() {

@@ -87,9 +87,29 @@ fn is_bin_target(f: &str) -> bool {
     l.contains("/src/bin/") || l.starts_with("src/bin/")
 }
 
+/// **这个文件是不是"被别人 import 的那个面"**（Rust 与 Python 各一条）。
+///
+/// - Rust：crate 根 `src/lib.rs`（`src/sub/lib.rs` 不算）；
+/// - **Python：包根 `__init__.py`**（2026-10-18，`pallets/flask` 实测）。
+///
+/// 为什么 Python 也要一条：`src/flask/__init__.py` 的出度入度都是 **0**
+/// （它全是 `from .app import Flask` 这种**重导出**——那是 import，不是 call），
+/// 于是被判成「还没连上」。
+/// 可它是这个包的公共面：**外面所有 `from flask import Flask` 都经过它**。
+/// 只看调用度会把它读成"没人用的死角"，那是错的。
+///
+/// 只认**包根**：`src/<包>/__init__.py` 或 `<包>/__init__.py` 两层；
+/// `src/<包>/<子包>/__init__.py` 不算（子包的口不是这个项目的口）。
 fn is_library_surface(f: &str) -> bool {
     let l = f.replace('\\', "/");
-    l == "src/lib.rs" || l.ends_with("/src/lib.rs")
+    if l == "src/lib.rs" || l.ends_with("/src/lib.rs") {
+        return true;
+    }
+    if !l.ends_with("/__init__.py") {
+        return false;
+    }
+    let slashes = l.matches('/').count();
+    slashes == 1 || (slashes == 2 && l.starts_with("src/"))
 }
 
 fn classify(out: i64, inn: i64) -> &'static str {
@@ -762,5 +782,24 @@ mod tests {
         // Rust 那半不许被这次改动带坏。
         assert!(is_test_file("src/deps_tests.rs"));
         assert!(!is_test_file("src/main.rs"));
+    }
+
+    /// **Python 的包根 `__init__.py` 是公共面**（2026-10-18，flask 实测）。
+    ///
+    /// `src/flask/__init__.py` 的出度入度都是 **0**（重导出是 import，不是 call），
+    /// 所以修之前它被判成「还没连上」——但它才是外面所有 `from flask import Flask`
+    /// 经过的那个面。**只看调用度会把它读成没人用的死角。**
+    #[test]
+    fn python的包根init是公共面() {
+        assert!(is_library_surface("src/flask/__init__.py"));
+        assert!(is_library_surface("flask/__init__.py"));
+        // 子包的口不是这个项目的口。
+        assert!(!is_library_surface("src/flask/json/__init__.py"));
+        // 普通模块不是面。
+        assert!(!is_library_surface("src/flask/app.py"));
+        // Rust 那条不许被带坏。
+        assert!(is_library_surface("src/lib.rs"));
+        assert!(is_library_surface("crates/engine/src/lib.rs"));
+        assert!(!is_library_surface("src/sub/lib.rs"));
     }
 }

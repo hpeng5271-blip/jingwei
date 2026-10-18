@@ -321,7 +321,10 @@ body.dock-open .rail{padding-bottom:calc(var(--dock-h) + var(--s2))}
 
 /* ── 主区 ────────────────────────────────────────────────── */
 main{grid-area:main;overflow:auto;padding:var(--s5) 0 64px}
-.view{display:none;max-width:1240px;margin:0 auto;padding:0 var(--s5)}
+.view{display:none;max-width:none;margin:0;padding:0 var(--s5)}
+/* **不留白**（2026-10-18 用户要求）：原来这里 max-width:1240px + 居中，
+   窗口一大，两侧就是空的。现在所有页都吃满宽度，只留 `--s5` 的呼吸边距。
+   边界：正文类块（欢迎语那种）另有自己的 max-width，长的中文句子不会拉成一行 200 字。 */
 .view.on{display:block}
 .secTitle{margin:var(--s6) 0 var(--s3);font-size:var(--fs-md);font-weight:700;letter-spacing:.2px}
 
@@ -1426,7 +1429,7 @@ body{background:var(--bg)}
 :root{ --r-card:10px; --r-float:14px }
 
 /* ── 页面骨架 ───────────────────────────────────────────── */
-.view{max-width:1200px}
+.view{max-width:none}
 .toolbar{background:transparent;border:0;padding:var(--s5) 0 var(--s3);
   display:flex;align-items:flex-end;gap:var(--s4);flex-wrap:wrap}
 .toolbar .big{font-size:var(--fs-xl);font-weight:700;letter-spacing:-.2px;line-height:1.3}

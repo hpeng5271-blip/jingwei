@@ -347,7 +347,7 @@ function checkDocCommands() {
 }
 
 function checkEntryDocSize() {
-  const CEILING = 300;
+  const CEILING = 260;
   const f = join(ROOT, 'AGENTS.md');
   if (!existsSync(f)) { problems.push('没有 AGENTS.md'); return; }
   const n = readFileSync(f, 'utf8').split(/\r?\n/).length;
@@ -358,7 +358,7 @@ function checkEntryDocSize() {
       + '或 框架.md / SOP.md（方法论）',
     );
   } else {
-    console.log(`  · 入口文件体积：AGENTS.md ${n} 行（上限 ${CEILING}，目标 120）`);
+    console.log(`  · 入口文件体积：AGENTS.md ${n} 行（上限 ${CEILING}，目标 120；每轮都注入，见 tools/ctx-cost.mjs）`);
   }
 }
 

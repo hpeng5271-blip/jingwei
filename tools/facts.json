@@ -1,17 +1,17 @@
 {
   "note": "文档数字的唯一真源。由 tools/collect_facts.mjs 现场采集；gate.mjs 用它校验文档。",
   "facts": {
-    "engine_unit": 346,
+    "engine_unit": 347,
     "engine_ignored": 1,
     "integration": 51,
     "model": 11,
-    "tests_total": 416,
+    "tests_total": 417,
     "shell_tests": 78,
     "gates": 8,
     "graph_files": 111,
-    "graph_symbols": 1716,
-    "graph_nodes": 1828,
-    "graph_edges": 3061,
+    "graph_symbols": 1717,
+    "graph_nodes": 1829,
+    "graph_edges": 3063,
     "motives_landed": 19,
     "motives_pending": 6
   }

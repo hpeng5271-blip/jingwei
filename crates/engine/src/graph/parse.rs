@@ -212,7 +212,7 @@ fn collect_calls(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "function_item" => {
+            "function_item" | "function_signature_item" => {
                 // 进这个函数体时**压栈**，出去时弹栈——作用域链就是这么来的。
                 let own = child
                     .child_by_field_name("name")
@@ -244,6 +244,17 @@ fn collect_calls(
                     if own.is_some() {
                         scope.pop();
                     }
+                }
+            }
+            // trait 默认方法体里的调用：src 是那个方法（与收符号那趟用同一套 id 拼法）
+            "trait_item" => {
+                let tname = child
+                    .child_by_field_name("name")
+                    .and_then(|n| n.utf8_text(src.as_bytes()).ok())
+                    .map(|s| s.trim().to_string());
+                if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
+                    // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
+                    collect_calls(body, src, rel, Some(&tname), scope, by_name, by_path, out, refs);
                 }
             }
             "impl_item" => {
@@ -376,18 +387,32 @@ fn collect(
     for child in node.children(&mut cursor) {
         match child.kind() {
             // 有名字、且名字本身就是它的标识
-            "function_item" | "struct_item" | "enum_item" | "union_item" | "trait_item"
+            "function_item" | "function_signature_item" | "struct_item" | "enum_item"
+            | "union_item" | "trait_item"
             | "type_item" | "const_item" | "static_item" | "mod_item" => {
                 let own = push_symbol(child, src, rel, now, container, scope, out);
                 // **函数可以嵌在函数里**，那时它自己就是一层作用域——
                 // 内层的符号 id 要带上外层的路径，否则同名嵌套函数会撞成同一个节点。
                 // （这一条是测试逼出来的：原来两个嵌套函数各自独立成 `a.rs#outer` 和 `a.rs#inner`。）
                 if child.kind() == "function_item" {
-                    if let Some(o) = own {
+                    if let Some(o) = own.as_ref() {
                         if let Some(body) = child.child_by_field_name("body") {
-                            scope.push(o);
+                            scope.push(o.clone());
                             collect(body, src, rel, now, container, scope, out);
                             scope.pop();
+                        }
+                    }
+                }
+                // **trait 的默认方法也是符号**（2026-10-19）：trait 只收了自己，
+                // body 从没走过 → 默认方法缺席 → 有边指向它时外键违约、整项目索引失败。
+                // 容器用 trait 名，与 impl 方法同形（`Trait::method`）。
+                if child.kind() == "trait_item" {
+                    // `own` 在前面已经被 function_item 那支借走过，这里只要读它的值
+                    if let Some(o) = own.clone() {
+                        if let Some(body) = child.child_by_field_name("body") {
+                            let tname = o.rsplit('#').next().unwrap_or("").to_string();
+                            // **不 push scope**：容器已经带了 trait 名，两样都写会拼成 Gen::Gen::x
+                            collect(body, src, rel, now, Some(&tname), scope, out);
                         }
                     }
                 }
@@ -633,6 +658,42 @@ enum Kind { A, B }
 
     /// **Q8 实测过的那件事**：写坏的函数照样会被抽出来。
     /// 所以"能不能建关系"不能看抽没抽到符号，只能看 `complete`。
+    /// **trait 的默认方法也是符号**（2026-10-19，真 tauri 撞出来的）。
+    ///
+    /// 原来 `trait_item` 只收了自己、**从不走 body**，于是默认方法缺席；
+    /// 而有调用边指向它 → 外键违约 → **整个项目索引失败**。
+    /// 这条同时钉住两件事：方法在（带 trait 前缀），以及方法体里的调用是对的源。
+    #[test]
+    fn trait_的默认方法也要算符号() {
+        let src = r#"
+pub trait Gen {
+    fn name(&self) -> String;
+    fn describe(&self) -> String {
+        helper(self.name())
+    }
+}
+fn helper(s: String) -> String { s }
+"#;
+        let r = parse_rust("src/t.rs", src, 1000);
+        assert!(r.complete, "这段源码没有语法错误");
+        let ids: Vec<&str> = r.symbols.iter().map(|s| s.id.as_str()).collect();
+        assert!(
+            ids.contains(&"symbol:src/t.rs#Gen::name"),
+            "trait 的方法声明要有位置：{ids:?}"
+        );
+        assert!(
+            ids.contains(&"symbol:src/t.rs#Gen::describe"),
+            "**默认方法必须进符号表**，否则有边指向它时外键会把整个索引领翻：{ids:?}"
+        );
+        // 默认方法体里的调用，源必须是那个方法 —— 不是 trait 本身
+        assert!(
+            r.calls.iter().any(|(s, d)| s == "symbol:src/t.rs#Gen::describe"
+                && d == "symbol:src/t.rs#helper"),
+            "默认方法里调 helper 的边要挂在 describe 上：{:?}",
+            r.calls
+        );
+    }
+
     #[test]
     fn 坏代码里也会抽出符号但必须标成不完整() {
         let src = "fn good() {}\nfn broken( { }\n";

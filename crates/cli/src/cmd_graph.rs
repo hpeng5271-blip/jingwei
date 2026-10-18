@@ -490,14 +490,25 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
         rep.ambiguous.len(),
         rep.external
     );
-    // **"我们自己漏了多少"要单独说**——"外部 4579 个"这个数里混着
-    // "标准库"与"我们没接上"，不分开报的话图是不是真的全，判断不了。
+    // **这两类必须单独说，但不能说成"都是我们的锅"**（2026-10-18 真 Python 项目换的）。
+    //
+    // 原话是「其中**我们自己漏的**」——而实测在 `flask`（83 个 .py）上它会报 203 + 350，
+    // 比那个项目**全部 import 语句（388 条）**还多。原因：`import os` / `import typing` 这种
+    // **标准库**导入，名字在项目里当然找不到，于是全被算成"我们漏了"。
+    // flask 的 388 条 import 里 **134 条是标准库**（34%）。
+    //
+    // **我们分不开这两种**：目标不在项目里（外部）vs 在项目里但我们没接上。
+    // 三态纪律：分不开就写分不开，**不许把外部说成自己的锅**（也不许反过来）。
     let leak = rep.unmapped_imports.len() + rep.namespace_mismatch.len();
     if leak > 0 {
         println!(
-            "      其中**我们自己漏的**：写了 use 却没接上 {} 处 · 名字在但命名空间不符 {} 处",
+            "      其中**写了 import 却没接上** {} 处 · 名字在但命名空间不符 {} 处",
             rep.unmapped_imports.len(),
             rep.namespace_mismatch.len()
+        );
+        println!(
+            "      {}",
+            c(DIM, "（这两类里混着「外部模块」与「我们真漏了」——我们现在**分不开**，所以不把它们算进上面那个「外部」）")
         );
     }
     if let Some(tip) = coverage_caveat(rep.resolved, rep.ambiguous.len()) {

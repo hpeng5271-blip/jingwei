@@ -362,6 +362,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **"我们没接上"不许说成"我们自己漏的"**（见 checkLeakWording 的头）。
+{
+  const r = checkLeakWording(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log('  · 漏接措辞：不说成「我们的锅」，且写明分不开');
+}
 // **便携边界要有一处说清，且实测/推断分得开**（见 checkPortableDoc 的头）。
 {
   const r = checkPortableDoc(ROOT);
@@ -659,6 +665,44 @@ export function checkPortableDoc(root) {
   checked++;
   if (!md.includes("还没做的")) {
     problems.push("便携文档缺「还没做的」——只写好消息的边界说明等于广告");
+  }
+
+  return { problems, checked };
+}
+
+// **"我们没接上"那句话不许说成"我们自己漏的"**（2026-10-18，flask 实测换的）。
+//
+// 实测：flask 全项目 388 条 import 里 134 条是标准库（34%），而索引输出把
+// "名字在项目里找不到"的导入全算成"我们自己漏的"，报出 203 + 350——
+// **比那个项目全部 import 语句还多**。那是把"外部"说成自己的锅（三态压扁）。
+//
+// 判据：输出这句的附近必须写明"分不开"，而且**不许**再出现「我们自己漏的」这种断言。
+// 诚实边界：这一道只查措辞，查不出分类对不对——分类我们确实还分不开。
+export function checkLeakWording(root) {
+  const problems = [];
+  let checked = 0;
+  const p = join(root, "crates", "cli", "src", "cmd_graph.rs");
+  if (!existsSync(p)) return { problems: ["crates/cli/src/cmd_graph.rs 不见了"], checked };
+  const src = readFileSync(p, "utf8");
+
+  // **只看代码行**：注释里出现这个词是**合法的**——那正是在解释"为什么不再这么说"。
+  // 第一版扫全文，于是它抓到了我自己那句解释性注释（假红）。
+  const codeLines = src
+    .split(/\r?\n/)
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("//");
+    })
+    .join("\n");
+
+  checked++;
+  if (codeLines.includes("我们自己漏的")) {
+    problems.push("cmd_graph.rs 里又出现「我们自己漏的」这句输出——它会把外部模块算成我们的锅（flask 实测 203+350 超过全项目 import 数）");
+  }
+
+  checked++;
+  if (!codeLines.includes("分不开")) {
+    problems.push("cmd_graph.rs 里那句「没接上」的说明必须写明「分不开」——分得开才许分开说");
   }
 
   return { problems, checked };

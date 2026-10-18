@@ -655,6 +655,21 @@ try {
     //
     // 从 `GROLE` 直接读理由，**不从渲染结果读**：渲染只包含当前数据里出现的角色，
     // 用渲染结果去查"没出现的角色有没有理由"必然查不到（第一版就栽在这）。
+    // **覆盖度不够时图例要加一句**（2026-10-18，拿 fd 的真数换的：连上 32、拿不准 141）。
+    // **拿不到覆盖度就不说**——老库没有这两个数，"不知道"不许冒充"够用"。
+    const tips = await page.evaluate(() => ({
+      bad: ghCoverageTip({ linked: 32, unresolved: 141 }),
+      good: ghCoverageTip({ linked: 200, unresolved: 10 }),
+      equal: ghCoverageTip({ linked: 50, unresolved: 50 }),
+      old: ghCoverageTip({}),
+      none: ghCoverageTip(null),
+    }));
+    check('图谱：覆盖度不够时图例说「会比实际偏多」',
+      tips.bad.includes('偏多') && tips.bad.includes('141'),
+      JSON.stringify(tips.bad.slice(0, 50)));
+    check('图谱：覆盖度够 / 相等 / 老库 / 没数据时都不吵',
+      tips.good === '' && tips.equal === '' && tips.old === '' && tips.none === '',
+      JSON.stringify(tips));
     const whys = await page.evaluate(() => {
       const out = {};
       for (const k of Object.keys(GROLE)) out[k] = GROLE[k].why;

@@ -160,7 +160,23 @@ var GROLE = {
 };
 
 /** 把角色计数画成一行。**没数据就藏起来**；有数据但一个角色都没有，要**明说**。 */
-function ghRenderRoles(roles) {
+/** **覆盖度不够时，角色图例要加一句提醒**（2026-10-18）。
+ *
+ * 判据来自 3 个真应用：跨文件调用只接上一部分时，"入口候选/公共底层"会偏多。
+ * 真数据：fd 120 条 calls 里 93 条同文件，跨文件只接上 27 条。
+ *
+ * **拿不到覆盖度就不说**（老库没有这两个数）——"不知道"不许冒充"够用"。
+ */
+function ghCoverageTip(stats) {
+  if (!stats) return "";
+  const linked = stats.linked;
+  const unresolved = stats.unresolved;
+  if (typeof linked !== "number" || typeof unresolved !== "number") return "";
+  if (unresolved <= linked) return "";
+  return "跨文件调用只接上 " + linked + " 条、" + unresolved + " 条拿不准——角色会比实际偏多";
+}
+
+function ghRenderRoles(roles, stats) {
   var box = $('#ghRoles');
   if (!box) return;
   if (!roles) { box.hidden = true; return; }
@@ -183,7 +199,10 @@ function ghRenderRoles(roles) {
     return;
   }
   box.hidden = false;
-  box.innerHTML = parts.join('');
+  // **覆盖度不够就说一句**（2026-10-18）：图例里的数字是"按我们连上的边算的"，
+  // 边只接上一部分时，角色会比实际偏多。不说 = 让人把猜当事实。
+  var tip = ghCoverageTip(stats);
+  box.innerHTML = parts.join('') + (tip ? '<span class="gr-tip">' + tip + '</span>' : '');
 }
 
 /** 一个点画多大。**颜色说角色，大小说规模**——两件事分开，别挤在一列里。
@@ -265,7 +284,8 @@ async function graphLoad(drawIt) {
   }
   GS.data = dp.data;
   graphBuild();
-  ghRenderRoles(dp.data.roles);
+  // 覆盖度与角色一起给：`ghCoverageTip` 会判断要不要加那句提醒。
+  ghRenderRoles(dp.data.roles, dp.data);
   ghRenderDirs(dp.data.dirs);
   // 截断要写在界面上——画不全时得能区分"只有这么多"和"被截了"
   $('#ghSub').textContent = dp.data.truncated

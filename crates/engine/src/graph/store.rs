@@ -270,6 +270,29 @@ impl Store {
     }
 
     /// 库里有多少节点、多少条**有效**边。界面上"这个项目索引了多少东西"就靠它。
+    /// 写一条元信息（用途：索引的"理解覆盖度"存进库，界面据此判断角色可信度）。
+    pub fn set_meta(&self, k: &str, v: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO meta(k, v) VALUES(?1, ?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                rusqlite::params![k, v],
+            )
+            .context("写 meta 失败")?;
+        Ok(())
+    }
+    /// 读一条元信息；**没有就是 None**（不是空串——那是"有值但是空的"）。
+    pub fn get_meta(&self, k: &str) -> Result<Option<String>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT v FROM meta WHERE k = ?1")
+            .context("准备读 meta 失败")?;
+        let mut rows = st.query([k]).context("读 meta 失败")?;
+        Ok(match rows.next().context("读 meta 失败")? {
+            Some(r) => Some(r.get::<_, String>(0).context("读 meta 值失败")?),
+            None => None,
+        })
+    }
+
     pub fn counts(&self) -> Result<(i64, i64)> {
         let n: i64 = self
             .conn

@@ -604,6 +604,17 @@ pub fn index_source(
         }
     }
 
+    // **把"理解覆盖度"存进库**（2026-10-18）：界面上的角色图例要能说
+    // "这些角色有多可信"。数据跟着库走——谁打开、什么时候打开，都是同一个事实。
+    //
+    // 为什么不在界面里现算：算它要重跑一次解析聚合，而这是**索引时已经知道的事**。
+    // 写失败只影响"界面那句提醒说不说"，不影响这次索引的结果——但**不许静默**，
+    // 所以走 `.ok()` 而不是 `let _ =`（后者会被 clippy 拦，见 `let_underscore_must_use`）。
+    store.set_meta("index_linked", &rep.resolved.to_string()).ok();
+    store.set_meta("index_unresolved", &rep.ambiguous.len().to_string()).ok();
+    store.set_meta("index_external", &rep.external.to_string()).ok();
+    store.set_meta("index_at_ms", &now_ms().to_string()).ok();
+
     Ok(rep)
 }
 

@@ -64,7 +64,24 @@ pub(crate) fn graph_stats(root: String) -> Value {
     }
     match jingwei_engine::graph::store::Store::open_readonly(&db) {
         Ok(s) => match s.counts() {
-            Ok((nodes, edges)) => Envelope::yes(json!({ "nodes": nodes, "edges": edges })).to_value(),
+            Ok((nodes, edges)) => {
+                // **覆盖度跟着库走**（2026-10-18）：索引时写进去的"接上多少 / 拿不准多少"。
+                // 界面用它判断"角色图例该不该加一句提醒"——没有就是 None（老库），
+                // **不许当成 0**（那会把"不知道"说成"没漏"）。
+                let linked = s.get_meta("index_linked").ok().flatten().and_then(|v| v.parse::<i64>().ok());
+                let unresolved = s
+                    .get_meta("index_unresolved")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<i64>().ok());
+                Envelope::yes(json!({
+                    "nodes": nodes,
+                    "edges": edges,
+                    "linked": linked,
+                    "unresolved": unresolved,
+                }))
+                .to_value()
+            }
             Err(e) => Envelope::<Value>::unknown(format!("读图谱规模失败：{e}")).to_value(),
         },
         Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),
@@ -81,7 +98,22 @@ pub(crate) fn graph_dump(root: String, limit: Option<usize>) -> Value {
     }
     match jingwei_engine::graph::store::Store::open_readonly(&db) {
         Ok(s) => match s.dump(limit.unwrap_or(2000)) {
-            Ok(v) => Envelope::yes(v).to_value(),
+            Ok(mut v) => {
+                // **覆盖度一起给前端**（2026-10-18）：图例要说"角色有多可信"，
+                // 而这个数索引时就写进库了。老库没有 → null（**不许当 0**）。
+                for (k, key) in [
+                    ("linked", "index_linked"),
+                    ("unresolved", "index_unresolved"),
+                ] {
+                    let val = s
+                        .get_meta(key)
+                        .ok()
+                        .flatten()
+                        .and_then(|x| x.parse::<i64>().ok());
+                    v[k] = serde_json::json!(val);
+                }
+                Envelope::yes(v).to_value()
+            }
             Err(e) => Envelope::<Value>::unknown(format!("导出图谱失败：{e}")).to_value(),
         },
         Err(e) => Envelope::<Value>::unknown(format!("打开图谱库失败：{e}")).to_value(),

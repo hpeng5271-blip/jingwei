@@ -246,6 +246,8 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
     };
 
     let mut file_count: HashMap<&str, i64> = HashMap::new();
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    let mut rows_seen: HashSet<String> = HashSet::new();
     let mut seen: HashSet<String> = HashSet::new();
     for n in nodes.iter_mut() {
         let id = n.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
@@ -259,6 +261,17 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
         } else {
             file_role(f)
         };
+        // **逐文件一行**（2026-10-18 加）：两个实现（产品与探针）对不上时，
+        // 只有"哪两个文件不同"才能定位；只给汇总数只能知道"差 2 个"。
+        if kind == "file" && !f.is_empty() && !rows_seen.contains(f) {
+            rows_seen.insert(f.to_string());
+            rows.push(serde_json::json!({
+                "file": f,
+                "role": file_role(f),
+                "out": *f_out.get(f).unwrap_or(&0),
+                "in": *f_in.get(f).unwrap_or(&0),
+            }));
+        }
         if kind == "file" && !f.is_empty() && seen.insert(f.to_string()) {
             *file_count.entry(file_role(f)).or_insert(0) += 1;
         }
@@ -288,6 +301,8 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
         "middle": file_count.get("middle").copied().unwrap_or(0),
         "test": file_count.get("test").copied().unwrap_or(0),
         "isolated": file_count.get("isolated").copied().unwrap_or(0),
+        // 逐文件明细：给"对拍/复核"用，界面不读它（GROLE 只认上面那几个数）。
+        "rows": rows,
     })
 }
 

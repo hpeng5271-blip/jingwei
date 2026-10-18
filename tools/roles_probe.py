@@ -84,13 +84,22 @@ def roles_of(db):
         node[i] = f
     out, inn = collections.Counter(), collections.Counter()
     cross = same = 0
-    cur.execute("select src, dst from edges where kind='calls'")
+    # **读 `live_edges`，不是 `edges`**（2026-10-18 对齐产品）：
+    # `store.dump()` 用的是 live_edges（本仓库 2967 行），而 `edges` 里有失效记录（3095 行）。
+    # 两边读不同的表，"对拍"就会永远差几个——**对拍前先确认读的是同一份数据**。
+    cur.execute("select src, dst from live_edges where kind='calls'")
     for s, d in cur.fetchall():
         fa, fb = node.get(s), node.get(d)
         if not fa or not fb:
             continue
         if fa == fb:
             same += 1
+            continue
+        # **测试文件参与的边不算**（2026-10-18 与 roles.rs 同步）：
+        # 测试文件调用一切，把它们算进度数会把"被测试用的模块"抬成底层、
+        # 把"调了别人"的抬成候选。第一版漏了这条，于是**有测试的项目全对不上**
+        # （fd 没测试 → 两边一致；flask / 本仓库 → 候选与底层各差几个）。
+        if is_test(fa) or is_test(fb):
             continue
         cross += 1
         out[fa] += 1

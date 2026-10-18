@@ -411,6 +411,8 @@ main{grid-area:main;overflow:auto;padding:var(--s5) 0 64px}
 #guideCard .gd-next b{font-size:var(--fs-sm);color:var(--muted);flex:none}
 #guideCard .gd-next code{background:var(--inset);border:1px solid var(--line);
   border-radius:var(--r-sm);padding:2px 7px;font-size:var(--fs-sm);user-select:all}
+/* **建议不是命令**（2026-10-18）：未标记但有源码的目录，nextStep 是一句话。 */
+#guideCard .gd-next .gd-advice{color:var(--fg);font-size:var(--fs-sm);line-height:1.5;}
 #guideCard .gd-blockers{margin-top:10px}
 #guideCard .gd-blockers > b{font-size:var(--fs-sm);color:var(--muted)}
 #guideCard .gd-b{display:flex;gap:var(--s2);margin-top:6px;align-items:flex-start}

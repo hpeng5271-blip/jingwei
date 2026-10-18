@@ -536,9 +536,15 @@ function renderGuide() {
   const face = r.state === 'yes' ? { ch: '✓', cls: 'ok' }
     : r.state === 'no' ? { ch: '✗', cls: 'warn' }
       : { ch: '?', cls: 'ask' };
+  // **「不适用」不许说成「还查不出来」**（2026-10-18 修）：引擎的 `ready.why` 里
+  // 已经有 `not_applicable` 这个值，而界面原来把所有 unknown 都写成同一句——
+  // 那就是三态压扁：**「我们没查到」与「这个问题对它不成立」是两件事**，
+  // 用户该做的事也完全不同（前者等我们，后者什么都不用做）。
+  const na = r.why === 'not_applicable';
   const head = r.state === 'yes' ? ('现在就能跑 · ' + esc(g.what || ''))
     : r.state === 'no' ? ('现在跑不起来 · ' + esc(g.what || ''))
-      : ('还查不出来 · ' + esc(g.what || ''));
+      : na ? ('这个问题对它不适用 · ' + esc(g.what || ''))
+        : ('还查不出来 · ' + esc(g.what || ''));
   let html = '<div class="status ' + face.cls + '"><div class="face">' + face.ch + '</div><div>'
     + '<h2>' + head + '</h2>';
   // 结论一句话：有挡路的就说第一条（"先做这个"），否则说下一步。
@@ -547,9 +553,15 @@ function renderGuide() {
   if (r.state === 'unknown' && r.whatToDo) {
     html += '<p class="gd-why">' + esc(r.whatToDo) + '</p>';
   }
-  // 下一步：一条能直接敲的东西（有才画）
+  // 下一步：**能敲的才画成命令**（2026-10-18 修）。
+  // 未标记但有源码的目录，`nextStep` 是一句话（「新增一个清单文件…」），
+  // 拿 `<code>` 画会把建议装成命令——那是**样式在替内容撒谎**。
   if (g.nextStep) {
-    html += '<div class="gd-next"><b>下一步</b><code>' + esc(g.nextStep) + '</code></div>';
+    const isCmd = !/[\u4e00-\u9fa5]/.test(g.nextStep);
+    html += '<div class="gd-next"><b>下一步</b>'
+      + (isCmd ? '<code>' + esc(g.nextStep) + '</code>'
+        : '<span class="gd-advice">' + esc(g.nextStep) + '</span>')
+      + '</div>';
   }
   // 挡路的逐条：第一条就是"先做这个"
   const bs = g.blockers || [];

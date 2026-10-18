@@ -86,6 +86,29 @@ function stubTauri() {
             // 因为"依赖没装"在体检里是 info，而这两张卡原来自己读 `d.counts`。
             //
             // 桩里把这两件事拆开摆：**counts 全 0、findings 空、guide 说 no**。
+            // 「不适用」桩（2026-10-18）：state=unknown + why=not_applicable，nextStep 是句子。
+            if (window.__guideNA) {
+              return {
+                summary: [{ k: '项目类型', v: 'Python' }],
+                counts: { error: 0, warn: 0 },
+                findings: [],
+                guide: {
+                  ready: {
+                    state: 'unknown',
+                    why: 'not_applicable',
+                    whatToDo: '这里有 3 个 .py，但没有任何项目标记文件——补一个清单我就能判断依赖和运行方式',
+                  },
+                  what: 'Python',
+                  headline: '这里不像一个项目（没有任何项目标记文件）',
+                  nextStep: '想让我能判断它：新增一个清单文件（记下 3 个 .py）；不需要就忽略这句',
+                },
+                hygiene: { items: [] },
+                deps: {}, depsDetail: [], depsTree: { total: 0, edges: [] },
+                depsTreeWeb: { total: 0, edges: [] },
+                web: null, jvm: null, jvmBuild: null,
+                notes: [], runs: [], venvs: [], declared: [],
+              };
+            }
             if (window.__guideNo) {
               return {
                 summary: [{ k: '项目类型', v: 'Python' }],
@@ -936,6 +959,23 @@ try {
     check('验一下：没有结论时一个字都不加', vh.empty === '', vh.empty);
   }
 
+  // 「不适用」≠「还查不出来」（2026-10-18 修）：引擎早就有 not_applicable，界面把所有 unknown
+  // 写成同一句 = 三态压扁；且那一支 nextStep 是句子，不许画成 `<code>`。
+  // ⚠️ 必须放最后 + 用 addInitScript：reload 会清掉页面状态与 evaluate 设的 window 标记
+  //（第一版两条都写错：放中间后面 20 条全红；用 evaluate 则拿到空文本）。
+  await page.addInitScript(() => { window.__guideNA = true; });
+  await page.reload();
+  await page.waitForTimeout(1500);
+  const banner = await page.$('#projList .banner');
+  if (banner) await banner.click();   // 重载后没有项目开着，指南卡当然是空的
+  await page.waitForTimeout(1500);
+  const na = await page.evaluate(() => {
+    const el = document.getElementById('guideCard') || {};
+    const q = (s) => (el.querySelector ? el.querySelector(s) : null);
+    return { text: el.textContent || '', hasAdvice: !!q('.gd-advice'), hasCode: !!q('.gd-next code') };
+  });
+  check('不适用：说「不适用」，不说「还查不出来」', na.text.includes('不适用') && !na.text.includes('还查不出来'), na.text.slice(0, 100));
+  check('不适用：建议按说明画（.gd-advice），不装成命令', na.hasAdvice && !na.hasCode, JSON.stringify(na).slice(0, 120));
 } catch (e) {
   check('测试脚本自身异常', false, String(e).slice(0, 160) + ' || 页面异常: ' + pageErrors.slice(0, 2).join(' | '));
 } finally {

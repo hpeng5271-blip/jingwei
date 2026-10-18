@@ -362,6 +362,14 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **`guide` 的字段都得有人读**（见 checkGuideWiring 的头）。
+{
+  const r = checkGuideWiring(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) {
+    console.log(`  · 字段接线：guide 的 ${r.checked} 个字段都有消费方`);
+  }
+}
 // **"就绪"判据的两份实现要互相点名**（见 checkReadyParity 的头）。
 {
   const r = checkReadyParity(ROOT);
@@ -739,6 +747,56 @@ export function checkReadyParity(root) {
     }
   }
   return { problems, checked };
+}
+
+// **`guide` 的每个输出字段都得有人读**（2026-10-18，靠它抓到 `niceToHave` 没人读）。
+//
+// 这个仓库最贵的失效模式是"写了但没接上"：引擎把字段产出来，某个壳却一个字不说。
+// 拿真数据数过一遍：`guide --json` 的 7 个键里，`niceToHave` 在 ui/ 与 cli/ 里 **0 处出现**，
+// 而 CLI 其实一直在打它——**同一份数据，两个壳只讲一个**。
+//
+// ## 范围（**故意只查这一个 payload**）
+//
+// 只查 `Guide::to_json()` 的字段，以及它 `ready` 里那几个。**不假装全仓覆盖**：
+// 别的 payload（scan/hygiene/graph）没有同样稳定的"出一份 json"入口。
+//
+// ## 判据
+//
+// 每个键必须在 **ui/*.js 或 crates/cli/src** 里出现过至少一次；否则红。
+// 确实"产出来但这一轮还没人用"的，写进 `allowed` 并说明理由——**留白要留成有意的**。
+export function checkGuideWiring(root) {
+  const problems = [];
+  let checked = 0;
+  const guideRs = join(root, "crates", "engine", "src", "understand", "guide.rs");
+  if (!existsSync(guideRs)) return { problems: ["guide.rs 不见了"], checked };
+  const src = readFileSync(guideRs, "utf8");
+
+  // 只取 `pub fn to_json` 这一段的字面键
+  const at = src.indexOf("pub fn to_json");
+  if (at < 0) return { problems: ["找不到 to_json——判据要跟着实现改"], checked };
+  const body = src.slice(at, src.indexOf("pub fn make_guide", at) > 0 ? src.indexOf("pub fn make_guide", at) : at + 4000);
+  const keys = [...new Set([...body.matchAll(/"([A-Za-z][A-Za-z0-9_]*)":/g)].map((m) => m[1]))];
+
+  // **有意留白**：键 → 理由。加进来之前先问"是真没人该用，还是我还没接"。
+  const allowed = new Map();
+
+  const consumers = [];
+  for (const f of readdirSync(join(root, "ui"))) {
+    if (f.endsWith(".js")) consumers.push(readFileSync(join(root, "ui", f), "utf8"));
+  }
+  for (const f of readdirSync(join(root, "crates", "cli", "src"))) {
+    if (f.endsWith(".rs")) consumers.push(readFileSync(join(root, "crates", "cli", "src", f), "utf8"));
+  }
+  const all = consumers.join("\n");
+
+  for (const k of keys) {
+    if (allowed.has(k)) continue;
+    checked++;
+    if (!all.includes(k)) {
+      problems.push(`guide 产出了 \`${k}\`，但 ui/ 与 cli/ 里一处都没读它——要么接上，要么写进 allowed 说明理由`);
+    }
+  }
+  return { problems, checked, keys };
 }
 
 export function checkWorkMethodDoc(root) {

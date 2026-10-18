@@ -1014,15 +1014,10 @@ function verifyHtml(v) {
   if (v.why) html += '<div class="boundary">' + esc(v.why) + '</div>';
   if (v.first_error) html += '<div class="crux">第一条错误 · ' + esc(v.first_error) + '</div>';
   // 缺件时只说缺什么、怎么自己验——**不给一键装的按钮**（不生成修复命令）
-  if (v.missing_tool) {
-    const m = v.missing_tool;
-    html += '<div class="missing">'
-      + '<div class="miss-head">这台机器缺 <b>' + esc(m.what) + '</b></div>'
-      + '<div class="miss-line"><span>为什么</span>' + esc(m.why) + '</div>'
-      + '<div class="miss-line"><span>怎么装</span>' + esc(m.shape) + '</div>'
-      + '<div class="miss-line"><span>怎么自己验</span><code>' + esc(m.verify) + '</code></div>'
-      + '</div>';
-  }
+  // **同一段标记别再写第二遍**（2026-10-18 收）：这里原来又抄了一份，
+  // 而且**漏了空值保护**——`shape` 缺失时会渲染出字面 `undefined`。
+  // `missingHtml()` 是唯一一处实现，两边都走它。
+  if (v.missing_tool) html += missingHtml(v.missing_tool);
   return html + '</div>';
 }
 

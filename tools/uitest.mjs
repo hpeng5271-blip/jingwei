@@ -960,11 +960,12 @@ try {
     check('验一下：没验成时是 ask（不是 bad）', vh.ask.includes('verdict ask') && !vh.ask.includes('verdict bad'), vh.ask.slice(0, 80));
     check('验一下：没有结论时一个字都不加', vh.empty === '', vh.empty);
   }
+    // **缺件那块的四行必须齐**（2026-10-18）：这是 `missingHtml()` 的契约，`verifyHtml` 原来又抄了一份。
+    const miss = await page.evaluate(() => verifyHtml({ verdict: 'failed', headline: '构建没过', missing_tool: { what: 'JDK', why: '没有 javac', shape: '装 JDK', verify: 'java -version' } }));
+    check('验一下：缺件要说清"缺什么/为什么/怎么装/怎么自己验"四行', ['这台机器缺', '为什么', '怎么装', '怎么自己验'].every((k) => miss.includes(k)), miss.slice(0, 100));
 
-  // 「不适用」≠「还查不出来」（2026-10-18 修）：引擎早就有 not_applicable，界面把所有 unknown
-  // 写成同一句 = 三态压扁；且那一支 nextStep 是句子，不许画成 `<code>`。
-  // ⚠️ 必须放最后 + 用 addInitScript：reload 会清掉页面状态与 evaluate 设的 window 标记
-  //（第一版两条都写错：放中间后面 20 条全红；用 evaluate 则拿到空文本）。
+  // 「不适用」≠「还查不出来」：引擎早有 not_applicable，界面压成一句就是三态压扁；且那支 nextStep 是句子，
+  // 不许画成 `<code>`。⚠️ 必须放最后 + 用 addInitScript（reload 会清掉页面状态与 evaluate 设的标记）。
   await page.addInitScript(() => { window.__guideNA = true; });
   await page.reload();
   await page.waitForTimeout(1500);

@@ -16,6 +16,7 @@ mod cmd_guide;
 mod cmd_machine;
 mod cmd_project;
 mod cmd_run;
+mod cmd_verify;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};
@@ -317,6 +318,7 @@ fn run() -> i32 {
         "note" => cmd_note(&root, rest, kind, purpose),
         "notes" | "log" => cmd_notes(&root, json),
         "test" => cmd_task(&root, "test", None),
+        "verify" | "build" => cmd_verify::cmd_verify(&root, json),
         "snap" | "snapshot" => cmd_snap(&root, json, diff_only),
         "run" | "start" => cmd_run(&root, run_override, rest),
         "scan" | "clean-list" => cmd_scan(&root, json),
@@ -400,6 +402,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     ),
     ("run", &["start"], "按契约启动项目：6 阶段进度 + 实时输出 + 就绪判定"),
     ("test", &[], "跑契约里声明的 test 命令"),
+    (
+        "verify",
+        &["build"],
+        "**跑一次真实构建**，回答这台机器够不够用：通过 / 没过 / 没有构建这一步 / 我们没验成",
+    ),
     (
         "note",
         &[],

@@ -15,7 +15,7 @@
 //! 混在一个函数里的话，Node 项目打开就报"没有可用的 Python"——
 //! 那不是简洁，是答非所问。
 
-use super::{split_command, Event, LaunchOptions, Prepared, StageStatus, TOTAL_STAGES};
+use super::{split_command, Event, LaunchOptions, Prepared, Purpose, StageStatus, TOTAL_STAGES};
 use crate::detect::probe;
 use crate::understand::contract::Contract;
 use anyhow::{anyhow, Result};
@@ -140,6 +140,12 @@ pub(crate) fn prepare(
         detail: format!("{}（绝对路径，不需要 activate）", exe.display()),
         ms: t.elapsed().as_millis(),
     });
+
+    // **Python 没有"构建"这一步**（2026-10-18）：冒烟问的是"能不能编出来"，
+    // 而 Python 是解释型——硬跑一遍程序只会得到"程序能起"，那不回答构建问题。
+    if opts.purpose == Purpose::Build {
+        return Err(anyhow!("Python 没有单独的构建这一步（解释型，没有构建产物）"));
+    }
 
     // ---- 5 启动进程 ----
     let run_cmd = opts

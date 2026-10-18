@@ -80,6 +80,13 @@ fn looks_like_error(line: &str) -> bool {
 ///
 /// 用 `Purpose::Build`：我们要的是"能不能编出来"，不是"能不能起服务"。
 pub fn smoke(root: &Path, timeout: Duration) -> SmokeVerdict {
+    // **先问一句"这是不是一个项目"**：对一个空目录跑构建，结论不是"我们没验成"，
+    // 而是"问错了对象"（`NotApplicable`）。两者退出码不同，不能混。
+    if !crate::understand::projects::looks_like_project(root) {
+        return SmokeVerdict::NotApplicable {
+            why: "这里不像一个项目（没有清单文件、没有 .git、也没有 env.contract.json）".into(),
+        };
+    }
     let opts = LaunchOptions {
         root: root.to_path_buf(),
         run_override: None,
@@ -135,7 +142,10 @@ pub fn smoke(root: &Path, timeout: Duration) -> SmokeVerdict {
         Err(e) => {
             let msg = e.to_string();
             // 常见的"这个项目没有构建这一步"：契约没声明、也推不出来。
-            if msg.contains("契约里没有声明") || msg.contains("没有可跑的脚本") {
+            if msg.contains("契约里没有声明")
+                || msg.contains("没有可跑的脚本")
+                || msg.contains("没有单独的构建这一步")
+            {
                 SmokeVerdict::NotApplicable { why: msg }
             } else {
                 SmokeVerdict::Unclear { why: msg }
@@ -150,7 +160,9 @@ impl SmokeVerdict {
         match self {
             Self::Passed(d) => format!("构建跑通了（退出码 0，{}ms）", d.ms),
             Self::Failed(d) => format!("构建没过（退出码 {}）", d.exit_code),
-            Self::NotApplicable { .. } => "这个项目没有构建这一步".to_string(),
+            // **不说成"这个项目没有构建这一步"**：空目录根本不是项目，
+            // 一句"没有构建"会让人以为"是个项目、只是不用构建"。理由由 `why` 说。
+            Self::NotApplicable { .. } => "这一步不适用".to_string(),
             Self::Unclear { .. } => "我们没能验成".to_string(),
         }
     }

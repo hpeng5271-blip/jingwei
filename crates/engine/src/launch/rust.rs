@@ -186,9 +186,15 @@ pub(crate) fn prepare(
 
     // ---- 4 准备工具链 ----
     let t = std::time::Instant::now();
-    let (run_cmd, guessed_this) = match opts.run_override.clone().or(from_contract.clone()) {
-        Some(c) => (c, false),
-        None => (guessed(opts.purpose).to_string(), true),
+    // **只有"跑"这件事才认契约里的 run 命令**（2026-10-18 真跑抓到的 bug）：
+    // 冒烟问的是"能不能构建"，而契约里写的是 run——照它跑就成了"跑了一次程序"，
+    // 退出码 0 也只证明程序能起，不证明编得出来。
+    let (run_cmd, guessed_this) = match opts.purpose {
+        Purpose::Run => match opts.run_override.clone().or(from_contract.clone()) {
+            Some(c) => (c, false),
+            None => (guessed(Purpose::Run).to_string(), true),
+        },
+        other => (guessed(other).to_string(), true),
     };
     let parts = super::split_quoted(&run_cmd);
     if parts.is_empty() {

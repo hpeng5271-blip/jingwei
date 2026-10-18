@@ -130,6 +130,34 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
         ] {
             println!("    {label:<10} {}", counts[k].as_i64().unwrap_or(0));
         }
+        // **守恒判据要当着人面报出来**（2026-10-18）：
+        // 七个格子的和必须等于"参与判断的文件数"，不等就是有文件掉出了所有格子。
+        // 这条判据在引擎单测里早就有，但**只有跑到人眼前才算数**——
+        // 用户看不出"6 + 8 + 1 = 15 但文件有 16 个"这种错，机器能。
+        let sum: i64 = [
+            "entry",
+            "entry_candidate",
+            "surface",
+            "foundation",
+            "middle",
+            "isolated",
+            "test",
+        ]
+        .iter()
+        .map(|k| counts[k].as_i64().unwrap_or(0))
+        .sum();
+        let files = counts["rows"].as_array().map(|a| a.len()).unwrap_or(0) as i64;
+        if sum == files {
+            println!("    {:<10} {} 个文件（七格之和 = {sum} ✓）", "合计", files);
+        } else {
+            // **不许静默**：不等就是要报警的，说清差多少。
+            println!(
+                "    {} {} 个文件，但七格之和是 {sum}（差 {}）——有文件掉出了所有格子",
+                c(YELLOW, "!"),
+                files,
+                files - sum
+            );
+        }
         println!();
         println!("  {} 目录级（前 3 名）", c(GREEN, "·"));
         for layer in ["entry", "foundation"] {

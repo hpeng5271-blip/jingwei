@@ -182,11 +182,13 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
 
     // ── 4. 契约里声明的命令能不能用 ──
     // **Node 项目没契约也说得出来**：命令在 package.json 的 scripts 里（与 launch 同一判据）。
+    // **命令能从项目本身推出来就别要契约**：Node 看 scripts，Rust 看 bin 目标（库身份优先）。
     let run_command = contract.and_then(|c| c.commands.run.clone()).or_else(|| {
-        if facts.lang == Lang::Web {
-            crate::detect::web::run_script(std::path::Path::new(&facts.project.root))
-        } else {
-            None
+        let root = std::path::Path::new(&facts.project.root);
+        match facts.lang {
+            Lang::Web => crate::detect::web::run_script(root),
+            Lang::Rust if !is_library(facts) => crate::understand::rustbins::run_hint(root),
+            _ => None,
         }
     });
     if contract.is_some() && run_command.is_none() {
@@ -552,7 +554,7 @@ fn decide_ready(
     // 连契约都没有的项目，我们**根本没查过它怎么跑**，那是 Unknown。
     // **Node 是例外**（真 Vite 换的）：命令在 package.json 的 scripts 里，
     // `run_command` 已经从那儿取到了——**这时还说"查不出来"就是在骗人。**
-    if contract.is_none() && facts.lang == Lang::Web {
+    if contract.is_none() && matches!(facts.lang, Lang::Web | Lang::Rust) {
         if let Some(cmd) = run_command {
             return Verdict::Yes(cmd.to_string());
         }

@@ -50,6 +50,22 @@ pub(crate) fn rust_bin_targets(root: &Path) -> usize {
     main + declared.max(in_dir)
 }
 
+/// **这个 crate 的"跑起来"就是 `cargo run` 吗**（2026-10-18 加）。
+///
+/// 来源：拿本仓库自己的 `crates/cli`（有 `src/main.rs`）跑 `guide`——它说
+/// 「还查不出来；补一份 env.contract.json」。**可 `cargo run` 是 cargo 自己就知道的命令**，
+/// 让用户为它写一份契约纯属噪音（Node 那边同样的洞刚修过）。
+///
+/// **只有一个 bin 才给**：多个 bin 时 `cargo run` 会报
+/// 「could not determine which binary to run」，那就是**答非所问**了。
+pub(crate) fn run_hint(root: &Path) -> Option<String> {
+    if rust_bin_targets(root) == 1 {
+        Some("cargo run".to_string())
+    } else {
+        None
+    }
+}
+
 /// `Cargo.toml` 里有没有以某个键开头的行（`default-run` / `edition` 这类）。
 pub(crate) fn cargo_toml_has(root: &Path, key: &str) -> bool {
     std::fs::read_to_string(root.join("Cargo.toml"))
@@ -78,4 +94,29 @@ pub(crate) fn edition_missing(root: &Path) -> bool {
     std::fs::read_to_string(root.join("Cargo.toml"))
         .map(|t| !t.lines().any(|l| l.trim_start().starts_with("edition")))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    // 临时目录清理失败不影响断言（与别的测试模块同一句）。
+    #![allow(clippy::let_underscore_must_use)]
+    use super::*;
+
+    /// **只有一个 bin 才敢说 `cargo run`**（2026-10-18，本仓库 `crates/cli` 换的）。
+    ///
+    /// 多个 bin 时 `cargo run` 会报「could not determine which binary to run」——
+    /// 那就成了答非所问，所以宁可说"不知道"，不给一条会错的命令。
+    #[test]
+    fn 单个bin才给cargo_run() {
+        let d = std::env::temp_dir().join(format!("dd-rustbins-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("Cargo.toml"), "[package]\nname = \"a\"\nversion = \"0.1.0\"\n").unwrap();
+        // 没有 bin 目标 → 不给命令
+        assert_eq!(run_hint(&d), None);
+        // 一个 main.rs → `cargo run`
+        std::fs::write(d.join("src/main.rs"), "fn main() {}").unwrap();
+        assert_eq!(run_hint(&d).as_deref(), Some("cargo run"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

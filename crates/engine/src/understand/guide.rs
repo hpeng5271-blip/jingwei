@@ -412,6 +412,10 @@ fn decide_unknown_why(
 /// 一个 Rust 库 crate 的场合（比如测试里的 `root: "."`）——
 /// **连"Python 项目"都会被判成库**。夹具照真东西写，就会把这种事打出来。
 fn is_library(facts: &Facts) -> bool {
+    // **Web 也认了**（2026-10-18，真 npm 包 `pnpm` 换的）：判据在 `detect::web::is_library`。
+    if facts.lang == Lang::Web {
+        return crate::detect::web::is_library(std::path::Path::new(&facts.project.root));
+    }
     if facts.lang != Lang::Rust {
         return false;
     }

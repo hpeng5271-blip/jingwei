@@ -273,6 +273,26 @@ fn push_pin(out: &mut Vec<Pin>, from: &str, text: &str) {
 ///
 /// 脚本名与顺序**必须和 `launch/node.rs` 的 `LIVE_SCRIPTS` 一致**：
 /// dev → start → serve → preview。两处不一致，就会出现"首页说 A、按钮跑 B"。
+/// **这个 Node 项目是"库/工具"，还是"能起来的东西"**（2026-10-18 加）。
+///
+/// 来源：拿真 npm 包 `pnpm` 跑 `guide`——它的 `scripts` 只有
+/// `preinstall` / `postinstall` / `bundle-node-gyp`（**没有 dev/start/serve/preview**），
+/// 而 `guide` 让用户「补一份 env.contract.json」。**补了也起不来**：它是给别人用的包。
+///
+/// 判据（两条都要）：① 没有能起的脚本；② `package.json` 里有 `bin` / `main` / `exports`
+/// ——那是"被别人引用"的面。**只有 `build` 脚本的应用不满足②**，仍按"你缺契约"处理，
+/// 免得把"只有构建没有服务"的真实应用误判成库。
+pub fn is_library(root: &Path) -> bool {
+    if run_script(root).is_some() {
+        return false;
+    }
+    let pj = std::fs::read_to_string(root.join("package.json")).unwrap_or_default();
+    let pj = crate::util::bom::strip_bom(&pj);
+    ["\"bin\"", "\"main\"", "\"exports\""]
+        .iter()
+        .any(|k| pj.contains(k))
+}
+
 pub fn run_script(root: &Path) -> Option<String> {
     let w = probe_web(root)?;
     let pm = w.package_manager.clone().unwrap_or_else(|| "npm".to_string());
@@ -623,6 +643,33 @@ mod tests {
             "BOM 不许让 scripts 变空：{:?}",
             f.scripts
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **Node 的"库"判据**（2026-10-18，真 npm 包 `pnpm` 换的）。
+    ///
+    /// `pnpm` 的 scripts 只有 preinstall/postinstall/bundle-node-gyp，而 guide 让用户
+    /// 补一份 env.contract.json——**补了也起不来，它是给别人用的包**。
+    #[test]
+    fn node的库与能起的东西分得开() {
+        let d = std::env::temp_dir().join(format!("dd-web-lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let w = |s: &str| std::fs::write(d.join("package.json"), s).unwrap();
+
+        // ① 有 bin、没有能起的脚本 → 库
+        w(r#"{"name":"x","bin":{"x":"./cli.js"},"scripts":{"postinstall":"node i.js"}}"#);
+        assert!(is_library(&d));
+
+        // ② 有能起的脚本 → 不是库（哪怕它也有 bin）
+        w(r#"{"name":"y","bin":{"y":"./cli.js"},"scripts":{"dev":"vite"}}"#);
+        assert!(!is_library(&d));
+
+        // ③ 只有 build 脚本、没有 bin/main/exports → **不判成库**
+        //    （免得把"只有构建没有服务"的真实应用说成"不用做什么"）
+        w(r#"{"name":"z","scripts":{"build":"vite build"}}"#);
+        assert!(!is_library(&d));
+
         let _ = std::fs::remove_dir_all(&d);
     }
 }

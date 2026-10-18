@@ -435,6 +435,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     detailAct(a);
   });
 
+  // **全盘扫描**：默认位置一次扫完（先出结果、后台继续）
+  const ball = $('#btnScanAll');
+  if (ball) ball.addEventListener('click', () => guard(scanAll));
+
+  // 分组头折叠（扫完的列表是分组的）
+  const plist = $('#projList');
+  if (plist) plist.addEventListener('click', (e) => {
+    const head = e.target.closest('.grp-head');
+    if (!head) return;
+    head.classList.toggle('closed');
+    const body = plist.querySelector('.grp-body[data-grp="' + head.dataset.grp + '"]');
+    if (body) body.classList.toggle('closed');
+  });
+
   // 常见位置：一把扫几个放项目的地方
   const bcommon = $('#btnScanCommon');
   if (bcommon) bcommon.addEventListener('click', () => guard(scanCommon));

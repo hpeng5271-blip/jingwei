@@ -179,6 +179,26 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             return out;
           }};
 
+          // **全盘扫描的自证**（2026-10-19）：点一次按钮、等它到终态，
+          // 再看"有没有分组、有没有卡片、终态那句话说了什么"。
+          // 终态由 Rust 的 done 决定，所以这里只等 `.done` 这个类（前端不猜）。
+          const scanAllProbe = async () => {{
+            const btn = document.querySelector('#btnScanAll');
+            if (!btn) return {{ ok: false, why: '没有「全盘扫描」按钮' }};
+            btn.click();
+            const t0 = Date.now();
+            let prog = null;
+            while (Date.now() - t0 < 20000) {{
+              prog = document.querySelector('#scanProg');
+              if (prog && !prog.hidden && prog.classList.contains('done')) break;
+              await rest(200);
+            }}
+            const heads = document.querySelectorAll('.grp-head').length;
+            const cards = document.querySelectorAll('#projList .banner').length;
+            const text = ((prog && prog.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+            return {{ ok: heads > 0 && cards > 0, heads, cards, text }};
+          }};
+
           const snapshot = (tab) => ({{
             tab,
             viewport: [window.innerWidth, window.innerHeight],
@@ -190,6 +210,7 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             // 这两件事只有"点一下"才看得出来，所以自检里**真点一次**再把结果报上去。
             // 点完立刻把展开卡摘掉，不污染后面的断言。
             hover: window.__hoverProbe || null,
+            scanAll: window.__scanAllProbe || null,
             scan: (function () {{
               const rect = (el) => {{
                 if (!el) return null;
@@ -300,6 +321,8 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             // 现在等 22 秒：要么数据回来了、要么看门狗已经改成"读不到"（那也是终端状态）。
             if (realTab) await waitReady(realTab, 22000);
             window.__hoverProbe = await hoverProbe();
+          window.__scanAllProbe = await scanAllProbe();
+            window.__scanAllProbe = await scanAllProbe();
             window.__TAURI__.core.invoke('save_report',
               {{ path: {path:?}, json: JSON.stringify([snapshot(realTab)]) }});
             return;

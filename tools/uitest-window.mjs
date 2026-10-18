@@ -666,6 +666,14 @@ async function main() {
         JSON.stringify({ on: hov.on, rect: hov.rect, text: (hov.text || '').slice(0, 40) }),
       );
 
+      // **全盘扫描**（2026-10-19 用户最痛的点）：自检真点一次按钮、等到终态，
+      // 再把「分组数 / 卡片数 / 终态那句话」报上来。
+      const sa = rep.scanAll || {};
+      ok('全盘扫描：点一下就出结果，并且有终态', sa.ok === true,
+        JSON.stringify({ heads: sa.heads, cards: sa.cards, text: (sa.text || '').slice(0, 60), why: sa.why }));
+      ok('全盘扫描：按类型+体量分组了（不是一坨）', (sa.heads || 0) >= 2, 'heads=' + (sa.heads || 0));
+      ok('全盘扫描：终态句子里说了扫完' , /扫完/.test(sa.text || ''), (sa.text || '').slice(0, 60));
+
       const audit = pick(rep, '#audit');
       const prob = pick(rep, '#probList');
       // **`#audit` 的尺寸这一轮暂时不断言**（2026-10-17）。

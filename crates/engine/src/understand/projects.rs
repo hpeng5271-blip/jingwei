@@ -129,6 +129,64 @@ pub fn discover(parent: &Path, depth: usize) -> Vec<Found> {
     out
 }
 
+/// **体量**：文件数 + 字节数，**有上限**（4000 个文件或 120ms 就停）。
+///
+/// 为什么要有上限：首页按体量分档只需要"小/中/大/超大"这个量级，
+/// 为一个档位把 node_modules 全读一遍是**拿用户的风扇换一个数字**。
+/// 返回 `(文件数, 字节数, 是否被上限截断)`——截断了就说截断了，不假装是真值。
+pub fn measure(dir: &Path) -> (u64, u64, bool) {
+    let t0 = std::time::Instant::now();
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if files >= 4000 || t0.elapsed().as_millis() > 120 {
+            return (files, bytes, true);
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') || crate::util::scan::is_not_source_dir(&name) {
+                    continue;
+                }
+                stack.push(e.path());
+            } else if ft.is_file() {
+                files += 1;
+                bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+                if files >= 4000 {
+                    return (files, bytes, true);
+                }
+            }
+        }
+    }
+    (files, bytes, false)
+}
+
+/// 给外壳用：判一个目录是不是项目、是什么类型（**与 discover 同一套**）。
+pub fn describe_public(dir: &Path) -> Found {
+    describe(dir, now_secs())
+}
+
+/// **默认扫描根**：常见放代码/研究/克隆的地方（2026-10-19）。
+///
+/// 为什么要有它：界面的默认父目录原来是"存在哪个用哪个"，于是
+/// **用户真实项目常常一个都没扫到**，却看不出是"没扫"还是"没有"。
+pub fn default_scan_roots() -> Vec<std::path::PathBuf> {
+    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for c in [r"D:\projects", r"D:\research", r"D:\code", r"D:\src"] {
+        out.push(std::path::PathBuf::from(c));
+    }
+    if !home.is_empty() {
+        out.push(std::path::Path::new(&home).join("source").join("repos"));
+        out.push(std::path::Path::new(&home).join("Desktop"));
+    }
+    out.retain(|p| p.is_dir());
+    out
+}
+
 fn describe(dir: &Path, now: u64) -> Found {
     let markers = markers_in(dir);
     let mut touched = mtime_secs(dir);

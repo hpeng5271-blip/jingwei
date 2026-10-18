@@ -830,7 +830,10 @@ function openInline(p) {
   const list = $('#projList');
   if (!list) return;
   list.querySelectorAll('.b-expand').forEach((el) => el.remove());
-  const card = Array.from(list.children).find((el) => el.dataset && el.dataset.path === p.path);
+  // **不能只看直接子元素**（2026-10-19）：分组之后卡片在 `.grp-body` 里面，
+  // 用 children 找会把"点了却没展开"做成静默失败。
+  const card = Array.from(list.querySelectorAll('.banner'))
+    .find((el) => el.dataset && el.dataset.path === p.path);
   if (!card) return;
   const box = document.createElement('div');
   box.className = 'b-expand';

@@ -21,6 +21,7 @@ use payload::{hygiene_value, inspect_payload};
 // 开发工具：`--report <路径>` 把界面状态写进文件（见模块头）。
 // 单独一个文件，是因为 main.rs 本来就贴着 1000 行上限，
 // 而这一段与"窗口、对话框、编辑器、笔记"不是一类东西。
+mod scan;
 mod selfcheck;
 mod verify;
 use selfcheck::start_report;
@@ -942,6 +943,10 @@ fn main() {
             graph::graph_dump,
             graph::graph_runs,
             initial_project,
+            scan::scan_start,
+            scan::scan_status,
+            scan::scan_cancel,
+            scan::scan_roots,
             initial_tab,
             selfcheck::save_report,
             sample_now,

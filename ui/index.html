@@ -114,6 +114,7 @@
       <b>扫描项目</b>
       <span class="hint" id="spHint">选一个父目录，看它下面有哪些项目</span>
       <span class="grow"></span>
+      <button class="btn sm" id="btnScanAll" data-tip="扫默认位置（D:\\projects、D:\\research、源码目录），先出结果再后台扫完">全盘扫描</button>
       <button class="btn ghost sm" id="btnScanCommon" data-tip="常见位置一把扫：D:\projects、D:\research、源码目录">常见位置</button>
     </div>
         <div class="scanbar">
@@ -126,6 +127,8 @@
           <button class="btn" id="btnScan">扫描</button>
           <button class="btn ghost" id="btnScanDir">选择目录…</button>
         </div>
+        <!-- **进度行**：扫的时候一直在这儿；扫完变成一句终态（说了算的是 Rust 侧的 done） -->
+        <div class="scanProg" id="scanProg" hidden></div>
         <div id="projList" class="projList"></div>
         <div id="projPager" class="pager" hidden></div>
         <div id="projDetail" class="projDetail" hidden></div>
@@ -546,6 +549,7 @@
      原来的 app.js 已经到 4400 行，门禁上限 4500，再加功能就撞线了。 -->
 <script src="core.js?v=22"></script>
 <script src="shell.js?v=22"></script>
+<script src="scan.js?v=1"></script>
 <script src="projects.js?v=22"></script>
 <script src="notes.js?v=22"></script>
 <script src="events.js?v=22"></script>

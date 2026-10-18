@@ -11,6 +11,7 @@ static MORE: AtomicBool = AtomicBool::new(false);
 // 拆的边界不是"大小平均切"：同一个文件里的东西该回答同一类问题。
 mod cmd_clean;
 mod cmd_doctor;
+mod cmd_discover;
 mod cmd_graph;
 mod cmd_lsp;
 mod cmd_guide;
@@ -348,6 +349,20 @@ fn run() -> i32 {
         "web" | "node" => cmd_web(&root, json),
         "init" => cmd_init(&root, json),
         "graph" => cmd_graph(&root, json, &rest),
+        // **扫盘找项目**：可扫多个根、边扫边出、有终态（与界面同一套引擎）。
+        "discover" => {
+            let depth = rest.iter().position(|a| a == "--depth")
+                .and_then(|i| rest.get(i + 1)).and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(4);
+            let mut roots: Vec<std::path::PathBuf> = Vec::new();
+            let mut i = 0;
+            while i < rest.len() {
+                if rest[i] == "--depth" { i += 2; continue; }
+                if !rest[i].starts_with(")--") { roots.push(std::path::PathBuf::from(&rest[i])); }
+                i += 1;
+            }
+            cmd_discover::cmd_discover(roots, depth, json)
+        }
         // **`jingwei index` = 把项目带到"图谱可用"的状态。**
         // 与界面「索引一次」同一个内核入口（`graph::index::index_source`）。
         //
@@ -447,6 +462,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "Node / 前端：包管理器、依赖装到哪去了、版本要求写在哪",
     ),
     ("init", &[], "给已有项目补一份 env.contract.json"),
+    (
+        "discover",
+        &[],
+        "**扫盘找项目**：可扫多个根、边扫边出、有终态（--depth N，默认 4）",
+    ),
     (
         "lsp",
         &[],

@@ -96,6 +96,7 @@ pub fn skip_reason(dir: &Path, root: &Path) -> Option<&'static str> {
     if name.starts_with('.') {
         return Some("名字以 . 开头（约定为工具/配置目录）");
     }
+    // **Windows 上名字不区分大小写**（学习调研的坑 2）：Node_Modules / TARGET 也要挡住。
     if crate::util::scan::is_not_source_dir(&name) {
         return Some("不是源码目录（node_modules / target / dist 之类）");
     }
@@ -158,6 +159,77 @@ fn facts_of(dir: &Path) -> (Vec<String>, bool, bool, bool) {
     let has_git = dir.join(".git").is_dir();
     let has_contract = dir.join("env.contract.json").is_file();
     (markers, has_git, has_contract, readable)
+}
+
+/// **可增量、可中断的建索引**（2026-10-19，用户要"先出结果、后台扫到完"）。
+///
+/// 与 `build` 的区别只有两点，但都是"扫全盘"必须的：
+///   ① 每进一个目录回调一次（界面据此**边扫边显示**，不用等整盘扫完）；
+///   ② `stop` 被置位就提前返回（用户点"停"要立刻停，不能扫完才理人）。
+///
+/// 回调里给的是**累计数**：`(已进目录数, 已跳过数, 当前目录)`。
+pub fn build_with(
+    root: &Path,
+    depth: usize,
+    stop: &std::sync::atomic::AtomicBool,
+    mut on_dir: impl FnMut(usize, usize, &Path),
+) -> DirsIndex {
+    let mut idx = DirsIndex {
+        root: root.to_path_buf(),
+        ..Default::default()
+    };
+    if !root.is_dir() {
+        return idx;
+    }
+    walk_with(root, root, 0, depth.max(1), &mut idx, stop, &mut on_dir);
+    idx
+}
+
+fn walk_with(
+    root: &Path,
+    dir: &Path,
+    level: usize,
+    max: usize,
+    idx: &mut DirsIndex,
+    stop: &std::sync::atomic::AtomicBool,
+    on_dir: &mut impl FnMut(usize, usize, &Path),
+) {
+    // **中断检查放在最前面**：用户点停之后，连"这一层剩下的目录"都不该再碰。
+    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let (row, readable) = row_for(dir);
+    idx.rows.insert(dir.to_path_buf(), row);
+    idx.visited += 1;
+    on_dir(idx.visited, idx.skipped, dir);
+    if !readable || level >= max {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let child = e.path();
+        if let Some(reason) = skip_reason(&child, root) {
+            idx.rows.insert(
+                child.clone(),
+                DirRow {
+                    mtime: mtime_secs(&child),
+                    skipped: Some(reason),
+                    ..Default::default()
+                },
+            );
+            idx.skipped += 1;
+            continue;
+        }
+        walk_with(root, &child, level + 1, max, idx, stop, on_dir);
+    }
 }
 
 /// 建索引：从 `root` 往下走 `depth` 层，**每个目录一行**，并且**不因为"像项目"就停**。

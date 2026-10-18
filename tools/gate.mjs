@@ -650,6 +650,27 @@ export function checkTrialKit(root) {
     problems.push("使用说明.md 没提怎么打试用包——使用者不会去翻 tools/");
   }
 
+  // **`dist\trial` 里那份必须是仓库里的这一份**（2026-10-18 补，真发生过）。
+  //
+  // 现状：`dist\trial\试用脚本.md` 是 **11:26** 打的（3733 字节），
+  // 而仓库里那份已经是 **4367 字节**——两版早就不一样了。
+  // 也就是说：**现在递出去的话，递的是一份旧脚本。**
+  // 这一条守的就是它：包可以还没打（不存在就放过），**打了就必须是最新的**。
+  checked++;
+  const trialDir = join(root, "dist", "trial");
+  if (existsSync(trialDir)) {
+    for (const name of ["试用脚本.md", "试用记录表.md"]) {
+      const a = join(trialDir, name);
+      if (!existsSync(a)) {
+        problems.push(`dist\\trial\\ 里缺 ${name}`);
+      } else if (readFileSync(a, "utf8") !== readFileSync(join(root, name), "utf8")) {
+        problems.push(
+          `dist\\trial\\${name} 与仓库里那份不一致（旧拷贝）——重跑 tools\\make-trial.ps1`,
+        );
+      }
+    }
+  }
+
   return { problems, checked };
 }
 

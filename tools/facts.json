@@ -6,12 +6,12 @@
     "integration": 50,
     "model": 11,
     "tests_total": 374,
-    "shell_tests": 69,
+    "shell_tests": 70,
     "gates": 8,
-    "graph_files": 105,
-    "graph_symbols": 1615,
-    "graph_nodes": 1721,
-    "graph_edges": 2887,
+    "graph_files": 106,
+    "graph_symbols": 1619,
+    "graph_nodes": 1726,
+    "graph_edges": 2895,
     "motives_landed": 19,
     "motives_pending": 6
   }

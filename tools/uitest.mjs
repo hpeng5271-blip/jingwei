@@ -638,6 +638,11 @@ try {
       && st.roles.includes('入口') && st.roles.includes('公共底层') && /\d/.test(st.roles),
     JSON.stringify({ hidden: st.rolesHidden, text: st.roles }),
   );
+    // **「入口」只能叫「候选」**（2026-10-18，拿 3 个真应用量出来的）：
+    // 判出 8 个"入口"只有 2 个是真的（25%）。标签骗人比没有标签更糟。
+    check('图谱：入口只能叫候选，不许说成事实',
+      st.roles.includes('入口候选') && !st.roles.includes('入口 '),
+      st.roles.slice(0, 60));
   // **测试文件不参与判断这件事要写在脸上**：读的人会把最热闹的当成入口。
   check(
     '图谱：说明测试不参与判断',

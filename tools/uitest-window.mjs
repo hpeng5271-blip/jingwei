@@ -258,7 +258,19 @@ function runWindow(args) {
     try { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* 同上 */ }
   };
   try {
-    const rep = waitReport(90_000);
+    let rep = waitReport(90_000);
+    // **偶发超时重试一次，并且把重试说出来**（2026-10-18 实测抓到的抖动）。
+    //
+    // 为什么允许重试：这一段等的是"窗口把报告写出来"，那是**基础设施**，
+    // 不是产品断言。实测约 1/3 的偶发超时（注释里记着），而**一个会随机红的门禁
+    // 会训练人忽略它**——那比没有门禁更坏。
+    //
+    // 为什么必须打出来：重试一次就悄悄过去，读的人会以为"每次都是 15 秒过"。
+    // **抖动的次数本身是数据。**
+    if (!rep) {
+      console.log('  · 窗口第 1 次没交报告（90 秒）——重试一次');
+      rep = waitReport(90_000);
+    }
     if (!rep) {
       const why = [];
       why.push(exited ? `**窗口自己退了**（${exited}）——启动就失败` : '窗口进程还活着（起来了但没交报告）');
@@ -266,7 +278,7 @@ function runWindow(args) {
         ? `报告文件存在（${statSync(REPORT).size} 字节）但读不出条目——多半写了一半`
         : '报告文件**根本不存在**——自检脚本没跑完（它只在扫完所有页之后写一次）');
       why.push(`参数：${args.join(' ')}`);
-      problems.push(`窗口 90 秒内没交出报告：${why.join('；')}`);
+      problems.push(`窗口两次（各 90 秒）都没交出报告：${why.join('；')}`);
     }
     return rep;
   } finally {

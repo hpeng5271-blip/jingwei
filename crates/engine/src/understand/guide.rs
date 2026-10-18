@@ -213,6 +213,15 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
         && !crate::understand::projects::looks_like_project(std::path::Path::new(
             &facts.project.root,
         ));
+    // **"无标记但有源码"要先算**（2026-10-18 用户拍板「要」）：
+    // 原规则"没有项目标记就一律沉默"来自 5 个真库（`site-packages/<pkg>` 的清单在上一层），
+    // 但它把**用户自己的脚本文件夹**也静音了——而那正是该说话的地方。
+    // 三支：不适用 + 有源码 → 给建议；包管理器树里 / 没源码 → 仍然沉默。
+    let unmarked = if not_a_project {
+        crate::understand::unmarked::unmarked_sources(std::path::Path::new(&facts.project.root))
+    } else {
+        None
+    };
     let unknown_why =
         decide_unknown_why(&ready, facts, contract, run_command.as_deref(), not_a_project);
 
@@ -235,10 +244,17 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     // 用 `what_to_do` 覆盖字段绕过去，`why` 仍是 `their_gap`、**退出码仍是 2**，
     // 于是 8 个别人写的真 crate 全被说成「补上就能判断」，脚本也全被当成"查不了"拦下。
     // **估算"改动太大"之前先数一遍**；数完常常是 3 处。
-    let what_to_do = if not_a_project {
-        "这里不像一个项目（没有任何项目标记文件）——所以「能不能跑」这类问题对它不适用"
-    } else {
-        unknown_why.what_to_do()
+    let what_to_do: String = match (&unmarked, not_a_project) {
+        // **有源码、没标记**：说清"补什么我就能判断"，而不是一句"不适用"就完事。
+        (Some(u), _) => format!(
+            "这里有 {}，但没有任何项目标记文件——补一个清单（`pyproject.toml` / `package.json` / `Cargo.toml` 任一），我就能判断依赖和运行方式",
+            u.lang_list()
+        ),
+        (None, true) => {
+            "这里不像一个项目（没有任何项目标记文件）——所以「能不能跑」这类问题对它不适用"
+                .to_string()
+        }
+        (None, false) => unknown_why.what_to_do().to_string(),
     };
 
     // **"不是一个项目"要排在所有分支之前**（2026-10-17）。
@@ -249,8 +265,14 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     //
     // 判据：`not_a_project` 一旦成立，**后面每一条"该做什么"都是错的**，
     // 因为它们全都按"这是一个项目"的口径写。所以它必须最先分流。
-    let next_step = if not_a_project {
-        // 不是一个项目：**不要让他去补任何东西**。
+    let next_step = if let Some(u) = &unmarked {
+        // **有源码、没标记**：给一个具体动作（这才是"建议"），而不是"不用做什么"。
+        format!(
+            "想让我能判断它：新增一个清单文件（`pyproject.toml` / `package.json` / `Cargo.toml` 任一，记下 {}）；不需要就忽略这句",
+            u.lang_list()
+        )
+    } else if not_a_project {
+        // 真的只是一个文件夹（或者别人的包）：**不要让他去补任何东西**。
         "不用做什么——这里不是一个项目（想管它这个目录，就把根指到真正含标记文件的那一层）"
             .to_string()
     } else if !blockers.is_empty() {
@@ -292,7 +314,7 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
         unknown_why,
         // 只在"这压根不是一个项目"时才由这一层给一句话；其余场合外壳退回类型的原话。
         what_to_do: if not_a_project {
-            Some(what_to_do.to_string())
+            Some(what_to_do.clone())
         } else {
             None
         },
@@ -896,6 +918,47 @@ mod tests {
             !said3.contains("不像一个项目"),
             "有项目标记就不许说'不是项目'（这是误报）：{said3}"
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **没有项目标记、但有源码 → 要给一句建议**（2026-10-18 用户拍板「要」）。
+    ///
+    /// 原来的规则是"没有标记就一律沉默"，它来自 5 个真库（包目录的清单在上一层）。
+    /// 但那条规则把**用户自己的脚本文件夹**也静音了——而这正是它最该说话的地方。
+    #[test]
+    fn 没标记但有源码时给建议() {
+        let d = std::env::temp_dir().join(format!("dd-guide-unmarked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["a.py", "b.py", "c.py"] {
+            std::fs::write(d.join(n), "x = 1\n").unwrap();
+        }
+        let mut f = facts_with(Lang::Python, vec![], None);
+        f.project.root = d.to_string_lossy().to_string();
+        let g = make_guide(&f, &[]);
+        let w = g.what_to_do.clone().unwrap_or_default();
+        assert!(w.contains("3 个 .py"), "要说出有什么：{w}");
+        assert!(w.contains("清单"), "要说清补什么：{w}");
+        assert!(g.next_step.contains("清单"), "下一步要是动作：{}", g.next_step);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **包管理器树里仍然沉默**——否则会对着别人的包狂报（5 个真库的教训）。
+    #[test]
+    fn 包管理器树里不给建议() {
+        let d = std::env::temp_dir().join(format!("dd-guide-pkg-{}", std::process::id()));
+        let pkg = d.join(".venv").join("Lib").join("site-packages").join("somelib");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&pkg).unwrap();
+        for n in ["__init__.py", "a.py"] {
+            std::fs::write(pkg.join(n), "x = 1\n").unwrap();
+        }
+        let mut f = facts_with(Lang::Python, vec![], None);
+        f.project.root = pkg.to_string_lossy().to_string();
+        let g = make_guide(&f, &[]);
+        let w = g.what_to_do.clone().unwrap_or_default();
+        assert!(!w.contains("清单"), "树里不许让他去补清单：{w}");
+        assert!(w.contains("不适用"), "该说的是不适用：{w}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

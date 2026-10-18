@@ -381,7 +381,10 @@ fn 目录不存在时三个出口说同一件事() {
 #[test]
 fn 不是项目时json与文字说同一件事() {
     let d = empty_dir("not-a-project");
-    std::fs::write(d.join("x.py"), "").unwrap();
+    // **夹具不能放源码**（2026-10-18 改）：现在"无标记但有源码"会给建议，
+    // 而这条测试要验的是**json 与文字口径一致**，不是"会不会给建议"。
+    // 有源码那一支由 `guide::tests::没标记但有源码时给建议` 钉住。
+    std::fs::write(d.join("notes.txt"), "").unwrap();
     let p = d.to_str().unwrap().to_string();
 
     let j = run(&["guide", "--root", &p, "--json"]);

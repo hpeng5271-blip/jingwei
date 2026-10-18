@@ -10,7 +10,7 @@
 //! - **终态**：`✓ 扫完：N 个目录 / M 个项目 / 用时 T 秒`，或者 `! 中断：…`
 //!   ——**永远有个明确的结尾**，不许让调用方猜"它还在扫吗"。
 
-use jingwei_engine::understand::{dirs_index, projects};
+use jingwei_engine::understand::{dirs_index, fingerprint, projects};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -65,12 +65,15 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
             let f = projects::describe_public(&p);
             total += 1;
             let (files, bytes, cut) = projects::measure(&p);
+            let fp = fingerprint::of(&p);
             let kind = f.kinds.first().cloned().unwrap_or_else(|| "未知".to_string());
             if json {
                 found.push(serde_json::json!({
                     "path": f.path, "name": f.name, "kinds": f.kinds,
                     "markers": f.markers, "files": files, "bytes": bytes,
                     "size": size_class(files), "size_cut": cut,
+                    "fp": fp.hash, "fp_truncated": fp.truncated,
+                    "lockfile": fp.lockfile,
                     "age_days": f.age_days,
                 }));
             } else {

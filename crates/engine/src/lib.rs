@@ -77,6 +77,8 @@ pub mod understand {
     pub mod project;
     pub mod projects;
     pub mod rules;
+    /// **冒烟**：主动跑一次构建，回答"这台机器到底够不够用"（见 `框架.md` §4.10）。
+    pub mod smoke;
     /// **cargo 的二进制目标数与 Cargo.toml 键**——见那个文件的头。
     pub mod rustbins;
 }

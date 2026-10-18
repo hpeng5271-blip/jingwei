@@ -14,6 +14,7 @@ import { checkDocs, selftest as selftestDocs } from './check-docs.mjs';
 import { checkUiDoc } from './check-ui-doc.mjs';
 import { checkDocLinks } from './check-doc-links.mjs';
 import { checkToolchains, selftest as selftestToolchains } from './check-toolchains.mjs';
+import { checkSkillsTree } from './check-skills.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const problems = [];
@@ -361,6 +362,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **二级技能树：每条技能都必须有守卫，且守卫名字必须真实存在**（见 check-skills.mjs 的头）。
+{
+  const r = checkSkillsTree(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log("  · skills 树：" + r.checked + " 条技能，四段齐全，守卫都找得到");
+}
 // **「缺哪个件」的链路要真接上**（见 checkRunMissingWiring 的注释）。
 {
   const r = checkRunMissingWiring(ROOT);

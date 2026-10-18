@@ -149,6 +149,12 @@ pub struct Outcome {
     /// 和这个项目上一次跑同一条命令相比，哪里变了。空 = 没变化或没法比。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory_delta: Vec<String>,
+    /// **跑失败了，缺哪个件**（表驱动，认不出就没有）。
+    ///
+    /// 为什么放在 `Outcome` 上：只有这一层手里有输出尾部。外壳拿不到，
+    /// 所以**不许**让外壳再自己扫一遍输出——那会出现两个消费点各说各的。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_tool: Option<toolchain_need::MissingToolOut>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -552,6 +558,17 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         None
     };
 
+    // **缺哪个件**：只在失败时看。认不出来就是 None——不猜。
+    //
+    // 与 `diagnose` 的分工：`diagnose` 回答"错在哪一行代码"（落点），
+    // 这一条回答"**这台机器缺什么**"。两个都放 `Outcome` 上，
+    // 是因为只有这一层手里有输出尾部；外壳不许再自己扫一遍。
+    let missing_tool = if code != 0 {
+        toolchain_need::first_missing_owned(tail.iter().map(|s| s.as_str()))
+    } else {
+        None
+    };
+
     let memory = mem.finish();
     if let Some(m) = &memory {
         crate::util::dlog::i(
@@ -698,6 +715,7 @@ pub fn launch(opts: &LaunchOptions, cb: &mut dyn FnMut(Event)) -> Result<Outcome
         diagnostics,
         memory,
         memory_delta,
+        missing_tool,
     })
 }
 

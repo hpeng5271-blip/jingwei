@@ -84,7 +84,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ## 状态
 
 内核（领域模型、数据层设计、规则引擎、系统探测、清理、机器清单）与外壳（六个页面）都在跑；
-测试 <!-- fact:tests_total -->367<!-- /fact --> 条通过（另有 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）、clippy 零警告、外壳测试 <!-- fact:shell_tests -->64<!-- /fact --> 条全过。
+测试 <!-- fact:tests_total -->368<!-- /fact --> 条通过（另有 <!-- fact:engine_ignored -->1<!-- /fact --> 条 ignore）、clippy 零警告、外壳测试 <!-- fact:shell_tests -->64<!-- /fact --> 条全过。
 一条龙认语言了：Python / Node / JVM 各自按自己的方式检查环境、解析依赖、挑启动命令，
 后两个阶段（拉起进程、等待就绪）三种语言共用同一套实现。
 还没做的都带触发条件记在 [设计.md](设计.md) §1.2，不写无条件的 TODO。

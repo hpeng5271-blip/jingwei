@@ -160,6 +160,33 @@ fn norm(s: &str) -> String {
     s.to_lowercase().replace(['`', '"', '\''], "")
 }
 
+/// 给 `Outcome` 用的可序列化形态（`&'static str` 不好跨层带）。
+///
+/// **字段与 `MissingTool` 一一对应，不加不减**：多一个字段就意味着有第二个地方在猜。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MissingToolOut {
+    pub what: String,
+    pub why: String,
+    pub shape: String,
+    pub verify: String,
+}
+
+impl From<&MissingTool> for MissingToolOut {
+    fn from(t: &MissingTool) -> Self {
+        Self {
+            what: t.what.to_string(),
+            why: t.why.to_string(),
+            shape: t.shape.to_string(),
+            verify: t.verify.to_string(),
+        }
+    }
+}
+
+/// 与 `first_missing` 同义，但返回可序列化的那份。
+pub fn first_missing_owned<'a, I: IntoIterator<Item = &'a str>>(lines: I) -> Option<MissingToolOut> {
+    first_missing(lines).map(MissingToolOut::from)
+}
+
 /// 从一行输出里认出「缺哪个件」。**认不出来就 `None`**（宁可不说）。
 pub fn missing_toolchain(line: &str) -> Option<&'static MissingTool> {
     let l = norm(line);

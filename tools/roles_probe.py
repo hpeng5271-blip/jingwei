@@ -71,20 +71,34 @@ def roles_of(db):
         cross += 1
         out[fa] += 1
         inn[fb] += 1
+    # **必须含"没有任何边"的文件**：`src/main.rs` 常常一条跨文件调用都没有，
+    # 但它是结构入口。只遍历 out|inn 会把它整条漏掉（第一版就这样漏了 1 个）。
+    all_files = set(out) | set(inn)
+    # **file 节点的路径存在 `id` 里**（`file:src/main.rs`），`file_path` 是 NULL——
+    # 这条与 roles.rs 的注释是同一件事，我又踩了一次。
+    cur.execute("select id, file_path from nodes where kind='file'")
+    for nid, fp in cur.fetchall():
+        path = fp or (nid[5:] if nid.startswith("file:") else None)
+        if path:
+            all_files.add(path)
     rows = []
-    for f in set(out) | set(inn):
+    for f in all_files:
         if is_test(f):
             continue
         o, i = out.get(f, 0), inn.get(f, 0)
         if is_library_surface(f):
             r = 'surface'
-        elif o >= 3 and o >= 2 * i:
+        elif is_bin_target(f):
             r = 'entry'
+        elif o >= 3 and o >= 2 * i:
+            r = 'entry_candidate'
         elif i >= 3 and i >= 2 * o:
             r = 'foundation'
         else:
             r = 'middle'
-        if o + i == 0:
+        # **只覆盖"按度数算出来的中间层"**：结构入口/公共面是事实，不许被覆盖。
+        # （第一版这里无条件覆盖，于是 embed-resource 的 `src/main.rs` 从入口变成"还没连上"。）
+        if o + i == 0 and r == 'middle':
             r = 'isolated'
         rows.append((r, o, i, os.path.basename(f)))
     return collections.Counter(r[0] for r in rows), rows, cross, same
@@ -101,6 +115,16 @@ def suspicious_foundation(names):
         if n in ('main.rs', 'lib.rs', 'mod.rs'):
             bad.append(n)
     return bad
+
+
+def is_bin_target(path):
+    """**Cargo 的 bin 目标**：`main.rs`（任何深度）或 `src/bin/` 下的文件。
+
+    这是**事实**，所以由它判出来的才叫「入口」；按度数判出来的叫「候选」。
+    （同 roles.rs；两处不一致以 roles.rs 为准，它有单测。）
+    """
+    p = path.replace("\\", "/")
+    return p == "main.rs" or p.endswith("/main.rs") or "/src/bin/" in p or p.startswith("src/bin/")
 
 
 def default_samples():
@@ -131,7 +155,7 @@ def main():
         print(f'找不到 {EXE}：先 cargo build --release -p jingwei')
         return 1
 
-    print(f"{'项目':<26}{'类型':<5}{'文件':>5}{'跨文件calls':>12}{'入口':>5}{'公共面':>6}{'底层':>5}  main.rs 是入口?")
+    print(f"{'项目':<26}{'类型':<5}{'文件':>5}{'跨文件calls':>12}{'入口':>5}{'候选':>5}{'公共面':>6}{'底层':>5}  main.rs 是入口?")
     apps = entries = correct = 0
     for name, path in targets:
         subprocess.run([EXE, 'index', '--root', path], capture_output=True, text=True,
@@ -144,12 +168,15 @@ def main():
         is_app = os.path.isfile(os.path.join(path, 'src', 'main.rs'))
         total = sum(counts.values())
         ents = [r[3] for r in rows if r[0] == 'entry']
+        cands = [r[3] for r in rows if r[0] == 'entry_candidate']
         main_is = 'main.rs' in ents
         mark = ('是' if main_is else '否 ⚠') if is_app else '—'
         print(f'{name:<26}{"应用" if is_app else "库":<5}{total:>5}{cross:>12}'
-              f'{counts.get("entry", 0):>5}{counts.get("surface", 0):>6}{counts.get("foundation", 0):>5}  {mark}')
+              f'{counts.get("entry", 0):>5}{counts.get("entry_candidate", 0):>5}{counts.get("surface", 0):>6}{counts.get("foundation", 0):>5}  {mark}')
         if ents:
             print(f'    入口名单: {", ".join(ents)}')
+        if cands:
+            print(f'    候选名单: {", ".join(cands)}')
         founds = [r[3] for r in rows if r[0] == 'foundation']
         if founds:
             print(f'    底层名单: {", ".join(founds)}')

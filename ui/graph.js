@@ -142,7 +142,10 @@ var GROLE = {
   // 真的是 main.rs 的只有 2 个（**准确率 25%**），其中一个连 main.rs 都没认出来。
   // 原因是跨文件调用太稀（fd：120 条 calls 里 93 条是同文件），入度被系统性低估。
   // **不知道就别装作知道**——所以标签写「候选」，悬停里也只说度数。
-  entry:      { c: '#cc7832', label: '入口候选', why: '按跨文件调用度数出来的：出 ≥ 3 且 出 ≥ 2×入。' },
+  // **入口（结构）与入口候选（度数）是两件事**（2026-10-18）：
+  // `src/main.rs` / `src/bin/*.rs` 是**事实**；按度数猜出来的准确率只有 25%。
+  entry:           { c: '#cc7832', label: '入口', why: 'Cargo 的 bin 目标（`src/main.rs` / `src/bin/*.rs`）——**这是事实，不看度数**。' },
+  entry_candidate: { c: '#e8a33d', label: '入口候选', why: '按跨文件调用度数出来的：出 ≥ 3 且 出 ≥ 2×入。真项目实测只有 25% 对，所以只当线索。' },
   foundation: { c: '#6897bb', label: '公共底层', why: '跨文件调用：入度 ≥ 3，且 入 ≥ 2×出。很多人用它，它自己很少调别人。' },
   // **公共面**（2026-10-18 加）：库的出口 `src/lib.rs`。
   // 它被很多人 use，自己很少调别人——按度数会掉进"公共底层"，
@@ -161,7 +164,7 @@ function ghRenderRoles(roles) {
   var box = $('#ghRoles');
   if (!box) return;
   if (!roles) { box.hidden = true; return; }
-  var order = ['entry', 'surface', 'foundation', 'middle', 'test', 'isolated'];
+  var order = ['entry', 'entry_candidate', 'surface', 'foundation', 'middle', 'test', 'isolated'];
   // **数字要有单位**（2026-10-17）：原来只写「入口 18」，读的人不知道是
   // 18 个文件、18 条边、还是 18 个符号。这里是**按文件**数的。
   var unit = ' 个文件';
@@ -305,7 +308,7 @@ function graphBuild() {
   //
   // 于是"依赖方向"不用读标签也看得出来：**箭头都是从外往里**。
   // 原来按度数分环，入口和底层混在一起，方向就抹掉了。
-  const RING = { container: 0.18, foundation: 0.5, surface: 0.42, middle: 0.78, entry: 1, test: 1.16, isolated: 1.12 };
+  const RING = { container: 0.18, foundation: 0.5, surface: 0.42, middle: 0.66, entry_candidate: 0.86, entry: 1, test: 1.16, isolated: 1.12 };
   const R = 320;
   for (let i = 0; i < GS.nodes.length; i++) {
     const ring = RING[GS.nodes[i].role] || 0.78;
@@ -364,7 +367,7 @@ function graphDraw() {
   // 颜色表 / 图例 / 环形半径，没加进这张表——于是那 17 个文件**一个都没被画出来**。
   // 图例说「还没连上 17 个文件」，画布上却一个都找不到。
   // 兜底那一段也救不了它们：那里 `if (n.role ...) continue` 会跳过所有有角色的节点。
-  for (const role of ['test', 'isolated', 'middle', 'foundation', 'surface', 'entry', 'container']) {
+  for (const role of ['test', 'isolated', 'middle', 'foundation', 'surface', 'entry_candidate', 'entry', 'container']) {
     const paint = GROLE[role];
     if (!paint) continue;
     ctx.fillStyle = paint.c;

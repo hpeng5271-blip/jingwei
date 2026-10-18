@@ -28,7 +28,8 @@
 //! ## 判据（写死在这里，别处只问它）
 //!
 //! ```text
-//! entry       出 >= 3 且 出 >= 2×入      （入口）
+//! entry       `src/main.rs` / `src/bin/*.rs`（**事实**）或 出>=3 且 出>=2×入 的老形状
+//! entry_candidate  只靠度数像入口（**猜**，真项目准确率 25%）
 //! foundation  入 >= 3 且 入 >= 2×出      （公共底层）
 //! surface     `src/lib.rs`（库的出口）——**不是底层，也不是入口**
 //! middle      其余，含孤立点
@@ -57,6 +58,23 @@ fn is_test_file(f: &str) -> bool {
 ///
 /// 只认 **crate 根**（`src/lib.rs`）：`src/sub/lib.rs` 不是公共面，按度数走——
 /// 不然"有 lib.rs 就叫公共面"会把普通目录也标错。
+/// **这是不是一个"能跑的东西"**（Cargo 的 bin 目标）。
+///
+/// - `src/main.rs`：默认 bin
+/// - `src/bin/<名字>.rs`：显式 bin
+/// - 文件名叫 `main.rs`（任何深度）：单文件示例也算能跑的东西
+///
+/// **这是事实，不是猜**——所以由它判出来的角色叫「入口」，
+/// 而按度数判出来的叫「入口候选」。真项目实测：度数那一路准确率只有 25%。
+fn is_bin_target(f: &str) -> bool {
+    let l = f.replace('\\', "/");
+    if l == "main.rs" || l.ends_with("/main.rs") {
+        return true;
+    }
+    // `src/bin/foo.rs`（再看一层就不算了：`src/bin/sub/mod.rs` 不是 bin）
+    l.contains("/src/bin/") || l.starts_with("src/bin/")
+}
+
 fn is_library_surface(f: &str) -> bool {
     let l = f.replace('\\', "/");
     l == "src/lib.rs" || l.ends_with("/src/lib.rs")
@@ -176,7 +194,16 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
         if is_library_surface(f) {
             return "surface";
         }
-        role_of(*f_out.get(f).unwrap_or(&0), *f_in.get(f).unwrap_or(&0))
+        // **bin 目标就是入口**（事实，不看度数）：它没有跨文件调用也还是入口。
+        if is_bin_target(f) {
+            return "entry";
+        }
+        // 剩下的按度数：只有"像入口"的把握 → **候选**，不是入口。
+        let r = role_of(*f_out.get(f).unwrap_or(&0), *f_in.get(f).unwrap_or(&0));
+        if r == "entry" {
+            return "entry_candidate";
+        }
+        r
     };
 
     let mut file_count: HashMap<&str, i64> = HashMap::new();
@@ -213,6 +240,8 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
     // 而这个仓库为这一类错误付过太多次账（三态压扁）。
     serde_json::json!({
         "entry": file_count.get("entry").copied().unwrap_or(0),
+        // **候选是另一格**：度数很像入口、但没有结构证据。压进入口就是拿猜冒充事实。
+        "entry_candidate": file_count.get("entry_candidate").copied().unwrap_or(0),
         "foundation": file_count.get("foundation").copied().unwrap_or(0),
         // **公共面**：库的出口（`src/lib.rs`）。它不是底层，也不是入口，
         // 所以必须单独一个数——三个格子压成一个就是今天修的那个错判。
@@ -646,5 +675,62 @@ mod tests {
         assert_eq!(r["foundation"], 1, "util.rs 该是公共底层：{r}");
         assert_eq!(nodes[0]["role"], "entry");
         assert_eq!(nodes[1]["role"], "foundation");
+    }
+
+    /// **入口有两类，不许混**（2026-10-18，3 个真应用量出 25% 之后改的）。
+    ///
+    /// - **结构入口**（`src/main.rs` / `src/bin/*.rs`）：这是**事实**，不看度数。
+    /// - **入口候选**（按度数出≥3 且 出≥2×入）：这是**猜**，真项目上准确率 25%。
+    ///
+    /// 压成同一个角色，就是拿"猜"冒充"事实"——这个仓库最熟的那个形状。
+    #[test]
+    fn 结构入口与度数候选分开算() {
+        let mut nodes = vec![
+            node("file:src/main.rs", "file", None),
+            node("file:src/walk.rs", "file", None),
+            node("file:src/types.rs", "file", None),
+            node("symbol:src/main.rs#main", "symbol", Some("src/main.rs")),
+        ];
+        for i in 0..4 {
+            nodes.push(node(&format!("file:src/m{i}.rs"), "file", None));
+            nodes.push(node(&format!("symbol:src/m{i}.rs#f"), "symbol", Some(&format!("src/m{i}.rs"))));
+        }
+        let mut edges = Vec::new();
+        // m0.rs 调用 m1/m2/m3 三个模块（出3/入0）→ 按度数是"入口"形状，
+        // 但它不是 bin 目标——所以只能是候选。（i 从 1 开始：调自己不算跨文件）
+        for i in 1..4 {
+            edges.push(json!({
+                "src": "symbol:src/m0.rs#f",
+                "dst": format!("symbol:src/m{i}.rs#f"),
+                "kind": "calls"
+            }));
+        }
+        let r = annotate(&mut nodes, &edges);
+        // main.rs 一条跨文件调用都没有，但它是 `src/main.rs` → **结构入口**
+        assert_eq!(r["entry"], 1, "`src/main.rs` 该算结构入口（不看度数）：{r}");
+        // m0.rs 出 3 入 0 → 但它不是 bin 目标 → **候选**
+        assert!(r["entry_candidate"].as_u64().unwrap() >= 1, "度数出来的只能是候选：{r}");
+    }
+
+    /// 没有 `main.rs` 的项目（库 / 脚本）**一个结构入口都没有**，
+    /// 度数出来的全进「候选」——**不许冒充入口**。
+    #[test]
+    fn 没有main时只有候选() {
+        let mut nodes = vec![];
+        for i in 0..4 {
+            nodes.push(node(&format!("file:a{i}.rs"), "file", None));
+            nodes.push(node(&format!("symbol:a{i}.rs#f"), "symbol", Some(&format!("a{i}.rs"))));
+        }
+        let mut edges = Vec::new();
+        for i in 1..4 {
+            edges.push(json!({
+                "src": "symbol:a0.rs#f",
+                "dst": format!("symbol:a{i}.rs#f"),
+                "kind": "calls"
+            }));
+        }
+        let r = annotate(&mut nodes, &edges);
+        assert_eq!(r["entry"], 0, "没有 main.rs 就没有结构入口：{r}");
+        assert_eq!(r["entry_candidate"], 1, "a0 该是候选（出3入0）：{r}");
     }
 }

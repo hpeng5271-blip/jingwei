@@ -649,9 +649,21 @@ try {
     check('图谱：库的出口叫「公共面」，不算底层',
       surf.includes('公共面') && surf.includes('1') && !surf.includes('公共底层 1'),
       surf.slice(0, 80));
-    check('图谱：入口只能叫候选，不许说成事实',
-      st.roles.includes('入口候选') && !st.roles.includes('入口 '),
-      st.roles.slice(0, 60));
+    // **两条判据必须对得上名**（2026-10-18 改）：
+    // 「入口」= Cargo 的 bin 目标（事实）；「入口候选」= 按度数猜的（真项目 25%）。
+    // 判据要变成**名字与理由匹配**，而不是"不许出现入口"那种临时口号。
+    //
+    // 从 `GROLE` 直接读理由，**不从渲染结果读**：渲染只包含当前数据里出现的角色，
+    // 用渲染结果去查"没出现的角色有没有理由"必然查不到（第一版就栽在这）。
+    const whys = await page.evaluate(() => {
+      const out = {};
+      for (const k of Object.keys(GROLE)) out[k] = GROLE[k].why;
+      return out;
+    });
+    check('图谱：入口说是事实，候选说是猜（两条判据对得上名）',
+      (whys.entry || '').includes('事实') && !(whys.entry || '').includes('25%')
+        && (whys.entry_candidate || '').includes('25%'),
+      JSON.stringify({ entry: (whys.entry || '').slice(0, 40), cand: (whys.entry_candidate || '').slice(0, 40) }));
   // **测试文件不参与判断这件事要写在脸上**：读的人会把最热闹的当成入口。
   check(
     '图谱：说明测试不参与判断',
@@ -687,10 +699,10 @@ try {
   check(
     '图谱：每个角色都挂着判据（悬停能问「凭什么」）',
     st.roleTitles.length > 0 && st.roleTitles.every((s) => s.length > 10
-      // 判据可以写成三种：带阈值（≥ / ×）、带等号（= 0）、或者一句明确的规则
-      // （测试文件那一条是路径规则：`_tests` / `_test` / `/tests/`）。
+      // 判据可以写成几种：带阈值（≥ / ×）、带等号（= 0）、一句明确的规则，
+      // 或者**路径规则**（测试文件 `_tests`/`_test`/`/tests/`；结构入口 `main.rs`/`src/bin/`）。
       // **但不许写成「它很重要」这种没有边界的话**——那正是误报的来源。
-      && /[≥×]|= 0|不参与/.test(s)),
+      && /[≥×]|= 0|不参与|main\.rs/.test(s)),
     JSON.stringify(st.roleTitles),
   );
   check(

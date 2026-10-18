@@ -181,7 +181,14 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     check_deps(facts, &mut blockers, &mut nice);
 
     // ── 4. 契约里声明的命令能不能用 ──
-    let run_command = contract.and_then(|c| c.commands.run.clone());
+    // **Node 项目没契约也说得出来**：命令在 package.json 的 scripts 里（与 launch 同一判据）。
+    let run_command = contract.and_then(|c| c.commands.run.clone()).or_else(|| {
+        if facts.lang == Lang::Web {
+            crate::detect::web::run_script(std::path::Path::new(&facts.project.root))
+        } else {
+            None
+        }
+    });
     if contract.is_some() && run_command.is_none() {
         nice.push(
             "契约里没写 `commands.run`——`jingwei run` 不知道要启动什么（补一行就好）".to_string(),
@@ -484,20 +491,6 @@ fn check_toolchain(facts: &Facts, lang: Lang, blockers: &mut Vec<Blocker>) {
 }
 
 /// 依赖：三态。**Unknown 不进 blockers**，它进 nice_to_have 并说清"没查到"。
-/// **"装依赖"该敲什么**——按生态给原生命令（2026-10-18，真 Spring petclinic 换的）。
-///
-/// 原来对所有语言都写 `jingwei env install`，而它走契约里的 `commands.install`——
-/// **Maven 项目没有那份契约**，用户敲下去只得到「契约里没有声明 install 命令」，一条死路。
-fn deps_install_hint(lang: crate::lang::Lang) -> &'static str {
-    match lang {
-        crate::lang::Lang::Python => "jingwei env install（或 python -m pip install -r requirements.txt）",
-        crate::lang::Lang::Java => "mvn dependency:go-offline（没装 Maven 就先装 mvn）",
-        crate::lang::Lang::Rust => "cargo fetch",
-        crate::lang::Lang::Web => "npm install",
-        _ => "按这个项目的生态装依赖",
-    }
-}
-
 fn check_deps(facts: &Facts, blockers: &mut Vec<Blocker>, nice: &mut Vec<String>) {
     let mut missing: Vec<&str> = Vec::new();
     let mut unknown: Vec<&str> = Vec::new();
@@ -513,7 +506,7 @@ fn check_deps(facts: &Facts, blockers: &mut Vec<Blocker>, nice: &mut Vec<String>
         blockers.push(Blocker {
             what: format!("{} 个依赖没装：{}", missing.len(), list),
             why: "声明了却没装，跑起来会在 import 那一行炸".to_string(),
-            fix: deps_install_hint(facts.lang).to_string(),
+            fix: facts.lang.install_hint().to_string(),
             verify: "jingwei doctor".to_string(),
         });
     }
@@ -553,6 +546,13 @@ fn decide_ready(
     }
     // 没有挡路的 —— 但"没有挡路的"不等于"能跑"：
     // 连契约都没有的项目，我们**根本没查过它怎么跑**，那是 Unknown。
+    // **Node 是例外**（真 Vite 换的）：命令在 package.json 的 scripts 里，
+    // `run_command` 已经从那儿取到了——**这时还说"查不出来"就是在骗人。**
+    if contract.is_none() && facts.lang == Lang::Web {
+        if let Some(cmd) = run_command {
+            return Verdict::Yes(cmd.to_string());
+        }
+    }
     let Some(c) = contract else {
         return Verdict::Unknown;
     };
@@ -982,11 +982,11 @@ mod tests {
     /// `jingwei env install`，而 Maven 项目没有契约，那是死路。
     #[test]
     fn 装依赖的提示要按语言给() {
-        assert!(deps_install_hint(crate::lang::Lang::Java).contains("mvn"));
-        assert!(deps_install_hint(crate::lang::Lang::Python).contains("pip"));
-        assert!(deps_install_hint(crate::lang::Lang::Rust).contains("cargo"));
-        assert!(deps_install_hint(crate::lang::Lang::Web).contains("npm"));
+        assert!(crate::lang::Lang::Java.install_hint().contains("mvn"));
+        assert!(crate::lang::Lang::Python.install_hint().contains("pip"));
+        assert!(crate::lang::Lang::Rust.install_hint().contains("cargo"));
+        assert!(crate::lang::Lang::Web.install_hint().contains("npm"));
         // 认不出来的语言不装懂。
-        assert!(deps_install_hint(crate::lang::Lang::Unknown).contains("按这个项目的生态"));
+        assert!(crate::lang::Lang::Unknown.install_hint().contains("按这个项目的生态"));
     }
 }

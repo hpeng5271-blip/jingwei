@@ -265,6 +265,25 @@ fn push_pin(out: &mut Vec<Pin>, from: &str, text: &str) {
 }
 
 /// 一次把 Node 项目该看的都看了。不是 Node 项目就返回 `None`。
+/// **这个 Node 项目"跑起来"该敲什么**（2026-10-18 加）。
+///
+/// 来源：拿真 Vite 项目跑 `guide`，它说「还查不出来——补一份 env.contract.json」。
+/// 而**前端项目的命令本来就在 `package.json` 的 `scripts` 里**（仓库自己的注释也这么写），
+/// `launch` 那一层早就会挑。所以这不是"查不了"，是 **`guide` 没去问同一份数据**。
+///
+/// 脚本名与顺序**必须和 `launch/node.rs` 的 `LIVE_SCRIPTS` 一致**：
+/// dev → start → serve → preview。两处不一致，就会出现"首页说 A、按钮跑 B"。
+pub fn run_script(root: &Path) -> Option<String> {
+    let w = probe_web(root)?;
+    let pm = w.package_manager.clone().unwrap_or_else(|| "npm".to_string());
+    for want in ["dev", "start", "serve", "preview"] {
+        if let Some((k, _)) = w.scripts.iter().find(|(k, _)| k == want) {
+            return Some(format!("{pm} run {k}"));
+        }
+    }
+    None
+}
+
 pub fn probe_web(root: &Path) -> Option<WebFacts> {
     if !is_node_project(root) {
         return None;

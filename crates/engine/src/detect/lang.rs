@@ -37,6 +37,23 @@ pub enum Lang {
 
 
 impl Lang {
+    /// **这个生态里"装依赖"的原生命令**（2026-10-18，真 Spring petclinic 换的）。
+    ///
+    /// 原来 `guide` 对所有语言都写 `jingwei env install`，而它走契约里的
+    /// `commands.install`——**Maven 项目没有那份契约**，用户敲下去只得到一句
+    /// 「契约里没有声明 install 命令」。**提示把用户引进了死路。**
+    ///
+    /// 放在 `Lang` 上而不是 `guide` 里：这是**这门语言的事实**，不是某个消费点的排版。
+    pub fn install_hint(self) -> &'static str {
+        match self {
+            Lang::Python => "jingwei env install（或 python -m pip install -r requirements.txt）",
+            Lang::Java => "mvn dependency:go-offline（没装 Maven 就先装 mvn）",
+            Lang::Rust => "cargo fetch",
+            Lang::Web => "npm install",
+            _ => "按这个项目的生态装依赖",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Lang::Python => "Python",

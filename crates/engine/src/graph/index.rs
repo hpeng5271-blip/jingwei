@@ -607,6 +607,51 @@ pub fn index_source(
     Ok(rep)
 }
 
+/// **这个目录里有多少"我们能解析的之外"的源码**（按扩展名数）。
+///
+/// 为什么需要它（2026-10-18 真输入打出来的）：拿 `vite`（TypeScript）跑 `index`，
+/// 扫到 0 个文件，界面说「这个目录里没有可索引的源文件」——
+/// **那是把"我们还不会解析这门语言"说成了"你没有源码"**（三态压扁的典型）。
+/// 有了这个计数，那句话才能说准：不是你没有，是我们还没支持。
+///
+/// 只数**常见源码扩展名**，并且跳过 `node_modules` / `target` / `.git` 之类的目录——
+/// 它只用于"把话说准"，不是精确统计，所以不值得为它做全量精确遍历。
+pub fn foreign_sources(root: &Path) -> Vec<(String, usize)> {
+    const WANTED: &[&str] = &[
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "java", "kt", "kts", "go", "c",
+        "h", "cc", "cpp", "hpp", "cs", "rb", "php", "swift",
+    ];
+    let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut stack = vec![root.to_path_buf()];
+    let mut visited = 0usize;
+    while let Some(dir) = stack.pop() {
+        visited += 1;
+        // **上限**：真项目可能有几万个目录，而这里只要"有没有、大概多少"。
+        if visited > 20_000 {
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let ft = match e.file_type() { Ok(f) => f, Err(_) => continue };
+            let name = e.file_name().to_string_lossy().to_string();
+            if ft.is_dir() {
+                if matches!(name.as_str(), "node_modules" | "target" | ".git" | "dist" | "build" | "vendor" | ".venv") {
+                    continue;
+                }
+                stack.push(e.path());
+            } else if let Some(ext) = name.rsplit('.').next() {
+                let ext = ext.to_lowercase();
+                if WANTED.contains(&ext.as_str()) {
+                    *counts.entry(ext).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut v: Vec<(String, usize)> = counts.into_iter().collect();
+    v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    v
+}
+
 #[cfg(test)]
 mod to_json_tests {
     use super::IndexReport;

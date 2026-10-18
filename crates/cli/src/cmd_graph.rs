@@ -393,12 +393,28 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
     // **两个数混用会让"正常的空"和"真的空"分不开**——这正是三态那条铁律在命令行的落法。
     if rep.scanned == 0 {
         let shown = root.display();
-        let exists = root.is_dir();
-        eprintln!(
-            "扫到 0 个文件——这个目录{}：{shown}",
-            if exists { "里没有可索引的源文件（.rs/.py）" } else { "不存在" },
-        );
-        eprintln!("  　提示：`--root` 之后跟的是**项目目录**；用 `jingwei scan` 可以看到它扫到了什么。");
+        if !root.is_dir() {
+            eprintln!("扫到 0 个文件——这个目录不存在：{shown}");
+            eprintln!("  　提示：`--root` 之后跟的是**项目目录**。");
+            return 1;
+        }
+        // **分清"你没有"和"我们不会"**（2026-10-18 真输入打出来的）：
+        // 拿 vite（TypeScript）跑，扫到 0 个文件，而原话是「没有可索引的源文件」——
+        // 那是把"我们还没支持这门语言"说成了"你的项目没有源码"。
+        let foreign = jingwei_engine::graph::index::foreign_sources(root);
+        if foreign.is_empty() {
+            eprintln!("扫到 0 个文件——这个目录里**确实没有**源码：{shown}");
+            eprintln!("  　（我们能解析的是 .rs / .py）");
+        } else {
+            let list: Vec<String> = foreign
+                .iter()
+                .take(4)
+                .map(|(ext, n)| format!("{n} 个 .{ext}"))
+                .collect();
+            eprintln!("扫到 0 个文件——这个目录里**没有我们能解析的源码**（目前只支持 .rs / .py）：{shown}");
+            eprintln!("  　它有：{}", list.join("、"));
+            eprintln!("  　**不是你没有源码，是我们还没支持这门语言。**");
+        }
         return 1;
     }
     let ms = t0.elapsed().as_millis() as u64;

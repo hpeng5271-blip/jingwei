@@ -657,6 +657,15 @@ async function main() {
         scan.panelAfter ? JSON.stringify(scan.panelAfter) : 'null',
       );
 
+      // **悬停浮卡**（2026-10-18）：自检真发一次 mouseover、等 260ms 再读，
+      // 所以这条能红——元素没出来 / 没加 `.on` / 尺寸为 0，都会红。
+      const hov = rep.hover || {};
+      ok(
+        '悬停项目卡片：浮卡弹出来了（有元素、有尺寸）',
+        hov.ok === true,
+        JSON.stringify({ on: hov.on, rect: hov.rect, text: (hov.text || '').slice(0, 40) }),
+      );
+
       const audit = pick(rep, '#audit');
       const prob = pick(rep, '#probList');
       // **`#audit` 的尺寸这一轮暂时不断言**（2026-10-17）。

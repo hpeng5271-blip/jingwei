@@ -152,6 +152,33 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
                        // `cargo-edition-missing`）在界面上有没有渲染，**此前没有任何东西在看**。
                        '#probList', '#audit', '#view-clean',
                        'body', 'main', '.view.on', '.graph-wrap'];
+          // **悬停浮卡的自证**（2026-10-18 补）：只有"真悬上去"才看得见它，
+          // 所以这里**真发一次 mouseover**、等 260ms（比 140ms 的延时多一倍余量），
+          // 再读三件事：有没有那个元素、`.on` 有没有加上、尺寸够不够。
+          // 读完立刻 mouseout 收回去，不污染后面的断言。
+          //
+          // 边界：它验的是**渲染与定位**这条路，不是"你的手真的停在那儿 140ms"。
+          // 那条得靠人；机器能钉住的是"发了事件之后有没有东西出来"。
+          const hoverProbe = async () => {{
+            const list = document.querySelector('#projList');
+            const first = list && list.querySelector('.banner');
+            if (!first) return {{ ok: false, why: '没有项目卡片可悬停' }};
+            first.dispatchEvent(new MouseEvent('mouseover', {{ bubbles: true, clientX: 320, clientY: 260 }}));
+            await rest(260);
+            const el = document.querySelector('#projHover');
+            const r = el ? el.getBoundingClientRect() : null;
+            const on = !!(el && el.classList.contains('on'));
+            const out = {{
+              ok: on && !!r && r.width > 100 && r.height > 20,
+              on,
+              rect: r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null,
+              text: ((el && el.innerText) || '').trim().slice(0, 160),
+            }};
+            first.dispatchEvent(new MouseEvent('mouseout', {{ bubbles: true }}));
+            await rest(60);
+            return out;
+          }};
+
           const snapshot = (tab) => ({{
             tab,
             viewport: [window.innerWidth, window.innerHeight],
@@ -162,6 +189,7 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             // **扫描面板常驻 + 点击行内展开**（2026-10-18 用户报的真问题）：
             // 这两件事只有"点一下"才看得出来，所以自检里**真点一次**再把结果报上去。
             // 点完立刻把展开卡摘掉，不污染后面的断言。
+            hover: window.__hoverProbe || null,
             scan: (function () {{
               const rect = (el) => {{
                 if (!el) return null;
@@ -271,6 +299,7 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             // 而报告只写一次 → 门禁拿到一份"永远没准备好"的报告，干等 90 秒。
             // 现在等 22 秒：要么数据回来了、要么看门狗已经改成"读不到"（那也是终端状态）。
             if (realTab) await waitReady(realTab, 22000);
+            window.__hoverProbe = await hoverProbe();
             window.__TAURI__.core.invoke('save_report',
               {{ path: {path:?}, json: JSON.stringify([snapshot(realTab)]) }});
             return;
@@ -292,6 +321,7 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
           // 扫完回到第一页——**别把窗口留在最后一页**，那不是它启动时的样子。
           const first = document.querySelector('#nav button[data-tab="' + tabs[0] + '"]');
           if (first) first.click();
+          window.__hoverProbe = await hoverProbe();
           window.__TAURI__.core.invoke('save_report',
             {{ path: {path:?}, json: JSON.stringify(out) }});
         }})()

@@ -977,6 +977,62 @@ function missingHtml(m) {
     + '</div>';
 }
 
+/// **"这台机器够不够用"的结果**（四态，一态一句，不许压成两态）。
+///
+/// `passed` / `failed` / `not_applicable` / `unclear` ——
+/// 最后那一态是**我们没验成**，界面上不能显示成"失败"（颜色与文案都分开）。
+function verifyHtml(v) {
+  if (!v || !v.verdict) return '';
+  const cls = v.verdict === 'passed' ? 'good'
+    : v.verdict === 'failed' ? 'bad'
+    : v.verdict === 'not_applicable' ? 'skip' : 'ask';
+  const mark = v.verdict === 'passed' ? '✓'
+    : v.verdict === 'failed' ? '✗'
+    : v.verdict === 'not_applicable' ? '·' : '?';
+  let html = '<div class="verdict ' + cls + '"><b>' + mark + ' ' + esc(v.headline || '') + '</b>';
+  if (v.cmd) html += '<div class="boundary">跑了 ' + esc(v.cmd) + '</div>';
+  if (v.why) html += '<div class="boundary">' + esc(v.why) + '</div>';
+  if (v.first_error) html += '<div class="crux">第一条错误 · ' + esc(v.first_error) + '</div>';
+  // 缺件时只说缺什么、怎么自己验——**不给一键装的按钮**（不生成修复命令）
+  if (v.missing_tool) {
+    const m = v.missing_tool;
+    html += '<div class="missing">'
+      + '<div class="miss-head">这台机器缺 <b>' + esc(m.what) + '</b></div>'
+      + '<div class="miss-line"><span>为什么</span>' + esc(m.why) + '</div>'
+      + '<div class="miss-line"><span>怎么装</span>' + esc(m.shape) + '</div>'
+      + '<div class="miss-line"><span>怎么自己验</span><code>' + esc(m.verify) + '</code></div>'
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
+/// 绑定「验一下能不能构建」。**只做一件事：跑一次、把四态画出来。**
+function bindVerify() {
+  const btn = $('#verifyBtn');
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', async () => {
+    if (!S.root) return;
+    const box = $('#verifyResult');
+    const hint = $('#verifyHint');
+    btn.disabled = true;
+    if (hint) hint.textContent = '正在跑构建……这一条会真跑一次，慢是正常的';
+    try {
+      const v = await invoke('verify_project', { root: S.root });
+      box.innerHTML = verifyHtml(v);
+      box.hidden = false;
+    } catch (e) {
+      // **我们没验成 ≠ 构建失败**：这里也说清是"没能验成"。
+      box.innerHTML = '<div class="verdict ask"><b>? 我们没能验成</b><div class="boundary">'
+        + esc((e && e.message) || String(e)) + '</div></div>';
+      box.hidden = false;
+    } finally {
+      btn.disabled = false;
+      if (hint) hint.textContent = '会真跑一次构建，可能要一两分钟';
+    }
+  });
+}
+
 function runCardHtml(rec, live) {
   const plan = rec.kind === 'run' ? PLAN_RUN : PLAN_TASK;
   let pill, verdict = '';

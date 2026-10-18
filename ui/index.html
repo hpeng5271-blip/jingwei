@@ -179,6 +179,12 @@
            数据与 `jingwei guide` 同源（引擎的 `Guide::to_json()`），不可能各说各的。 -->
       <div id="guideCard"></div>
       <div id="statusCard" class="status"></div>
+      <!-- **验一下能不能构建**：只有它回答"这台机器够不够用" -->
+      <div class="verify-row">
+        <button id="verifyBtn" class="btn">验一下能不能构建</button>
+        <span class="hint" id="verifyHint">会真跑一次构建，可能要一两分钟</span>
+      </div>
+      <div id="verifyResult" hidden></div>
       <div id="autoLine" class="autoLine" hidden></div>
       <div id="cardNotes" class="cardNotes"></div>
       <div id="changeCard"></div>

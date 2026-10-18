@@ -22,6 +22,7 @@ use payload::{hygiene_value, inspect_payload};
 // 单独一个文件，是因为 main.rs 本来就贴着 1000 行上限，
 // 而这一段与"窗口、对话框、编辑器、笔记"不是一类东西。
 mod selfcheck;
+mod verify;
 use selfcheck::start_report;
 
 /// 启动时如果带了个目录参数，就直接把它当项目打开。
@@ -421,6 +422,7 @@ fn list_projects(parent: String, depth: usize) -> Result<Value, String> {
         "projects": projects::discover(&p, depth.clamp(1, 4)),
     }))
 }
+
 
 /// 第一次打开时给个像样的默认值：常见放代码的地方，存在哪个用哪个。
 #[tauri::command]
@@ -975,6 +977,7 @@ fn main() {
             profile_remove,
             check_project,
             create_project,
+            verify::verify_project,
             launch_project,
             run_task,
         ])

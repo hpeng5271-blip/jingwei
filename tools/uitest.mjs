@@ -878,6 +878,21 @@ try {
       g.notes.slice(0, 120),
     );
     await page.evaluate(() => { window.__guideNo = false; });
+
+    // **「验一下能不能构建」的四态**（2026-10-18）：一态一句，不许压成两态。
+    // 尤其 `unclear` —— 它是"我们没能验成"，**不是"构建失败"**。
+    const vh = await page.evaluate(() => ({
+      passed: verifyHtml({ verdict: 'passed', headline: '构建跑通了（退出码 0，12ms）', cmd: 'cargo build' }),
+      failed: verifyHtml({ verdict: 'failed', headline: '构建没过（退出码 1）', first_error: 'error: x' }),
+      skip: verifyHtml({ verdict: 'not_applicable', headline: '这一步不适用', why: 'Python 没有构建' }),
+      ask: verifyHtml({ verdict: 'unclear', headline: '我们没能验成', why: '超时' }),
+      empty: verifyHtml(null),
+    }));
+    check('验一下：通过时是 good 且带命令', vh.passed.includes('verdict good') && vh.passed.includes('cargo build'), vh.passed.slice(0, 80));
+    check('验一下：没过时是 bad 且带第一条错误', vh.failed.includes('verdict bad') && vh.failed.includes('第一条错误'), vh.failed.slice(0, 80));
+    check('验一下：不适用时是 skip（不是 bad）', vh.skip.includes('verdict skip') && !vh.skip.includes('verdict bad'), vh.skip.slice(0, 80));
+    check('验一下：没验成时是 ask（不是 bad）', vh.ask.includes('verdict ask') && !vh.ask.includes('verdict bad'), vh.ask.slice(0, 80));
+    check('验一下：没有结论时一个字都不加', vh.empty === '', vh.empty);
   }
 
 } catch (e) {

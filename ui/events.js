@@ -53,6 +53,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   initTooltips();
   initParallax();
   initDock();
+  // 概览页那个「验一下能不能构建」——**只绑一次**（`bindVerify` 里有 dataset 防重）
+  bindVerify();
   // 全局点击反馈：任何可点的东西按下去都有涟漪 + 一声轻响
   document.addEventListener('pointerdown', (e) => {
     const hit = e.target.closest('button, .pcard, .diag, .nb-item, .copy, .agroup>summary, .item');

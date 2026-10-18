@@ -1822,3 +1822,10 @@ body{background:var(--bg)}
 .missing .miss-line { color: var(--dim); line-height: 1.6; }
 .missing .miss-line span { display: inline-block; min-width: 64px; color: var(--dim); }
 .missing code { color: var(--fg); word-break: break-all; }
+
+/* **「验一下能不能构建」**：四态四种颜色——最后那一态（我们没验成）不是"失败"。 */
+.verify-row{display:flex;align-items:center;gap:10px;margin:10px 0 6px}
+.verify-row .hint{font-size:12px;color:var(--dim)}
+#verifyResult{margin:6px 0 10px}
+.verdict.skip{background:var(--bg2);border:1px solid var(--line);color:var(--dim)}
+.verdict.ask{background:rgba(255,193,7,.10);border:1px solid rgba(255,193,7,.45)}

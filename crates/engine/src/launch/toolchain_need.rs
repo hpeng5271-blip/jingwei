@@ -78,7 +78,7 @@ fn rules() -> &'static [Rule] {
                 needle: "link.exe not found",
                 tool: MissingTool {
                     what: "MSVC 链接器（link.exe）",
-                    why: "rustup 只装 rustc/cargo，**不装链接器**；没有它 cargo 编不出可执行文件",
+                    why: "rustup 只装 rustc/cargo，不装链接器；没有它 cargo 编不出可执行文件",
                     shape: "官方安装器（Build Tools）；或改用 gnu 工具链 + MinGW",
                     verify: "rustc --print target-libdir; cargo -Vv",
                 },

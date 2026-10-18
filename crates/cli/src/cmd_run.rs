@@ -159,6 +159,20 @@ pub(crate) fn cmd_run(root: &Path, run_override: Option<String>, extra: Vec<Stri
                         c(RED, "✗"),
                         out.exit_code
                     );
+                    // **先给"缺哪个件"**（如果有）：它比"错在哪一行"更靠前——
+                    // 缺件时用户去改代码是白费力气。两个都来自 `Outcome`，
+                    // **外壳不许自己再扫一遍输出**（那会出现两个消费点各说各的）。
+                    if let Some(m) = &out.missing_tool {
+                        println!(
+                            "  {} 这台机器缺 {}",
+                            c(YELLOW, "!"),
+                            c(BOLD, &m.what)
+                        );
+                        println!("    {} {}", c(DIM, "为什么"), m.why);
+                        println!("    {} {}", c(DIM, "怎么装"), m.shape);
+                        println!("    {} {}", c(DIM, "怎么自己验"), m.verify);
+                        println!();
+                    }
                     match &out.diagnosis {
                         Some(d) => {
                             println!("  {} {}", c(BOLD, "症结"), d.crux);

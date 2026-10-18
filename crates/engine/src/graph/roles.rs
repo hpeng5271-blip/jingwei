@@ -41,9 +41,21 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// 一个文件是不是测试。**路径分隔符要统一**——库里两种写法都有。
+/// **测试文件不参与角色判断**——它们调用一切，出度天然最高。
+///
+/// 判据按语言分开（2026-10-18 补 Python 那半）：
+///
+/// - Rust：`*_tests.rs` / `*_test.rs` / 路径里有 `/tests/`
+/// - **Python**：`test_*.py` / `*_test.py` —— 来源是 `pallets/flask` 的实测：
+///   修之前 `test_cli.py` / `test_helpers.py` 被算成「入口候选」和「公共底层」，
+///   而这两格读的是"谁在用这个模块"，测试文件一进来就把结论带偏。
 fn is_test_file(f: &str) -> bool {
     let l = f.replace('\\', "/");
-    l.ends_with("_tests.rs") || l.ends_with("_test.rs") || l.contains("/tests/")
+    if l.ends_with("_tests.rs") || l.ends_with("_test.rs") || l.contains("/tests/") {
+        return true;
+    }
+    let name = l.rsplit('/').next().unwrap_or(&l);
+    name.ends_with("_test.py") || name.starts_with("test_")
 }
 
 /// **角色判据只写这一处**（出度与入度的对比）。
@@ -732,5 +744,23 @@ mod tests {
         let r = annotate(&mut nodes, &edges);
         assert_eq!(r["entry"], 0, "没有 main.rs 就没有结构入口：{r}");
         assert_eq!(r["entry_candidate"], 1, "a0 该是候选（出3入0）：{r}");
+    }
+
+    /// **Python 的测试文件也要排除**（2026-10-18，`pallets/flask` 换的）。
+    ///
+    /// 修之前：`test_cli.py` / `test_helpers.py` 被算成「入口候选」「公共底层」——
+    /// 而这两格读的是"谁在用这个模块"，测试文件进来就把结论带偏。
+    /// 修之后同一个库：文件 76→54（22 个测试文件退出判断）、候选 6→4、底层 11→8。
+    #[test]
+    fn python的测试文件不参加角色判断() {
+        assert!(is_test_file("tests/test_cli.py"));
+        assert!(is_test_file("src/flask/test_json_tag.py"));
+        assert!(is_test_file("src/flask/core_test.py"));
+        // **`testing.py` 不是测试文件**：它是 flask 给用户用的测试工具模块，
+        // 按"名以 test_ 开头 / 以 _test.py 结尾"判，它两条都不沾。
+        assert!(!is_test_file("src/flask/testing.py"));
+        // Rust 那半不许被这次改动带坏。
+        assert!(is_test_file("src/deps_tests.rs"));
+        assert!(!is_test_file("src/main.rs"));
     }
 }

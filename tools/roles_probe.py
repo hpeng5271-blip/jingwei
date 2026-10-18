@@ -47,8 +47,17 @@ def is_library_surface(path):
 
 
 def is_test(path):
+    """**测试文件不参与角色判断**——与 `crates/engine/src/graph/roles.rs` 同一判据。
+
+    ⚠️ 这是**第二份拷贝**（探针故意复刻产品判据，好让"改了产品忘了改探针"当场看出来）。
+    2026-10-18：补 Python 那半（`test_*.py` / `*_test.py`）——
+    来源是 `pallets/flask`：`test_cli.py` 当时被算成「入口候选」。
+    """
     p = path.replace('\\', '/').lower()
-    return '/tests/' in p or p.endswith('_test.rs') or p.endswith('tests.rs')
+    if '/tests/' in p or p.endswith('_test.rs') or p.endswith('tests.rs'):
+        return True
+    name = p.rsplit('/', 1)[-1]
+    return name.startswith('test_') or name.endswith('_test.py')
 
 
 def roles_of(db):
@@ -57,6 +66,13 @@ def roles_of(db):
     node = {}
     cur.execute('select id, kind, name, file_path from nodes')
     for i, _k, _n, f in cur.fetchall():
+        # **符号节点的路径藏在 id 里**（2026-10-18 修，Python 上抓到的）：
+        #   Rust 的符号节点 file_path 有值，而 Python 的是 NULL，
+        #   id 形如 `symbol:src/flask/app.py#create_app`。
+        # 原来这一列只读 file_path，于是 **Python 项目 all calls 全被跳过**
+        # （flask 实测：库里 314 条 calls，探针算出跨文件 0 条）。
+        if f is None and i.startswith('symbol:') and '#' in i:
+            f = i[len('symbol:'):].rsplit('#', 1)[0]
         node[i] = f
     out, inn = collections.Counter(), collections.Counter()
     cross = same = 0

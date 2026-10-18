@@ -175,6 +175,30 @@ impl UnmarkedSources {
             .collect::<Vec<_>>()
             .join("、")
     }
+
+    /// **该补哪种清单**（按源码里最多的那门语言排序，2026-10-18 加）。
+    ///
+    /// 原来三句建议都是「`pyproject.toml` / `package.json` / `Cargo.toml` 任一」——
+    /// 对每一种项目都念同一串。真机实测（`@deepseek-ai` 那个 1 万多个 js/ts 的包）：
+    /// 一个纯 `.ts/.js` 目录被告知先补 `pyproject.toml`。**那不是建议，那是噪音。**
+    ///
+    /// 判据：看 `langs` 里数量最多的那个扩展名——它决定这个项目"本来该有什么清单"。
+    /// 认不出来时（比如 .go/.java 这类我们还不解析的）退回那串"任一"，
+    /// **不猜**：给错的清单比给一串候选更糟。
+    pub fn manifest_hint(&self) -> &'static str {
+        let top = self
+            .langs
+            .iter()
+            .max_by_key(|(_, n)| *n)
+            .map(|(e, _)| e.as_str())
+            .unwrap_or("");
+        match top {
+            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => "`package.json`",
+            "py" => "`pyproject.toml`",
+            "rs" => "`Cargo.toml`",
+            _ => "`pyproject.toml` / `package.json` / `Cargo.toml` 任一",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -282,5 +306,29 @@ mod tests {
         fs::write(d.join("three.py"), "z=1\n").unwrap();
         assert!(unmarked_sources(&d).is_some(), "3 个才开口");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **该补哪种清单：按源码里最多的那门语言说**（2026-10-18，真机换的）。
+    ///
+    /// 拿到一个 1 万多个 js/ts 的真实 npm 包（`@deepseek-ai`）跑 `guide`，它说：
+    /// 「补一个清单（`pyproject.toml` / `package.json` / `Cargo.toml` 任一）」——
+    /// 对一个纯 TS 目录先念 `pyproject.toml`，**那不是建议，是噪音**。
+    #[test]
+    fn 清单建议按语言排序() {
+        let mk = |langs: Vec<(&str, usize)>| UnmarkedSources {
+            files: langs.iter().map(|(_, n)| *n).sum(),
+            langs: langs.into_iter().map(|(e, n)| (e.to_string(), n)).collect(),
+            dirs: 1,
+        };
+        assert_eq!(mk(vec![("ts", 8), ("js", 7)]).manifest_hint(), "`package.json`");
+        assert_eq!(mk(vec![("py", 3)]).manifest_hint(), "`pyproject.toml`");
+        assert_eq!(mk(vec![("rs", 5)]).manifest_hint(), "`Cargo.toml`");
+        // 认不出来的语言**不猜**：给一串候选，别给一个错的。
+        assert_eq!(
+            mk(vec![("go", 9)]).manifest_hint(),
+            "`pyproject.toml` / `package.json` / `Cargo.toml` 任一"
+        );
+        // 混合时看最多的那个：py 多过 ts 就提 pyproject。
+        assert_eq!(mk(vec![("py", 6), ("ts", 2)]).manifest_hint(), "`pyproject.toml`");
     }
 }

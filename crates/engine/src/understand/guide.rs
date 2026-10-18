@@ -247,8 +247,9 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     let what_to_do: String = match (&unmarked, not_a_project) {
         // **有源码、没标记**：说清"补什么我就能判断"，而不是一句"不适用"就完事。
         (Some(u), _) => format!(
-            "这里有 {}，但没有任何项目标记文件——补一个清单（`pyproject.toml` / `package.json` / `Cargo.toml` 任一），我就能判断依赖和运行方式",
-            u.lang_list()
+            "这里有 {}，但没有任何项目标记文件——补一个清单（{}），我就能判断依赖和运行方式",
+            u.lang_list(),
+            u.manifest_hint()
         ),
         (None, true) => {
             "这里不像一个项目（没有任何项目标记文件）——所以「能不能跑」这类问题对它不适用"
@@ -268,7 +269,8 @@ pub fn make_guide(facts: &Facts, diagnostics: &[crate::launch::rundiag::RunDiagn
     let next_step = if let Some(u) = &unmarked {
         // **有源码、没标记**：给一个具体动作（这才是"建议"），而不是"不用做什么"。
         format!(
-            "想让我能判断它：新增一个清单文件（`pyproject.toml` / `package.json` / `Cargo.toml` 任一，记下 {}）；不需要就忽略这句",
+            "想让我能判断它：新增一个清单文件（{}，记下 {}）；不需要就忽略这句",
+            u.manifest_hint(),
             u.lang_list()
         )
     } else if not_a_project {

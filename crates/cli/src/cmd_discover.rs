@@ -28,7 +28,26 @@ fn size_class(files: u64) -> &'static str {
     }
 }
 
-pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
+/// **同源检测**：只比"同名目录"（跨机器/克隆最常见的那一类），
+/// 阈值 0.8（学习调研给的数：低于它更像"碰巧都有几个相似文件"）。
+/// 只对候选算集合，不跑全量两两比较——**成本要可控**。
+fn similar(list: &[(String, String, Vec<String>)], min: f64) -> Vec<(String, String, f64)> {
+    let mut out = Vec::new();
+    for i in 0..list.len() {
+        for j in (i + 1)..list.len() {
+            if list[i].1 != list[j].1 {
+                continue; // 名字不同不比（"同内容不同名"是另一类，代价更高，先不做）
+            }
+            let s = jingwei_engine::understand::fingerprint::jaccard(&list[i].2, &list[j].2);
+            if s >= min {
+                out.push((list[i].0.clone(), list[j].0.clone(), s));
+            }
+        }
+    }
+    out
+}
+
+pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar: bool) -> i32 {
     let roots: Vec<PathBuf> = if roots.is_empty() {
         projects::default_scan_roots()
     } else {
@@ -45,6 +64,8 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
     let mut seen = 0usize;
     let mut skipped = 0usize;
     let mut total = 0usize;
+    // (路径, 目录名, 文件集合)——只在 --similar 时填，避免白算
+    let mut sets: Vec<(String, String, Vec<String>)> = Vec::new();
     let mut last_print = 0usize;
 
     for root in &roots {
@@ -66,6 +87,9 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
             total += 1;
             let (files, bytes, cut) = projects::measure(&p);
             let fp = fingerprint::of(&p);
+            if want_similar {
+                sets.push((f.path.clone(), f.name.clone(), fingerprint::set_of(&p)));
+            }
             let kind = f.kinds.first().cloned().unwrap_or_else(|| "未知".to_string());
             if json {
                 found.push(serde_json::json!({
@@ -88,6 +112,7 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
         }
     }
 
+    let pairs = if want_similar { similar(&sets, 0.8) } else { Vec::new() };
     let secs = t0.elapsed().as_secs_f64();
     if json {
         let out = serde_json::json!({
@@ -101,6 +126,12 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool) -> i32 {
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         0
     } else {
+        if !pairs.is_empty() {
+            println!("  ≈ 同源（Jaccard ≥ 0.8）：{} 对", pairs.len());
+            for (a, b, s) in &pairs {
+                println!("    {:.0}%  {}\n          {}", s * 100.0, a, b);
+            }
+        }
         println!(
             "  ✓ 扫完：{} 个目录（跳过 {}）/ {} 个项目 / 用时 {:.1} 秒",
             seen,

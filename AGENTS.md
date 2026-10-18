@@ -35,7 +35,7 @@ cd D:\projects\jingwei
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
-**8 道**：单测+集成（<!-- fact:tests_total -->423<!-- /fact --> 条：engine <!-- fact:engine_unit -->351<!-- /fact --> /
+**8 道**：单测+集成（<!-- fact:tests_total -->425<!-- /fact --> 条：engine <!-- fact:engine_unit -->353<!-- /fact --> /
 集成 <!-- fact:integration -->53<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
@@ -67,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | **扫盘真能用**：多根、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | `discover --depth 3 D:\projects D:\research` → **186 目录 / 133 项目 / 0.3s**；界面门禁 3 条绿 |
 | **首页按类型×体量分组**（可折叠） | `ui/scan.js::groupFound` + `.grp-head` | 界面门禁：`heads ≥ 2` 且终态说"扫完" |
 | **tauri 索引崩溃修复**（trait 默认方法） | `graph/parse.rs` | 整个 tauri **329 文件 / 5,916 符号 / 3.2s**；单测 347 绿 |
-| **项目指纹**（Merkle：相对路径+内容哈希，排除 vendored） | `graph/…`→`understand/fingerprint.rs` | 实机 133 项目里认出 **2 组重复**（3 份 + 2 份克隆）；3 条单测 |
+| **项目指纹 + 同源检测**（Merkle + Jaccard≥0.8） | `understand/fingerprint.rs` + `discover --similar` | 实机 133 项目：**2 组完全相同**、**5 对同源**（含 `jingwei\src-tauri` ↔ `pylaunch-rs\src-tauri` **88%**）；5 条单测 |
 
 ## 4. 分工（别越界）
 

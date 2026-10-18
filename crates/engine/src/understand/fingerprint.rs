@@ -43,6 +43,11 @@ fn is_vendor(name: &str) -> bool {
 
 /// 算一个目录的项目指纹。**只读**，不会写任何东西。
 pub fn of(root: &Path) -> Fingerprint {
+    of_detailed(root).0
+}
+
+/// 指纹 + 文件集合（集合给 Jaccard 用，不塞进 JSON）。
+pub fn of_detailed(root: &Path) -> (Fingerprint, Vec<String>) {
     let mut out = Fingerprint::default();
     let mut items: Vec<(String, String)> = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -97,7 +102,28 @@ pub fn of(root: &Path) -> Fingerprint {
     out.hash = crate::facts::stable_hash(joined.iter().map(|s| s.as_str()));
     out.bytes = bytes;
     out.markers.sort();
-    out
+    let set: Vec<String> = items.iter().map(|(p, h)| format!("{p}\u{1}{h}")).collect();
+    (out, set)
+}
+
+/// **文件集合**：每个元素是 `相对路径\u{1}内容哈希`。
+///
+/// 与 `of()` 的关系：`of()` 是"把集合排序后整体哈希"，适合判"完全同一份"；
+/// 集合本身用来算 **Jaccard**，判"同源不同版本"（官方文档/源码里那套）。
+pub fn set_of(root: &Path) -> Vec<String> {
+    of_detailed(root).1
+}
+
+/// **Jaccard 相似度**：交集 / 并集。空集返回 0（"比不了"不是"完全一样"）。
+pub fn jaccard(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let sa: std::collections::BTreeSet<&str> = a.iter().map(|s| s.as_str()).collect();
+    let sb: std::collections::BTreeSet<&str> = b.iter().map(|s| s.as_str()).collect();
+    let inter = sa.intersection(&sb).count() as f64;
+    let union = sa.union(&sb).count() as f64;
+    if union == 0.0 { 0.0 } else { inter / union }
 }
 
 fn is_marker(name: &str) -> bool {
@@ -179,5 +205,41 @@ mod tests {
         std::fs::write(d.join("node_modules/x/i.js"), "x").unwrap();
         assert_eq!(before, of(&d).hash, "node_modules 不该改变项目指纹");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **同源不同版本**：共享大部分文件、各多一个 → Jaccard 在 0.8 附近，
+    /// 但精确指纹必须不同（否则"版本不同"会被当成"完全同一份"）。
+    #[test]
+    fn jaccard_同源不同版本() {
+        let a = scratch("ja");
+        let b = scratch("jb");
+        for i in 0..8 {
+            for d in [&a, &b] {
+                std::fs::write(d.join(format!("f{i}.rs")), format!("fn f{i}() {{}}")).unwrap();
+            }
+        }
+        std::fs::write(a.join("only_a.rs"), "fn a_only() {}").unwrap();
+        std::fs::write(b.join("only_b.rs"), "fn b_only() {}").unwrap();
+
+        let sa = set_of(&a);
+        let sb = set_of(&b);
+        let j = jaccard(&sa, &sb);
+        assert!((j - 8.0 / 10.0).abs() < 1e-9, "8 共有 / 10 并集 = 0.8，实际 {j}");
+        assert_ne!(of(&a).hash, of(&b).hash, "版本不同 → 精确指纹必须不同");
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
+    }
+
+    /// 完全不相关 → 0；空集 → 0（"比不了"不是"完全一样"）。
+    #[test]
+    fn jaccard_不相关是零() {
+        let a = scratch("jc");
+        let b = scratch("jd");
+        std::fs::write(a.join("x.rs"), "fn x() {}").unwrap();
+        std::fs::write(b.join("y.rs"), "fn y() {}").unwrap();
+        assert_eq!(jaccard(&set_of(&a), &set_of(&b)), 0.0);
+        assert_eq!(jaccard(&[], &[]), 0.0);
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
     }
 }

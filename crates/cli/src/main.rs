@@ -229,6 +229,8 @@ fn run() -> i32 {
                     }
                 }
             }
+            // **扫盘的同源检测**（2026-10-19）：只对同名目录算 Jaccard，代价可控
+            "--similar" => rest.push("--similar".to_string()),
             "--help" | "-h" => return help(),
             "--version" | "-V" => {
                 println!("jingwei {}", env!("CARGO_PKG_VERSION"));
@@ -361,7 +363,8 @@ fn run() -> i32 {
                 if !rest[i].starts_with(")--") { roots.push(std::path::PathBuf::from(&rest[i])); }
                 i += 1;
             }
-            cmd_discover::cmd_discover(roots, depth, json)
+            let want_similar = rest.iter().any(|a| a == "--similar");
+            cmd_discover::cmd_discover(roots, depth, json, want_similar)
         }
         // **`jingwei index` = 把项目带到"图谱可用"的状态。**
         // 与界面「索引一次」同一个内核入口（`graph::index::index_source`）。

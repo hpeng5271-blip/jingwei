@@ -105,19 +105,25 @@ pub fn skip_reason(dir: &Path, root: &Path) -> Option<&'static str> {
     scan::should_skip(dir, root)
 }
 
+/// **机器级的系统目录**：扫盘时进去既慢又没意义。
+///
+/// **这份是唯一真源**（2026-10-18 合并）：原来 `projects.rs` 里还有一份，
+/// 而两份几乎一样——"两份清单各写各的，必然漂"是这个仓库最熟的事故形状。
+pub const SYSTEM_DIRS: &[&str] = &[
+    "appdata",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+    "perflogs",
+    "recovery",
+];
+
 fn is_system_dir(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "appdata"
-            | "windows"
-            | "program files"
-            | "program files (x86)"
-            | "programdata"
-            | "system volume information"
-            | "$recycle.bin"
-            | "perflogs"
-            | "recovery"
-    )
+    let lower = name.to_lowercase();
+    SYSTEM_DIRS.contains(&lower.as_str())
 }
 
 fn mtime_secs(p: &Path) -> u64 {
@@ -458,33 +464,37 @@ mod tests {
         fs::write(dir.join(marker), "{}").unwrap();
     }
 
-    /// **回归**：同一棵树，索引的"最外层"口径必须与 `discover` 一致。
+    /// **最外层口径 = 显式预期**（不是拿 `discover` 跟自己比）。
     ///
-    /// 这一条是"先有裁判，再换选手"——**接线之前先证明等价**。
+    /// 2026-10-18 改：`discover` 自己已经走索引了，所以原来那条"索引与 discover 一致"
+    /// **变成了自己比自己**（永远绿）。换成写死预期的写法——这才是真判据。
+    ///
+    /// 口径（与界面一致）：**遇项目就不再往里算**；因此 `mono/pkg1`、`mono/pkg2` 不出现。
     #[test]
-    fn 索引与_discover_对同一棵树给出同样的项目集() {
-        let d = scratch("same");
+    fn 最外层口径与显式预期一致() {
+        let d = scratch("expect");
         mkproject(&d.join("a"), "Cargo.toml");
         mkproject(&d.join("b"), "package.json");
-        // monorepo：外层是项目，里面还有两个
         mkproject(&d.join("mono"), "package.json");
         mkproject(&d.join("mono").join("pkg1"), "package.json");
         mkproject(&d.join("mono").join("pkg2"), "package.json");
-        // 不是项目的目录
         fs::create_dir_all(d.join("notaproject")).unwrap();
 
-        let old: Vec<String> = crate::understand::projects::discover(&d, 3)
-            .into_iter()
-            .map(|f| f.path.replace('\\', "/"))
-            .collect();
         let idx = build(&d, 3);
-        let new: Vec<String> = idx
+        let got: Vec<String> = idx
             .top_level_projects()
             .iter()
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .map(|p| p.strip_prefix(&d).unwrap().to_string_lossy().replace('\\', "/"))
             .collect();
+        assert_eq!(got, vec!["a", "b", "mono"], "最外层只该是这三个，实际：{got:?}");
 
-        assert_eq!(old, new, "索引的「最外层」口径必须和 discover 一致");
+        // 同一个索引，换个查询就看得见嵌套的——**规则改了不用重建**。
+        let all: Vec<String> = idx
+            .all_projects()
+            .iter()
+            .map(|p| p.strip_prefix(&d).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(all.len(), 5, "全都给应该是 5 个（含 mono/pkg1、mono/pkg2）：{all:?}");
         let _ = fs::remove_dir_all(&d);
     }
 

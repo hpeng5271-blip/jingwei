@@ -25,40 +25,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // **教训：注释说"只有一份"不等于只有一份——只有一处实现才算。**
 // 现在判据只有 `project::manifest_kind`，本文件与 `container.rs` 都问它。
 
-/// 扫目录树找项目时**不往里走**。
-///
-/// ## 这条判据拆成了两样（2026-10-17）
-///
-/// 原来这儿是一个大 `SKIP` 常量，里面**混着两件不同的事**：
-///   · 产物 / 编辑器 / 工具目录（`node_modules` `target` `.idea` …）——
-///     那是"什么不算源码"，判据在 **`util::scan::NOT_SOURCE_DIRS`**，**只有一处**；
-///   · **机器系统目录**（`Windows` `Program Files` `AppData` …）——
-///     那是"扫盘时哪儿根本不用去"，与"源码"无关。
-///
-/// 混在一起的时候，两张清单各写一遍、内容还不同（这一份多 `.gradle`/`.m2`/`vendor`，
-/// 而 `index.rs` 那份没有）——**同一个病**。所以现在只在**这个函数**里合流：
-/// 产物那半问 `NOT_SOURCE_DIRS`，系统那半问 `SYSTEM_DIRS`。
-fn skip_dir(name: &str) -> bool {
-    if name.starts_with('.') {
-        return true;
-    }
-    if crate::util::scan::is_not_source_dir(name) {
-        return true;
-    }
-    SYSTEM_DIRS.contains(&name.to_lowercase().as_str())
-}
-
-/// 机器级的系统目录：扫盘找项目时进去既慢又没意义。
-const SYSTEM_DIRS: &[&str] = &[
-    "appdata",
-    "windows",
-    "program files",
-    "program files (x86)",
-    "programdata",
-    "$recycle.bin",
-    "system volume information",
-];
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Found {
     pub path: String,
@@ -137,55 +103,30 @@ pub(crate) fn looks_like_project(dir: &Path) -> bool {
 
 /// 从某个父目录往下找出所有项目。`depth` 是往下看几层。
 ///
-/// 一个目录本身是项目就不再往里翻——不然 `frontend/` 和它里面的
-/// `frontend/legacy/` 会各占一张卡，人反而看不清有几个东西。
+/// ## 2026-10-18：**它现在是索引之上的一层皮**
+///
+/// 原来这里是"一边走一边判"（`walk_from` 命中项目就 `push` + `return`）。
+/// 那样有两个后果：**规则一改就得重扫**、**"为什么这个目录被跳过"没有记录**。
+/// 现在改成：`dirs_index` 先把目录表建好（每行带 mtime / 标记文件 / 跳过原因），
+/// 这里只做两件事——**查"最外层项目"** + 给每个补上界面要的字段（`describe`）。
+///
+/// **口径没变**（遇项目就不再往里算），变的是它从哪儿来。
+/// 为什么必须统一：`jingwei projects` 已经走索引了，界面还走旧的会**两套口径并存**——
+/// 那正是这个仓库最熟的事故形状（两份清单各写各的，必然漂）。
 pub fn discover(parent: &Path, depth: usize) -> Vec<Found> {
-    let mut out = Vec::new();
     if !parent.is_dir() {
-        return out;
+        return Vec::new();
     }
     let now = now_secs();
-    walk(parent, 0, depth.max(1), now, &mut out);
+    let (idx, _reuse) =
+        crate::understand::dirs_index::build_cached(parent, depth.max(1), None);
+    let mut out: Vec<Found> = idx
+        .top_level_projects()
+        .iter()
+        .map(|p| describe(p, now))
+        .collect();
     out.sort_by(|a, b| b.touched.cmp(&a.touched).then(a.name.cmp(&b.name)));
     out
-}
-
-fn walk(dir: &Path, level: usize, max: usize, now: u64, out: &mut Vec<Found>) {
-    walk_from(dir, dir, level, max, now, out)
-}
-
-/// root 是这次扫描的起点：所有跳过的判断都相对它做，避免顺着链接跑到项目外面。
-fn walk_from(root: &Path, dir: &Path, level: usize, max: usize, now: u64, out: &mut Vec<Found>) {
-    if level > 0 && looks_like_project(dir) {
-        out.push(describe(dir, now));
-        return;
-    }
-    if level >= max {
-        return;
-    }
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = e.file_name().to_string_lossy().to_string();
-        if skip_dir(&name) {
-            continue;
-        }
-        let child = e.path();
-        // 网络盘 / 联接点 / 超长路径：进去之前先问一句。
-        // 这三样的共同症状都是"卡住不动"，而用户看不出为什么。
-        if crate::util::scan::should_skip(&child, root).is_some() {
-            continue;
-        }
-        walk_from(root, &child, level + 1, max, now, out);
-    }
-    // 父目录自己也可能是个项目
-    if level == 0 && looks_like_project(dir) {
-        out.push(describe(dir, now));
-    }
 }
 
 fn describe(dir: &Path, now: u64) -> Found {

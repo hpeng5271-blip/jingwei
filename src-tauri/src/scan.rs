@@ -5,7 +5,7 @@
 //!
 //! 纪律：**终态只由这里写**（running/done/cancelled），前端不许靠"多久没收到"去猜。
 
-use jingwei_engine::understand::{dirs_index, projects};
+use jingwei_engine::understand::{dirs_index, fingerprint, projects};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 /// **后台扫盘的共享状态**（2026-10-19）。
@@ -87,10 +87,12 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
                 }
                 let f = projects::describe_public(&p);
                 let (files, bytes, cut) = projects::measure(&p);
+                let fp = fingerprint::of(&p);
                 all.push(json!({
                     "path": f.path, "name": f.name, "kinds": f.kinds, "markers": f.markers,
                     "has_git": f.has_git, "has_contract": f.has_contract,
-                    "age_days": f.age_days, "files": files, "bytes": bytes, "size_cut": cut
+                    "age_days": f.age_days, "files": files, "bytes": bytes, "size_cut": cut,
+                    "fp": fp.hash, "fp_truncated": fp.truncated
                 }));
             }
             // 每个根扫完就先把结果交出去：**先出结果**，不等整轮

@@ -375,15 +375,6 @@ try {
   //
   //   这是拿真项目跑出来的：`#guideCard` 写「✗ 现在跑不起来 · 2 个依赖没装」，
   //   而同一屏的 `#cardNotes` 写「要处理 **没有挡路的问题**」——
-  //   因为它读的是 `d.error`，而 payload 把计数放在 `d.counts.error` 里，
-  //   于是那句"没有"**永远**会出现。
-  //
-  //   这个 bug 从 `cbb5e18`（前端拆七个脚本那次）就在了，
-  //   **47 条外壳测试全绿都没抓到**——因为它们在验别处（树、编辑器、图谱）。
-  //   **一个确定的"没有"而事实是"有"，是最不该错的那种错。**
-  //
-  //   桩里 `counts: { error: 1, warn: 1 }` 且两条 finding 各一条：
-  //   所以小字**必须**报出数来，**不许**说"没有挡路的问题"。
   st = await page.evaluate(() => ({
     notes: (document.getElementById('cardNotes') || {}).textContent || '',
     head: (document.querySelector('#statusCard h2') || {}).textContent || '',
@@ -986,6 +977,15 @@ try {
   check('不适用：建议按说明画（.gd-advice），不装成命令', na.hasAdvice && !na.hasCode, JSON.stringify(na).slice(0, 120));
   // **"顺便说一句"CLI 一直在打、界面原来一个字都不说**（2026-10-18 接上）——这一条钉住它。
   check('锦上添花：界面也要画出来（CLI 早就说了）', na.nice.includes('没能确认'), na.nice.slice(0, 60) || '（没画）');
+  // 指纹去重（纯函数）：页面里直接验，不开窗口也能跑。
+  {
+    const v = await page.evaluate(() => {
+      const l = [{ fp: 'h1' }, { fp: 'h1' }, { fp: 'h2' }, {}], c = fingerprintCounts(l);
+      return { a: c.get('h1'), b: c.get('h2'), d1: duplicateOf(l[0], c), d2: duplicateOf(l[2], c), d3: duplicateOf(l[3], c) };
+    });
+    check('指纹统计：同指纹计成一堆、无指纹不参与', v.a === 2 && v.b === 1 && v.d1 === 2 && v.d2 === 0 && v.d3 === 0, JSON.stringify(v));
+  }
+
 } catch (e) {
   check('测试脚本自身异常', false, String(e).slice(0, 160) + ' || 页面异常: ' + pageErrors.slice(0, 2).join(' | '));
 } finally {

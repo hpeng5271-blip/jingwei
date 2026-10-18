@@ -57,10 +57,30 @@ function shortPath(p) {
   return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/');
 }
 
+/// **同一份**：按指纹统计出现次数（纯函数，外壳测试可直接验）。
+/// 判据只有一条：指纹字符串相等。**不做相似度**（那是下一步，别混在一起）。
+function fingerprintCounts(list) {
+  const m = new Map();
+  for (const p of list || []) {
+    const fp = p.fp;
+    if (!fp) continue;
+    m.set(fp, (m.get(fp) || 0) + 1);
+  }
+  return m;
+}
+
+/// 这条卡片是不是"同一份"之一（≥2 个相同指纹）。
+function duplicateOf(p, counts) {
+  if (!p || !p.fp) return 0;
+  const n = counts.get(p.fp) || 0;
+  return n > 1 ? n : 0;
+}
+
 /// 画分组列表：每组一个可折叠的头 + 若干横幅。
 function renderGrouped(list) {
   const box = $('#projList');
   if (!box) return;
+  const counts = fingerprintCounts(list);
   const groups = groupFound(list);
   if (!groups.length) {
     box.innerHTML = '<div class="hint" style="padding:10px">还没扫到项目——点「全盘扫描」。</div>';
@@ -70,11 +90,14 @@ function renderGrouped(list) {
     const info = PS.info[p.path];
     const on = bannerOn(p.path);
     const kind = (p.kinds && p.kinds[0]) || '目录';
+    const dup = duplicateOf(p, counts);
+    const dupBadge = dup ? '<span class="b-dup" data-tip="和另外 ' + (dup - 1) + ' 个目录的指纹完全相同">同一份 ×' + dup + '</span>' : '';
     return '<div class="banner stagger' + (on ? ' on' : '') + '" data-path="' + esc(p.path) + '">'
       + '<div><div class="b-name">' + esc(p.name)
       + '<span class="b-kind">' + esc(String(kind).toLowerCase()) + '</span></div>'
       + '<div class="b-path" data-tip="' + esc(p.path) + '">' + esc(p.path) + '</div></div>'
       + '<div class="b-facts">' + projFacts(p, info) + '</div>'
+      + dupBadge
       + '<div class="b-acts"><button class="btn ghost sm" data-act="detail">详情</button>'
       + '<button class="btn sm" data-act="open">打开</button></div></div>';
   };

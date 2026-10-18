@@ -1887,6 +1887,8 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
   color: var(--muted); cursor: pointer; user-select: none; }
 .grp-head b { color: var(--fg); font-size: 12.5px; }
 .grp-head .grp-n { font-variant-numeric: tabular-nums; }
+.b-dup { margin-left: 8px; padding: 1px 6px; border-radius: 8px; font-size: 11px;
+  background: var(--primary-soft); color: var(--primary); border: 1px solid var(--primary-line); }
 .grp-head .grp-caret { transition: transform 120ms var(--ease); }
 .grp-head.closed .grp-caret { transform: rotate(-90deg); }
 .grp-body.closed { display: none; }

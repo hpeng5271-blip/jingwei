@@ -37,7 +37,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **8 道**：单测+集成（<!-- fact:tests_total -->423<!-- /fact --> 条：engine <!-- fact:engine_unit -->351<!-- /fact --> /
 集成 <!-- fact:integration -->53<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
-文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->78<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
+文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
 

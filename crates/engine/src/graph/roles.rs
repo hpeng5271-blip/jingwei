@@ -139,6 +139,17 @@ fn role_of(out: i64, inn: i64) -> &'static str {
 ///
 /// **文件节点的路径在 `id` 里**（`file:<路径>`），它的 `file` 字段是 null——
 /// 这是库里两种节点存法不同的地方，按文件/目录聚就得把这条路走通。
+/// 每个节点属于哪个文件（以及它是什么 kind）。
+///
+/// **三种形状都要认**（2026-10-18，拿 `flask` 从命令行看角色时抓到的）：
+///
+/// 1. `file` 节点：路径在 `id` 里（`file:src/main.rs`）；
+/// 2. Rust 的 symbol：`file` 字段有值；
+/// 3. **Python 的 symbol：`file` 是 NULL**，路径在 `id` 里（`symbol:src/flask/app.py#create_app`）。
+///
+/// 第 3 种原来没认，于是 **Python 项目的所有跨文件调用都没接上**，
+/// 角色统计变成"53 个还没连上、0 个底层"——而真值是 4 个候选、8 个底层。
+/// 同一个错我在探针里修过一次（`tools/roles_probe.py`），**产品这边漏了**。
 fn node_paths(nodes: &[Value]) -> (HashMap<String, String>, HashMap<String, String>) {
     let mut node_file: HashMap<String, String> = HashMap::new();
     let mut node_kind: HashMap<String, String> = HashMap::new();
@@ -149,7 +160,17 @@ fn node_paths(nodes: &[Value]) -> (HashMap<String, String>, HashMap<String, Stri
         let path = if kind == "file" {
             id.strip_prefix("file:").map(|s| s.to_string())
         } else {
-            n.get("file").and_then(|x| x.as_str()).map(|s| s.to_string())
+            // `file` 与 `file_path` 两种键都认（两条出口的字段名曾经不一样）。
+            n.get("file")
+                .or_else(|| n.get("file_path"))
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    // 从 id 兜底：`symbol:<路径>#<名字>`。
+                    id.strip_prefix("symbol:").and_then(|rest| {
+                        rest.rsplit_once('#').map(|(f, _)| f.to_string())
+                    })
+                })
         };
         if let Some(p) = path {
             node_file.insert(id.to_string(), p);
@@ -173,25 +194,11 @@ fn parent_dir(path: &str) -> &str {
 /// 参数就是 `store::dump` 导出来的那两个数组——**不重新查库**：
 /// 这个函数只做归并，数据从哪儿来是调用方的事。
 pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
-    // 节点 → 路径；节点 → 种类。
-    //
-    // **文件节点的路径在 `id` 里**（`file:<路径>`），它的 `file` 字段是 null——
-    // 这是库里两种节点存法不同的地方，角色按文件聚就得把这条路走通。
-    let mut node_file: HashMap<String, String> = HashMap::new();
-    let mut node_kind: HashMap<String, String> = HashMap::new();
-    for n in nodes.iter() {
-        let id = n.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        let kind = n.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-        node_kind.insert(id.to_string(), kind.to_string());
-        let path = if kind == "file" {
-            id.strip_prefix("file:").map(|s| s.to_string())
-        } else {
-            n.get("file").and_then(|x| x.as_str()).map(|s| s.to_string())
-        };
-        if let Some(p) = path {
-            node_file.insert(id.to_string(), p);
-        }
-    }
+    // **路径映射只留一份**（2026-10-18）：这里原来是 `node_paths` 的复制品，
+    // 于是 Python 的符号节点（`file` 为 NULL、路径在 id 里）在这条路上又被判成"没文件"，
+    // 文件级角色全变成「还没连上」——而目录级（走 `node_paths`）是对的。
+    // 同一件事三份实现，修了探针和 node_paths，**这一份漏了**。
+    let (node_file, node_kind) = node_paths(nodes);
 
     // 文件 → (出, 入)：只由跨文件的 `calls` 累加。
     let mut f_out: HashMap<&str, i64> = HashMap::new();
@@ -801,5 +808,28 @@ mod tests {
         assert!(is_library_surface("src/lib.rs"));
         assert!(is_library_surface("crates/engine/src/lib.rs"));
         assert!(!is_library_surface("src/sub/lib.rs"));
+    }
+
+    /// **Python 的符号节点没有 `file` 字段，路径在 `id` 里**（2026-10-18 真 flask 换的）。
+    ///
+    /// 修之前：`file` 为 NULL → 跨文件调用全被跳过 → 文件级角色变成
+    /// 「53 个还没连上、0 个底层」，而目录级（走 `node_paths`）是对的。
+    /// **同一件事三份实现**（探针、node_paths、annotate 里的复制品），修了两份漏一份。
+    #[test]
+    fn python符号节点的路径要从id取() {
+        use serde_json::json;
+        let mut nodes = vec![
+            json!({"id": "symbol:pkg/app.py#run", "kind": "symbol", "file": null}),
+            json!({"id": "symbol:pkg/db.py#get", "kind": "symbol", "file": null}),
+            json!({"id": "file:pkg/app.py", "kind": "file", "file": null}),
+            json!({"id": "file:pkg/db.py", "kind": "file", "file": null}),
+        ];
+        // app.run 调 db.get —— 一条跨文件调用。
+        let edges = vec![json!({"src": "symbol:pkg/app.py#run", "dst": "symbol:pkg/db.py#get", "kind": "calls"})];
+
+        let c = annotate(&mut nodes, &edges);
+        // 两个文件都不该是「还没连上」：它们之间有一条真实的跨文件调用。
+        assert_eq!(c["isolated"].as_i64().unwrap(), 0, "{c}");
+        assert_eq!(c["middle"].as_i64().unwrap(), 2, "{c}");
     }
 }

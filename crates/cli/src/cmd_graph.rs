@@ -97,6 +97,65 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
         }
     };
 
+    // **角色也要能从命令行看**（2026-10-18）：原来只有桌面「图谱」页算角色，
+    // CLI 看到的是另一份东西——**同一件事两个壳，却只有一个壳讲**。
+    // 现在两边都走 `roles::annotate` / `roles::dir_roles`（同一处实现）。
+    if matches!(sub, "roles" | "role") {
+        let limit = 5000usize;
+        let v = match store.dump(limit) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("{}", json!({ "state": "unknown", "why": "our_gap", "reason": format!("导出图谱失败：{e}") }));
+                return 2;
+            }
+        };
+        let mut nodes = v["nodes"].as_array().cloned().unwrap_or_default();
+        let edges = v["edges"].as_array().cloned().unwrap_or_default();
+        let counts = jingwei_engine::graph::roles::annotate(&mut nodes, &edges);
+        let dirs = jingwei_engine::graph::roles::dir_roles(&nodes, &edges);
+        if json {
+            println!("{}", json!({ "state": "yes", "roles": counts, "dirs": dirs }));
+            return 0;
+        }
+        println!();
+        println!("  {} 角色（只算跨文件调用；测试文件不参与）", c(GREEN, "·"));
+        for (k, label) in [
+            ("entry", "入口"),
+            ("entry_candidate", "入口候选"),
+            ("surface", "公共面"),
+            ("foundation", "公共底层"),
+            ("middle", "中间层"),
+            ("isolated", "还没连上"),
+            ("test", "测试文件"),
+        ] {
+            println!("    {label:<10} {}", counts[k].as_i64().unwrap_or(0));
+        }
+        println!();
+        println!("  {} 目录级（前 3 名）", c(GREEN, "·"));
+        for layer in ["entry", "foundation"] {
+            let arr = dirs[layer].as_array().cloned().unwrap_or_default();
+            if arr.is_empty() {
+                println!("    {layer:<10} （没有）");
+                continue;
+            }
+            let list: Vec<String> = arr
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{} 出{}入{}",
+                        d["dir"].as_str().unwrap_or("?"),
+                        d["out"].as_i64().unwrap_or(0),
+                        d["in"].as_i64().unwrap_or(0)
+                    )
+                })
+                .collect();
+            println!("    {layer:<10} {}", list.join(" · "));
+        }
+        println!("    {:<10} 共 {} 个目录", "总数", dirs["total"].as_i64().unwrap_or(0));
+        println!();
+        return 0;
+    }
+
     match sub {
         // 某一次的明细
         "runs" | "run" | "log" => {

@@ -7,14 +7,50 @@
     "**现在 entries 是空的**：先有校验器，再填真链接（填之前必须实测 sha256 / size / 签名）。"
   ],
   "_hosts": [
-    { "host": "static.rust-lang.org", "why": "rustup 的官方分发域（toolchain 与 rustup-init）" },
-    { "host": "win.rustup.rs", "why": "rustup 的 Windows 引导页（会 302 到 static.rust-lang.org）" },
-    { "host": "sh.rustup.rs", "why": "rustup 的类 Unix 引导脚本（同一份发布）" },
-    { "host": "nodejs.org", "why": "Node 官方二进制与安装包" },
-    { "host": "www.python.org", "why": "Python 官方安装包（含 embeddable zip）" },
-    { "host": "api.adoptium.net", "why": "Adoptium（Eclipse Temurin）JDK 的官方 API 分发" },
-    { "host": "github.com", "why": "w64devkit / MinGW-w64 的官方 release 页（构建链唯一可便携的来源）" },
-    { "host": "objects.githubusercontent.com", "why": "github.com 的 release 资产实际下载域（一次重定向）" }
+    {
+      "host": "static.rust-lang.org",
+      "why": "rustup 的官方分发域（toolchain 与 rustup-init）"
+    },
+    {
+      "host": "win.rustup.rs",
+      "why": "rustup 的 Windows 引导页（会 302 到 static.rust-lang.org）"
+    },
+    {
+      "host": "sh.rustup.rs",
+      "why": "rustup 的类 Unix 引导脚本（同一份发布）"
+    },
+    {
+      "host": "nodejs.org",
+      "why": "Node 官方二进制与安装包"
+    },
+    {
+      "host": "www.python.org",
+      "why": "Python 官方安装包（含 embeddable zip）"
+    },
+    {
+      "host": "api.adoptium.net",
+      "why": "Adoptium（Eclipse Temurin）JDK 的官方 API 分发"
+    },
+    {
+      "host": "github.com",
+      "why": "w64devkit / MinGW-w64 的官方 release 页（构建链唯一可便携的来源）"
+    },
+    {
+      "host": "objects.githubusercontent.com",
+      "why": "github.com 的 release 资产实际下载域（一次重定向）"
+    }
   ],
-  "entries": []
+  "entries": [
+    {
+      "id": "rustup-init",
+      "version": "1.29.1",
+      "url": "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe",
+      "host": "static.rust-lang.org",
+      "sha256": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+      "publisher": null,
+      "homepage": "https://rustup.rs",
+      "verified_at": "2026-10-18",
+      "size": 12721664
+    }
+  ]
 }

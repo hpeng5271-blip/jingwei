@@ -25,7 +25,7 @@
 //   node tools/uitest-window.mjs --keep   出错时留着窗口不关（人工看现场）
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, statSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, readdirSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -245,8 +245,34 @@ const visible = (it) => !!it && it.exists && it.display !== 'none' && !it.hidden
 ///   - 进程**还在不在**？—— 起来了但卡住 vs 根本没起来，是两回事
 ///   - 退出码是多少？—— **已经退出**说明它启动就失败了（参数错、目录不存在、单实例锁）
 ///   - 报告文件**存在吗**？—— 存在但内容不能解析（写了一半），与"根本没写"不同
+/// **把抖动记下来**（2026-10-18 加）。
+///
+/// 为什么要落盘：重试能让门禁变绿，但**绿了之后就没人知道它抖过**。
+/// 而"这道门禁多久抖一次"本身是数据——没有它，下一次讨论"要不要信门禁"只能凭印象。
+function appendFlake(line) {
+  try {
+    const dir = join(ROOT, "dist");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "uitest-window-flakes.log"),
+      `${new Date().toISOString()}  ${line}\n`);
+  } catch { /* 日志写不进去不影响门禁结论 */ }
+}
+
 function runWindow(args) {
   rmSync(REPORT, { force: true });
+  // **启动前清一次残留**（2026-10-18 加）：全量跑时这一道偶发 193 秒失败
+  // （一次 runWindow 两次 90s 都超时），而单独跑 15 秒就过。
+  // 最像的原因是**上一个窗口没退干净**——`taskkill` 是异步的，下一次 spawn 可能在
+  // 它还没消失时就起来了。所以这里先按名字清一遍，再等 300ms 让句柄释放。
+  // **不是掩盖超时**：真正的超时（窗口起不来）仍然会在两次等待后报出来。
+  try {
+    spawnSync('taskkill', ['/IM', 'jingwei-gui.exe', '/F'], { stdio: 'ignore' });
+    // **CLI 也清**（2026-10-18 加）：`jingwei index` 会写 SQLite，残留进程可能占着库锁，
+    // 于是窗口里的 `graph_dump` 一直等 → 90 秒不交报告。这条是猜的，但很便宜。
+    spawnSync('taskkill', ['/IM', 'jingwei.exe', '/F'], { stdio: 'ignore' });
+  } catch { /* 没有残留就是好事 */ }
+  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+
   let exited = null;
   const child = spawn(EXE, [...args, '--report', REPORT], { detached: false, stdio: 'ignore' });
   child.on('exit', (code, sig) => {
@@ -266,10 +292,11 @@ function runWindow(args) {
     // 会训练人忽略它**——那比没有门禁更坏。
     //
     // 为什么必须打出来：重试一次就悄悄过去，读的人会以为"每次都是 15 秒过"。
-    // **抖动的次数本身是数据。**
+    // **抖动的次数本身是数据。** 所以还要落盘记一行（见下面 appendFlake）。
     if (!rep) {
-      console.log('  · 窗口第 1 次没交报告（90 秒）——重试一次');
-      rep = waitReport(90_000);
+      console.log('  · 窗口第 1 次没交报告（90 秒）——重试一次（120 秒）');
+      appendFlake(`第 1 次超时（90s），参数：${args.join(' ')}`);
+      rep = waitReport(120_000);
     }
     if (!rep) {
       const why = [];

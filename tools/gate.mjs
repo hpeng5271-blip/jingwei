@@ -362,6 +362,12 @@ checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
 checkPageList();
+// **"就绪"判据的两份实现要互相点名**（见 checkReadyParity 的头）。
+{
+  const r = checkReadyParity(ROOT);
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log('  · 就绪判据：两处都写明了「两份实现」（防悄悄漂走）');
+}
 // **"我们没接上"不许说成"我们自己漏的"**（见 checkLeakWording 的头）。
 {
   const r = checkLeakWording(ROOT);
@@ -705,6 +711,33 @@ export function checkLeakWording(root) {
     problems.push("cmd_graph.rs 里那句「没接上」的说明必须写明「分不开」——分得开才许分开说");
   }
 
+  return { problems, checked };
+}
+
+// **"就绪"这一个判据有两份实现，谁都不许偷偷单飞**（2026-10-18）。
+//
+// 门禁抖动的根因就是这个：`src-tauri/src/selfcheck.rs` 注入的 JS 里的 `ready(tab)`
+// 只判"页面可见"，而 `tools/uitest-window.mjs::reportReady()` 要求"主卡有字"。
+// 于是报告在"可见但还没画好"时被拍下来，门禁那边永远判它没就绪——**干等 90 秒**。
+//
+// 两份实现跨不了语言边界（一个在 Rust 字符串里、一个在 mjs 里），所以留了这条门禁：
+// **两边都必须写明"同一个判据的两份实现"**。它挡不住逻辑被改坏，
+// 但能挡住"有人只改一边、另一边悄悄漂走"。
+export function checkReadyParity(root) {
+  const problems = [];
+  let checked = 0;
+  const pairs = [
+    [join(root, "src-tauri", "src", "selfcheck.rs"), "同一个判据的两份实现"],
+    [join(root, "tools", "uitest-window.mjs"), "两份实现"],
+  ];
+  for (const [f, marker] of pairs) {
+    checked++;
+    if (!existsSync(f)) { problems.push(`${f} 不见了`); continue; }
+    const src = readFileSync(f, "utf8");
+    if (!src.includes(marker)) {
+      problems.push(`${f} 没写明"就绪判据有两份实现"——两边会悄悄漂走（这正是抖动根因）`);
+    }
+  }
   return { problems, checked };
 }
 

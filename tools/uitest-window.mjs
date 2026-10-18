@@ -179,6 +179,15 @@ function assertExeFresh() {
  * 不满足就继续等，由外层的硬上限兜底——**等不到就交一份"卡住了"的报告**，
  * 那比交不出来有用（门禁正是靠它看出「正在读取…」的）。
  */
+// ⚠️ **这条判据有两份实现**（2026-10-18 抓到抖动根因后写明）：
+//
+// - 这里（门禁侧，判"报告算不算就绪"）
+// - `src-tauri/src/selfcheck.rs` 里注入的 `ready(tab)`（app 侧，判"能不能拍快照"）
+//
+// 两份**必须一致**。原来它们不一致：app 侧对 `home` 只看"页面可见"，
+// 而这里要求"主卡有文字"——于是容器夹具上报告被拍早了，这里永远判没就绪，
+// **门禁干等 90 秒**（实测 10 次里 2 次）。改一处必须改另一处；
+// `gate.mjs::checkReadyParity` 会检查两边都写着这句话。
 function reportReady(rep) {
   if (!Array.isArray(rep) || rep.length === 0 || !Array.isArray(rep[0].items)) return false;
   const page = rep[0];

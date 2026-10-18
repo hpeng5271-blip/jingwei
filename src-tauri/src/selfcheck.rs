@@ -167,6 +167,21 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             if (!v || !v.classList.contains('on')) return false;
             const g = document.getElementById('ghSub');
             if (tab === 'graph' && g) return !/正在读取/.test(g.textContent || '');
+            // **`home` 光"可见"不算就绪**（2026-10-18 抓到抖动后修的）：
+            //
+            // 文档面板/容器夹具上，`#statusCard` 的数据要等 IPC 回来才填。
+            // 原来这里只判 `rect > 0`，于是**页面刚显示、字还没填**就被拍进报告；
+            // 而门禁那边的 `reportReady()` 要求「主卡文字非空」——**两份判据不一致**，
+            // 于是那份报告永远"没就绪"，门禁干等 90 秒。
+            // 实测：失败时报告能解析、是数组，就是 `#statusCard` 是空的。
+            //
+            // ⚠️ 这条与 `tools/uitest-window.mjs::reportReady()` 是**同一个判据的两份实现**
+            // （一个在 Rust 注入的 JS 里、一个在门禁里，跨不了语言边界）。
+            // 改一处必须改另一处——已在两边都写了这句注释。
+            if (tab === 'home') {{
+              const sc = document.getElementById('statusCard');
+              if (sc && !(sc.textContent || '').trim()) return false;
+            }}
             const r = v.getBoundingClientRect();
             return r.width > 0 && r.height > 0;
           }};

@@ -164,9 +164,8 @@ impl Contract {
     /// 从 requirements.txt 读声明（没有就是空）
     pub fn declared_deps(root: &Path) -> Vec<String> {
         let p = root.join("requirements.txt");
-        let Ok(raw_text) = std::fs::read_to_string(&p) else {
-            return Vec::new();
-        };
+        let raw_text = std::fs::read_to_string(&p).unwrap_or_default();
+
         // **先去掉 BOM**（2026-10-18 实测）：带 BOM 的 requirements.txt，
         // 第一条依赖会变成 `\u{feff}flask`——**永远匹配不上已安装**，长期误报"缺 flask"。
         let text = crate::util::bom::strip_bom(&raw_text);
@@ -186,8 +185,94 @@ impl Contract {
                 out.push(name);
             }
         }
+        // **再补上 `pyproject.toml` 的 `[project] dependencies`**（2026-10-18）：
+        // 现代 Python 项目常常只有 pyproject、没有 requirements.txt（`flask` 就是）。
+        for (name, _) in Self::pyproject_deps_spec(root) {
+            out.push(name);
+        }
         out.sort();
         out.dedup();
+        out
+    }
+
+    /// 从 `pyproject.toml` 的 `[project] dependencies` 读声明（2026-10-18 加）。
+    ///
+    /// ## 为什么必须有它
+    ///
+    /// 拿真的 `pallets/flask` 跑 `doctor`：它 **一个依赖都不报**——因为 flask 的依赖写在
+    /// `pyproject.toml` 里，而我们只读 `requirements.txt`。
+    /// 那不是"这个项目没有依赖"，那是"**我们没读**"。三态不许压扁。
+    ///
+    /// ## 为什么自己解析而不是用 toml crate
+    ///
+    /// 这里只要一件事：`[project]` 段里的 `dependencies = [ "a>=1", "b" ]` 列表。
+    /// 为一个键引一个依赖（含它的版本兼容面）不划算。**边界写清**：
+    /// - 只认 `[project]` 段（到下一个 `[` 开头的段头为止）；
+    /// - 只认 `dependencies` 这个键，**不认** `optional-dependencies` / `build-system.requires`；
+    /// - 支持跨多行与单行两种写法；
+    /// - 解析不出来的行**跳过**，不猜（宁可少报，不许瞎报）。
+    pub fn pyproject_deps_spec(root: &Path) -> Vec<(String, String)> {
+        let p = root.join("pyproject.toml");
+        let Ok(raw) = std::fs::read_to_string(&p) else {
+            return Vec::new();
+        };
+        let text = crate::util::bom::strip_bom(&raw);
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut in_project = false;
+        let mut collecting = false;
+        let mut buf = String::new();
+        for raw_line in text.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                // 段头：`[project]` 进去，别的段一律不认。
+                collecting = false;
+                in_project = line.replace(' ', "") == "[project]";
+                continue;
+            }
+            if !in_project {
+                continue;
+            }
+            if !collecting {
+                let Some(eq) = line.find('=') else { continue };
+                if line[..eq].trim() != "dependencies" {
+                    continue;
+                }
+                let rest = line[eq + 1..].trim();
+                if !rest.starts_with('[') {
+                    continue; // `dependencies = { … }` 这种不认，跳过
+                }
+                collecting = true;
+                buf.push_str(rest);
+            } else {
+                buf.push_str(line);
+            }
+            if !buf.contains(']') {
+                continue;
+            }
+            collecting = false;
+            // 把这一段里所有 `"名字>=版本"` 抠出来。
+            if let Some(open) = buf.find('[') {
+                if let Some(close) = buf[open..].find(']') {
+                    let body = &buf[open + 1..open + close];
+                    for piece in body.split(',') {
+                        let spec = piece.trim().trim_matches('"').trim_matches('\'').trim();
+                        if spec.is_empty() || spec.starts_with('#') {
+                            continue;
+                        }
+                        let cut = spec
+                            .find(|c: char| "<>=!~[; ".contains(c))
+                            .unwrap_or(spec.len());
+                        let name = spec[..cut].trim().to_lowercase();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let want = spec[cut..].trim().to_string();
+                        out.push((name, want));
+                    }
+                }
+            }
+            buf.clear();
+        }
         out
     }
 
@@ -196,9 +281,8 @@ impl Contract {
     /// 「装上的是什么」对得上对不上，名字单独拎出来什么都说明不了。
     pub fn declared_deps_spec(root: &Path) -> Vec<(String, String)> {
         let p = root.join("requirements.txt");
-        let Ok(raw_text) = std::fs::read_to_string(&p) else {
-            return Vec::new();
-        };
+        let raw_text = std::fs::read_to_string(&p).unwrap_or_default();
+
         // **先去掉 BOM**（2026-10-18 实测）：带 BOM 的 requirements.txt，
         // 第一条依赖会变成 `\u{feff}flask`——**永远匹配不上已安装**，长期误报"缺 flask"。
         let text = crate::util::bom::strip_bom(&raw_text);
@@ -230,6 +314,10 @@ impl Contract {
                 .trim()
                 .to_string();
             out.push((name, spec));
+        }
+        // **`pyproject.toml` 也算声明**（2026-10-18）：否则 `flask` 这种项目会"一个依赖都没有"。
+        for nw in Self::pyproject_deps_spec(root) {
+            out.push(nw);
         }
         out.sort();
         out.dedup();
@@ -473,6 +561,42 @@ mod tests {
         assert_eq!(deps, vec!["flask".to_string(), "requests".to_string()], "依赖名要干净：{deps:?}");
         let spec = Contract::declared_deps_spec(&d);
         assert!(spec.iter().any(|(n, _)| n == "flask"), "名字+版本那条也要干净：{spec:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **只有 `pyproject.toml` 的项目也要读得出依赖**（2026-10-18，拿真 flask 换的）。
+    ///
+    /// 修前：`pallets/flask` 的 `doctor` **一个依赖都不报**——因为它的依赖在 `pyproject.toml`，
+    /// 而我们只读 `requirements.txt`，**读不到就早退成空**。
+    /// 那不是"没有依赖"，那是"我们没读"——三态压扁。
+    #[test]
+    fn pyproject里的依赖要读出来() {
+        let d = std::env::temp_dir().join(format!("dd-pyproj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("pyproject.toml"),
+            "[build-system]\nrequires = [\"setuptools>=61\"]\n\n[project]\nname=\"t\"\ndependencies = [\n    \"flask>=3.0\",\n    \"requests\",\n]\n\n[project.optional-dependencies]\ndev = [\"pytest\"]\n",
+        )
+        .unwrap();
+
+        let got = Contract::declared_deps_spec(&d);
+        let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["flask", "requests"], "只认 [project] dependencies：{got:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// **BOM 也挡不住它**（两个坑会叠在一起：Windows 编辑器 + pyproject）。
+    #[test]
+    fn 带bom的pyproject也读得出依赖() {
+        let d = std::env::temp_dir().join(format!("dd-pyproj-bom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"[project]\ndependencies = [\"click\"]\n");
+        std::fs::write(d.join("pyproject.toml"), &bytes).unwrap();
+
+        assert_eq!(Contract::declared_deps(&d), vec!["click".to_string()]);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

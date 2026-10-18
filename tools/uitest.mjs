@@ -640,6 +640,15 @@ try {
   );
     // **「入口」只能叫「候选」**（2026-10-18，拿 3 个真应用量出来的）：
     // 判出 8 个"入口"只有 2 个是真的（25%）。标签骗人比没有标签更糟。
+    // **公共面**（2026-10-18）：库的 `src/lib.rs` 既不是底层也不是入口。
+    // 真项目证据：embed-resource 的 lib.rs 曾是"公共底层"，而它是库的出口。
+    const surf = await page.evaluate(() => {
+      ghRenderRoles({ surface: 1, entry: 1, foundation: 0, middle: 2, test: 0, isolated: 0 });
+      return document.querySelector('#ghRoles').textContent;
+    });
+    check('图谱：库的出口叫「公共面」，不算底层',
+      surf.includes('公共面') && surf.includes('1') && !surf.includes('公共底层 1'),
+      surf.slice(0, 80));
     check('图谱：入口只能叫候选，不许说成事实',
       st.roles.includes('入口候选') && !st.roles.includes('入口 '),
       st.roles.slice(0, 60));

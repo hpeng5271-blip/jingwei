@@ -30,6 +30,7 @@
 //! ```text
 //! entry       出 >= 3 且 出 >= 2×入      （入口）
 //! foundation  入 >= 3 且 入 >= 2×出      （公共底层）
+//! surface     `src/lib.rs`（库的出口）——**不是底层，也不是入口**
 //! middle      其余，含孤立点
 //! test        测试文件（不参与判断）
 //! container   项目节点（它装东西，不是入口）
@@ -48,6 +49,19 @@ fn is_test_file(f: &str) -> bool {
 ///
 /// 文件和目录两级都问它——不然"什么算入口"会出现第二份定义，
 /// 而这个仓库为"同一个事实在第二个地方判断"付过太多次账。
+/// **`src/lib.rs` 是"公共面"，不是"公共底层"**（2026-10-18，3 个真应用换来的）。
+///
+/// `embed-resource` 的 `src/lib.rs` 被 3 个文件调用、自己不调用谁，按度数就成了"公共底层"。
+/// 而它是**库的出口**——被别人 `use` 的那个面，不是被人当工具用的零件。
+/// 两个名字说的是两件事，压成一个就是错判（这个仓库最熟的形状）。
+///
+/// 只认 **crate 根**（`src/lib.rs`）：`src/sub/lib.rs` 不是公共面，按度数走——
+/// 不然"有 lib.rs 就叫公共面"会把普通目录也标错。
+fn is_library_surface(f: &str) -> bool {
+    let l = f.replace('\\', "/");
+    l == "src/lib.rs" || l.ends_with("/src/lib.rs")
+}
+
 fn classify(out: i64, inn: i64) -> &'static str {
     if out >= 3 && out >= 2 * inn {
         "entry"
@@ -158,6 +172,10 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
         if is_test_file(f) {
             return "test";
         }
+        // **crate 根的 lib.rs 先于度数**：它是公共面，不是工具也不是入口。
+        if is_library_surface(f) {
+            return "surface";
+        }
         role_of(*f_out.get(f).unwrap_or(&0), *f_in.get(f).unwrap_or(&0))
     };
 
@@ -196,6 +214,9 @@ pub fn annotate(nodes: &mut [Value], edges: &[Value]) -> Value {
     serde_json::json!({
         "entry": file_count.get("entry").copied().unwrap_or(0),
         "foundation": file_count.get("foundation").copied().unwrap_or(0),
+        // **公共面**：库的出口（`src/lib.rs`）。它不是底层，也不是入口，
+        // 所以必须单独一个数——三个格子压成一个就是今天修的那个错判。
+        "surface": file_count.get("surface").copied().unwrap_or(0),
         "middle": file_count.get("middle").copied().unwrap_or(0),
         "test": file_count.get("test").copied().unwrap_or(0),
         "isolated": file_count.get("isolated").copied().unwrap_or(0),
@@ -280,6 +301,72 @@ pub fn dir_roles(nodes: &[Value], edges: &[Value]) -> Value {
 
 #[cfg(test)]
 mod tests {
+
+    /// **`src/lib.rs` 是"公共面"，不是"公共底层"**（2026-10-18，真项目打出来的）。
+    ///
+    /// 判据从 3 个真应用换来：`embed-resource` 的 `lib.rs` 被 3 个文件调用、自己不调用谁，
+    /// 按度数就被判成"公共底层"。而它是**库的出口**（被别人 `use` 的那个面），
+    /// 不是"被调用的工具"。两个名字说的是两件事，压成一个就是错判。
+    ///
+    /// 这条测试同时钉住：**`src/main.rs` 仍然是入口**（别为了修 lib 把 main 也挪走）。
+    #[test]
+    fn 库的根文件是公共面不是公共底层() {
+        let mut nodes = vec![
+            node("file:src/lib.rs", "file", None),
+            node("file:src/main.rs", "file", None),
+        ];
+        for i in 0..4 {
+            nodes.push(node(&format!("file:src/m{i}.rs"), "file", None));
+            nodes.push(node(&format!("symbol:src/m{i}.rs#f"), "symbol", Some(&format!("src/m{i}.rs"))));
+        }
+        nodes.push(node("symbol:src/lib.rs#go", "symbol", Some("src/lib.rs")));
+        nodes.push(node("symbol:src/main.rs#run", "symbol", Some("src/main.rs")));
+
+        let mut edges = Vec::new();
+        // 4 个模块文件都调用 lib.rs 里的 go → lib.rs 入度 4、出度 0
+        for i in 0..4 {
+            edges.push(json!({
+                "src": format!("symbol:src/m{i}.rs#f"),
+                "dst": "symbol:src/lib.rs#go",
+                "kind": "calls"
+            }));
+        }
+        // main.rs 调用 3 个模块（跨文件）→ 出度 3、入度 0 → 仍是入口
+        for i in 0..3 {
+            edges.push(json!({
+                "src": "symbol:src/main.rs#run",
+                "dst": format!("symbol:src/m{i}.rs#f"),
+                "kind": "calls"
+            }));
+        }
+        let r = annotate(&mut nodes, &edges);
+        assert_eq!(r["surface"], 1, "`src/lib.rs` 该是公共面：{r}");
+        assert_eq!(r["foundation"], 0, "`src/lib.rs` 不许再算公共底层：{r}");
+        assert_eq!(r["entry"], 1, "`src/main.rs` 仍是入口：{r}");
+    }
+
+    /// 非 crate 根的 `lib.rs`（例如 `src/sub/lib.rs`）**不许被特殊对待**——
+    /// 它不是公共面，按度数走。（不然"有 lib.rs 就叫公共面"会把普通目录也标错。）
+    #[test]
+    fn 非根目录里的lib不算公共面() {
+        let mut nodes = vec![node("file:src/sub/lib.rs", "file", None)];
+        for i in 0..3 {
+            nodes.push(node(&format!("file:src/m{i}.rs"), "file", None));
+            nodes.push(node(&format!("symbol:src/m{i}.rs#f"), "symbol", Some(&format!("src/m{i}.rs"))));
+        }
+        nodes.push(node("symbol:src/sub/lib.rs#go", "symbol", Some("src/sub/lib.rs")));
+        let mut edges = Vec::new();
+        for i in 0..3 {
+            edges.push(json!({
+                "src": format!("symbol:src/m{i}.rs#f"),
+                "dst": "symbol:src/sub/lib.rs#go",
+                "kind": "calls"
+            }));
+        }
+        let r = annotate(&mut nodes, &edges);
+        assert_eq!(r["surface"], 0, "子目录里的 lib.rs 不是公共面：{r}");
+        assert_eq!(r["foundation"], 1, "它按度数就是公共底层：{r}");
+    }
     use super::*;
     use serde_json::json;
 

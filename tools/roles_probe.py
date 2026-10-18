@@ -35,6 +35,17 @@ EXE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    'target', 'release', 'jingwei.exe')
 
 
+def is_library_surface(path):
+    """**crate 根的 `src/lib.rs` 是公共面**，不是公共底层（与 roles.rs 同一判据）。
+
+    ⚠ 这是**第二份**判据（唯一真源在 roles.rs）。放在这里的理由：探针要能独立跑，
+    不能依赖 Rust 侧的输出格式。**两处不一致时以 roles.rs 为准**——
+    它有自己的单测盯着（`库的根文件是公共面不是公共底层`）。
+    """
+    p = path.replace("\\", "/")
+    return p == "src/lib.rs" or p.endswith("/src/lib.rs")
+
+
 def is_test(path):
     p = path.replace('\\', '/').lower()
     return '/tests/' in p or p.endswith('_test.rs') or p.endswith('tests.rs')
@@ -65,7 +76,9 @@ def roles_of(db):
         if is_test(f):
             continue
         o, i = out.get(f, 0), inn.get(f, 0)
-        if o >= 3 and o >= 2 * i:
+        if is_library_surface(f):
+            r = 'surface'
+        elif o >= 3 and o >= 2 * i:
             r = 'entry'
         elif i >= 3 and i >= 2 * o:
             r = 'foundation'
@@ -118,7 +131,7 @@ def main():
         print(f'找不到 {EXE}：先 cargo build --release -p jingwei')
         return 1
 
-    print(f"{'项目':<26}{'类型':<5}{'文件':>5}{'跨文件calls':>12}{'入口':>5}{'底层':>5}  main.rs 是入口?")
+    print(f"{'项目':<26}{'类型':<5}{'文件':>5}{'跨文件calls':>12}{'入口':>5}{'公共面':>6}{'底层':>5}  main.rs 是入口?")
     apps = entries = correct = 0
     for name, path in targets:
         subprocess.run([EXE, 'index', '--root', path], capture_output=True, text=True,
@@ -134,7 +147,7 @@ def main():
         main_is = 'main.rs' in ents
         mark = ('是' if main_is else '否 ⚠') if is_app else '—'
         print(f'{name:<26}{"应用" if is_app else "库":<5}{total:>5}{cross:>12}'
-              f'{counts.get("entry", 0):>5}{counts.get("foundation", 0):>5}  {mark}')
+              f'{counts.get("entry", 0):>5}{counts.get("surface", 0):>6}{counts.get("foundation", 0):>5}  {mark}')
         if ents:
             print(f'    入口名单: {", ".join(ents)}')
         founds = [r[3] for r in rows if r[0] == 'foundation']

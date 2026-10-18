@@ -16,6 +16,8 @@ mod java;
 mod node;
 mod python;
 mod rust;
+/// **跑失败了，缺哪个件**——把构建错误翻成"缺什么 + 怎么验"（见那个文件的头）。
+pub mod toolchain_need;
 mod ready;
 pub mod rundiag;
 

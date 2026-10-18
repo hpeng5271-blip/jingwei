@@ -574,6 +574,14 @@ function renderGuide() {
         + '</div></div>').join('')
       + '</div>';
   }
+  // **"锦上添花"CLI 一直在打，界面原来一个字都不说**（2026-10-18 接上）。
+  // 它们不进「卡在哪」——不挡路；但"依赖没确认过""没有 .gitignore"这类事，
+  // 桌面用户现在也能看到了。**同一份数据，两个壳必须都讲**。
+  const nice = g.niceToHave || [];
+  if (nice.length) {
+    html += '<div class="gd-nice"><b>顺便说一句</b><ul>'
+      + nice.map((s) => '<li>' + esc(s) + '</li>').join('') + '</ul></div>';
+  }
   html += '</div></div>';
   el.innerHTML = html;
 }

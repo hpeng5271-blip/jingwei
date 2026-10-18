@@ -412,6 +412,11 @@ main{grid-area:main;overflow:auto;padding:var(--s5) 0 64px}
 #guideCard .gd-next code{background:var(--inset);border:1px solid var(--line);
   border-radius:var(--r-sm);padding:2px 7px;font-size:var(--fs-sm);user-select:all}
 /* **建议不是命令**（2026-10-18）：未标记但有源码的目录，nextStep 是一句话。 */
+
+/* **"顺便说一句"不是挡路的**（2026-10-18）：比 blockers 轻，但要说。 */
+#guideCard .gd-nice{margin-top:10px;font-size:var(--fs-sm);color:var(--muted);}
+#guideCard .gd-nice ul{margin:4px 0 0 18px;padding:0;}
+#guideCard .gd-nice li{margin:2px 0;line-height:1.45;}
 #guideCard .gd-next .gd-advice{color:var(--fg);font-size:var(--fs-sm);line-height:1.5;}
 #guideCard .gd-blockers{margin-top:10px}
 #guideCard .gd-blockers > b{font-size:var(--fs-sm);color:var(--muted)}

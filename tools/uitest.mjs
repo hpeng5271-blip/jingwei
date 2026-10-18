@@ -99,6 +99,7 @@ function stubTauri() {
                     whatToDo: '这里有 3 个 .py，但没有任何项目标记文件——补一个清单我就能判断依赖和运行方式',
                   },
                   what: 'Python',
+                  niceToHave: ['依赖没能确认：pip list 没跑成（不是没装）'],
                   headline: '这里不像一个项目（没有任何项目标记文件）',
                   nextStep: '想让我能判断它：新增一个清单文件（记下 3 个 .py）；不需要就忽略这句',
                 },
@@ -116,6 +117,7 @@ function stubTauri() {
                 findings: [],
                 guide: {
                   ready: { state: 'no' },
+                  niceToHave: ['依赖没能确认：pip list 没跑成（不是没装）'],
                   what: 'Python',
                   headline: '4 个依赖没装：click、flask、numpy、requests',
                   nextStep: 'jingwei env install',
@@ -972,10 +974,17 @@ try {
   const na = await page.evaluate(() => {
     const el = document.getElementById('guideCard') || {};
     const q = (s) => (el.querySelector ? el.querySelector(s) : null);
-    return { text: el.textContent || '', hasAdvice: !!q('.gd-advice'), hasCode: !!q('.gd-next code') };
+    return {
+      text: el.textContent || '',
+      hasAdvice: !!q('.gd-advice'),
+      hasCode: !!q('.gd-next code'),
+      nice: (q('.gd-nice') || {}).textContent || '',
+    };
   });
   check('不适用：说「不适用」，不说「还查不出来」', na.text.includes('不适用') && !na.text.includes('还查不出来'), na.text.slice(0, 100));
   check('不适用：建议按说明画（.gd-advice），不装成命令', na.hasAdvice && !na.hasCode, JSON.stringify(na).slice(0, 120));
+  // **"顺便说一句"CLI 一直在打、界面原来一个字都不说**（2026-10-18 接上）——这一条钉住它。
+  check('锦上添花：界面也要画出来（CLI 早就说了）', na.nice.includes('没能确认'), na.nice.slice(0, 60) || '（没画）');
 } catch (e) {
   check('测试脚本自身异常', false, String(e).slice(0, 160) + ' || 页面异常: ' + pageErrors.slice(0, 2).join(' | '));
 } finally {

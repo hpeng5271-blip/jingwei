@@ -301,6 +301,51 @@ function checkCrateTable() {
  *     给它们设上限只会逼着把有用的话删掉——**那比长更糟**。
  *   - 120 是**目标**，这里守的是**上限**：到了就必须往下搬（搬到 `事故账本.md`）。
  */
+/// **文档里列出来的命令，必须真存在**（2026-10-18 加）。
+///
+/// 这个仓库为这件事付过账：说明书承诺过 `jingwei inspect`，而它当时并不存在。
+/// 现在 `使用说明.md` 里有一整块命令清单——**没人守它，它就一定会漂**
+/// （今天新加的 `graph roles` 就只活在会话里，两处交付文档都没有）。
+///
+/// 做法是**静态对照**，不跑 exe：从 `使用说明.md` 的命令块里抠出子命令，
+/// 再去 `crates/cli/src/main.rs` 的 dispatch 里找同名字符串字面量。
+/// 只看**第一个词**（`env install`、`graph roles` 这种两级的不拆），
+/// 因为第二级在不同命令里含义不同（`graph roles` vs `env install`）。
+function checkDocCommands() {
+  const docPath = join(ROOT, '使用说明.md');
+  const cliPath = join(ROOT, 'crates/cli/src/main.rs');
+  if (!existsSync(docPath) || !existsSync(cliPath)) {
+    problems.push('缺 使用说明.md 或 crates/cli/src/main.rs——命令对照判据失效');
+    return;
+  }
+  const doc = readFileSync(docPath, 'utf8');
+  // 只取 ``` 围栏里的那些以 `jingwei ` 开头的行
+  const cmds = new Set();
+  let inFence = false;
+  for (const line of doc.split(/\r?\n/)) {
+    if (line.trim().startsWith('```')) { inFence = !inFence; continue; }
+    if (!inFence) continue;
+    const m = line.trim().match(/^jingwei\s+([a-z][a-z0-9-]*)/);
+    if (m && !m[1].startsWith('-')) cmds.add(m[1]);
+  }
+  if (!cmds.size) {
+    problems.push('使用说明.md 的命令块里一个子命令都没解析出来——判据失效');
+    return;
+  }
+  const cli = readFileSync(cliPath, 'utf8');
+  let checked = 0;
+  for (const c of cmds) {
+    checked++;
+    // dispatch 里是 `"doctor" | "check" =>` 这种形状：找带引号的字面量即可。
+    if (!cli.includes(`"${c}"`)) {
+      problems.push(`使用说明.md 列了 \`jingwei ${c}\`，但 crates/cli/src/main.rs 里没有这个子命令`);
+    }
+  }
+  if (checked && !problems.some((x) => x.includes('使用说明.md 列了'))) {
+    console.log(`  · 文档命令：使用说明.md 里 ${checked} 个子命令都在 CLI 里`);
+  }
+}
+
 function checkEntryDocSize() {
   const CEILING = 300;
   const f = join(ROOT, 'AGENTS.md');
@@ -361,6 +406,7 @@ checkDocFacts();
 checkDocClaims();
 checkCrateTable();
 checkEntryDocSize();
+checkDocCommands();
 checkPageList();
 // **`verify` 的字段也得有人读**（见 checkVerifyWiring 的头）。
 {

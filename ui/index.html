@@ -105,6 +105,32 @@
 
   <!-- ───── 概览 ───── -->
   <section id="view-home" class="view on">
+
+  <!-- **扫描面板常驻**（2026-10-18 用户反馈：选中项目后它就没了）。
+       以前它长在"欢迎页"里，选中项目 → 欢迎页隐藏 → 扫描、项目列表一起消失，
+       想换个目录就得先忘掉当前项目。**扫描是这个工具的主入口，不该被选中状态挤掉。** -->
+  <div class="scanPanel" id="scanPanel">
+    <div class="sp-head">
+      <b>扫描项目</b>
+      <span class="hint" id="spHint">选一个父目录，看它下面有哪些项目</span>
+      <span class="grow"></span>
+      <button class="btn ghost sm" id="btnScanCommon" data-tip="常见位置一把扫：D:\projects、D:\research、源码目录">常见位置</button>
+    </div>
+        <div class="scanbar">
+          <input id="scanParent" placeholder="父目录，例如 D:\projects">
+          <select id="scanDepth">
+            <option value="1">往下 1 层</option>
+            <option value="2" selected>往下 2 层</option>
+            <option value="3">往下 3 层</option>
+          </select>
+          <button class="btn" id="btnScan">扫描</button>
+          <button class="btn ghost" id="btnScanDir">选择目录…</button>
+        </div>
+        <div id="projList" class="projList"></div>
+        <div id="projPager" class="pager" hidden></div>
+        <div id="projDetail" class="projDetail" hidden></div>
+  </div>
+
     <div id="welcome" class="welcome">
       <svg class="hero-art" viewBox="0 0 120 120" aria-hidden="true">
         <!-- 空状态插画：一只敞开的箱子 + 一点暖光（线条与图标同源） -->
@@ -116,19 +142,6 @@
       </svg>
       <h2>选择项目</h2>
       <p>选择一个目录，扫描其中的项目；选中后可查看它声明了什么、实际用的是哪个。</p>
-      <div class="scanbar">
-        <input id="scanParent" placeholder="父目录，例如 D:\projects">
-        <select id="scanDepth">
-          <option value="1">往下 1 层</option>
-          <option value="2" selected>往下 2 层</option>
-          <option value="3">往下 3 层</option>
-        </select>
-        <button class="btn" id="btnScan">扫描</button>
-        <button class="btn ghost" id="btnScanDir">选择目录…</button>
-      </div>
-      <div id="projList" class="projList"></div>
-      <div id="projPager" class="pager" hidden></div>
-      <div id="projDetail" class="projDetail" hidden></div>
       <div class="wrow" style="margin-top:18px">
         <button class="btn big" id="btnPick2">打开已有项目</button>
         <button class="btn ghost" id="btnNew2">＋ 新建项目</button>

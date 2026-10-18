@@ -637,6 +637,26 @@ async function main() {
     if (!rep) {
       problems.push('概览页/笔记页：窗口没交出报告');
     } else {
+      // **扫描面板必须常驻**（2026-10-18 用户报的真问题：选中项目后它就没了）。
+      // 判据不是"元素存在"——它在不在、点一条卡片会不会在**它下面**长出详情，
+      // 都由自检**真点一次之后**报上来（见 `src-tauri/src/selfcheck.rs` 的 `scan`）。
+      const scan = rep.scan || {};
+      ok(
+        '扫描面板在概览页上常驻可见',
+        !!scan.panel && scan.panel[2] > 200 && scan.panel[3] > 120,
+        scan.panel ? JSON.stringify(scan.panel) : '没有 scan 自检',
+      );
+      ok(
+        '点一条项目卡片：详情在它下面展开',
+        scan.expand === true,
+        'expand=' + scan.expand,
+      );
+      ok(
+        '展开之后扫描面板还在（没有把自己挤掉）',
+        !!scan.panelAfter && scan.panelAfter[2] > 200,
+        scan.panelAfter ? JSON.stringify(scan.panelAfter) : 'null',
+      );
+
       const audit = pick(rep, '#audit');
       const prob = pick(rep, '#probList');
       // **`#audit` 的尺寸这一轮暂时不断言**（2026-10-17）。

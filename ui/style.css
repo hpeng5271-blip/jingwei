@@ -1832,6 +1832,46 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 }
 #view-graph .graph-wrap { flex: 1 1 auto; min-height: 0; border-radius: 0; }
 
+
+/* ══ 扫描面板（常驻概览页）══════════════════════════════════════
+   为什么常驻：它是**主入口**（选项目、换目录），选中一个项目不代表不再需要它。 */
+.scanPanel { margin: 0 0 var(--s5); }
+.scanPanel .sp-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); }
+.scanPanel .sp-head b { font-size: var(--fs-md); }
+
+/* ══ 悬停浮卡（比 IDEA 的提示更克制）══════════════════════════
+   规矩：**只给 4 行**（类型 / 能不能跑 / 依赖 / 待处理），跟随光标、不挡点击
+   （pointer-events:none），进出各 120ms——快到"跟着手走"，慢到"不闪"。 */
+.projHover {
+  position: fixed; z-index: 300; pointer-events: none;
+  min-width: 200px; max-width: 330px; padding: 9px 11px;
+  border-radius: var(--r); background: var(--surface); border: 1px solid var(--line);
+  box-shadow: var(--shadow-2); backdrop-filter: blur(4px);
+  font-size: 12px; line-height: 1.55;
+  opacity: 0; transform: translateY(3px) scale(.985);
+  transition: opacity 120ms var(--ease), transform 120ms var(--ease);
+}
+.projHover.on { opacity: 1; transform: translateY(0) scale(1); }
+.projHover .ph-name { font-weight: 700; margin-bottom: 3px; }
+.projHover .ph-row { display: flex; gap: 8px; color: var(--muted); }
+.projHover .ph-row b { color: var(--fg); font-weight: 600; }
+
+/* ══ 行内展开的详情卡（点谁就长在谁下面）════════════════════ */
+.b-expand {
+  margin: -2px 0 var(--s3) 0; padding: var(--s4) var(--s4) var(--s3);
+  border: 1px solid var(--primary-line); border-top: 0;
+  border-radius: 0 0 var(--r) var(--r);
+  background: color-mix(in srgb, var(--surface) 96%, var(--primary-soft));
+  animation: expandIn 160ms var(--ease);
+}
+@keyframes expandIn { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+.b-expand .ex-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s3) var(--s5); }
+.b-expand .ex-sec { min-width: 0; }
+.b-expand .ex-k { font-size: 11.5px; color: var(--faint); margin-bottom: 2px; }
+.b-expand .ex-v { font-size: var(--fs-sm); word-break: break-word; }
+.b-expand .ex-v.mono { font-family: var(--mono); font-size: 11.5px; }
+.b-expand .ex-acts { display: flex; gap: 6px; margin-top: var(--s3); flex-wrap: wrap; }
+
 /* ── 图谱：画布是主体（和编辑器同一条规矩：画布不是卡片）──────── */
 .graph-wrap { position:relative; width:100%; height:100%; overflow:hidden; background:var(--sunken); }
 #graphCv { display:block; width:100%; height:100%; cursor:grab; }

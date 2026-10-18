@@ -715,7 +715,7 @@ function renderProjList() {
   pager.innerHTML = '<button class="btn ghost sm" data-page="prev"' + (PS.page === 0 ? ' disabled' : '') + '>上一页</button>'
     + '<span>第 ' + (PS.page + 1) + ' / ' + pages + ' 页 · 共 ' + PS.all.length + ' 个项目</span>'
     + '<button class="btn ghost sm" data-page="next"' + (PS.page >= pages - 1 ? ' disabled' : '') + '>下一页</button>';
-  if (PS.sel) renderDetail();
+  if (PS.sel) openInline(PS.sel);   // 重画之后把展开卡挂回去——它是"选中"的一部分
 }
 
 async function scanProjects(parent, depth) {
@@ -793,6 +793,111 @@ async function analyzeRange(from, to) {
   }
 }
 
+/// **行内展开卡**：点谁就长在谁下面（用户 2026-10-18 的要求）。
+/// 详细一点是对的，但**分组要清楚**：一眼能扫到「它是什么 / 怎么跑 / 现在的状态」。
+function inlineDetailHtml(p) {
+  const info = PS.info[p.path] || {};
+  const c = PS.draft && PS.draft.contract;
+  const why = (PS.draft && PS.draft.why) || [];
+  const run = (c && c.commands && c.commands.run) || info.run;
+  const when = p.age_days === 0 ? '今天' : (p.age_days === 1 ? '昨天' : p.age_days + ' 天前');
+  const cell = (k, v, mono) => '<div class="ex-sec"><div class="ex-k">' + k + '</div>'
+    + '<div class="ex-v' + (mono ? ' mono' : '') + '">' + v + '</div></div>';
+  return '<div class="ex-grid">'
+    + cell('路径', esc(p.path), true)
+    + cell('类型', esc(info.kinds || '…'))
+    + cell('最近改动', esc(when))
+    + cell('怎么跑', run ? esc(run) : '还没看出来——可以直接填下面那三步', true)
+    + cell('契约', info.contract ? '有' : '没有')
+    + cell('待处理', info.todo ? info.todo + ' 件' : '没有挡路的')
+    + cell('卫生', info.auditAll != null ? info.auditAll + ' 条（' + (info.auditHot || 0) + ' 条值得处理）' : '…')
+    + '</div>'
+    + (why.length ? '<div class="ex-sec" style="margin-top:10px"><div class="ex-k">为什么是这个结论</div>'
+        + '<div class="ex-v">' + why.map(esc).join('<br>') + '</div></div>' : '')
+    + '<div class="ex-acts">'
+    + '<button class="btn sm" data-pd="open">打开项目</button>'
+    + '<button class="btn ghost sm" data-pd="contract">' + (info.contract ? '重新起草契约' : '生成契约') + '</button>'
+    + '<button class="btn ghost sm" data-pd="editor">用编辑器打开</button>'
+    + '<button class="btn ghost sm" data-pd="clean">去清理</button>'
+    + '<button class="btn ghost sm" data-pd="close">收起</button>'
+    + '</div>';
+}
+
+/// 在**某一条横幅下面**插入/替换展开卡；顺手把旧的收掉（同一时刻只开一张）。
+function openInline(p) {
+  PS.sel = p;
+  paintProjectBanners();
+  const list = $('#projList');
+  if (!list) return;
+  list.querySelectorAll('.b-expand').forEach((el) => el.remove());
+  const card = Array.from(list.children).find((el) => el.dataset && el.dataset.path === p.path);
+  if (!card) return;
+  const box = document.createElement('div');
+  box.className = 'b-expand';
+  box.dataset.for = p.path;
+  box.innerHTML = '<div class="hint"><span class="spin"></span> 正在解析项目声明…</div>';
+  card.after(box);
+  // 声明异步补：先给能立刻说的话，再填细节（不让卡片空着）
+  invoke('contract_draft', { root: p.path, save: false })
+    .then((d) => { PS.draft = d; })
+    .catch(() => { PS.draft = null; })
+    .finally(() => {
+      if (box.dataset.for !== p.path) return;   // 已经换成别的项目了
+      box.innerHTML = inlineDetailHtml(p);
+    });
+  box.innerHTML = inlineDetailHtml(p);
+}
+
+/// **悬停浮卡**：跟随光标、只有 4 行、不挡点击。
+function showHover(p, x, y) {
+  let el = $('#projHover');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'projHover';
+    el.className = 'projHover';
+    document.body.appendChild(el);
+  }
+  const info = PS.info[p.path] || {};
+  el.innerHTML = '<div class="ph-name">' + esc(p.name) + '</div>'
+    + '<div class="ph-row"><b>' + esc(info.kinds || '…') + '</b></div>'
+    + '<div class="ph-row">能跑：<b>' + (info.run ? esc(info.run) : (info.ready === 'no' ? '现在不行' : '还没判定')) + '</b></div>'
+    + '<div class="ph-row">待处理：<b>' + (info.todo ? info.todo + ' 件' : '无') + '</b></div>';
+  el.classList.add('on');
+  moveHover(x, y);
+}
+function moveHover(x, y) {
+  const el = $('#projHover');
+  if (!el) return;
+  const w = el.offsetWidth || 240, h = el.offsetHeight || 90;
+  el.style.left = Math.min(x + 14, window.innerWidth - w - 10) + 'px';
+  el.style.top = Math.min(y + 16, window.innerHeight - h - 10) + 'px';
+}
+function hideHover() {
+  const el = $('#projHover');
+  if (el) el.classList.remove('on');
+}
+
+/// **常见位置一把扫**：把几处放项目的地方都扫一遍，结果合并去重。
+async function scanCommon() {
+  // **GitHub 克隆放哪都要能扫到**（2026-10-18 用户反馈：扫不到拉下来的项目）：
+  // 除了常见工作目录，再带上 `D:\research` 与它下面专门放研究对象的那一层。
+  const roots = ['D:\\projects', 'D:\\research', 'D:\\research\\jingwei-objects', 'D:\\code', 'D:\\src'];
+  const found = new Map();
+  for (const r of roots) {
+    try {
+      const res = await invoke('list_projects', { parent: r, depth: 2 });
+      for (const p of (res.projects || [])) found.set(p.path, p);
+    } catch (e) { /* 这个位置扫不动就跳过，不算失败 */ }
+  }
+  PS.all = Array.from(found.values()).sort((a, b) => (b.age_days ?? 0) - (a.age_days ?? 0) === 0
+    ? String(a.name).localeCompare(String(b.name)) : (a.age_days ?? 0) - (b.age_days ?? 0));
+  PS.page = 0; PS.sel = null; PS.info = {};
+  renderProjList(); renderSwitcher(); renderRailProjs();
+  feedback(found.size ? 'info' : 'warn', '常见位置扫到 ' + found.size + ' 个项目',
+    'D:\\projects · D:\\research · D:\\code · D:\\src（各往下 2 层）');
+  if (SET.analyze) analyzeRange(0, PAGE_SIZE);
+}
+
 async function openDetail(p) {
   PS.sel = p;
   // 只改高亮，不重建列表：停留预览时整张重画会把入场动画重放一遍，看着就是闪。
@@ -853,7 +958,7 @@ async function detailAct(act) {
   if (!p) return;
   if (act === 'close') {
     PS.sel = null; PS.draft = null; PS.pinned = false;
-    $('#projDetail').hidden = true;
+    document.querySelectorAll('.b-expand').forEach((el) => el.remove());
     paintProjectBanners();
     return;
   }

@@ -53,10 +53,11 @@ pub struct FileState {
 /// **一个项目一个库**，跟着项目走（放在 `.jingwei/graph.db`），删掉即可重建——
 /// 它是可重算的派生数据。真正不可丢的是笔记正文，那条路不在这个文件里。
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Store {
+
     /// 打开（必要时新建）某个项目的图谱库。
     ///
     /// 这条路径是**写者**：DDL 里所有 `IF NOT EXISTS` 让重复打开是幂等的，
@@ -269,7 +270,6 @@ impl Store {
         }))
     }
 
-    /// 库里有多少节点、多少条**有效**边。界面上"这个项目索引了多少东西"就靠它。
     /// 写一条元信息（用途：索引的"理解覆盖度"存进库，界面据此判断角色可信度）。
     pub fn set_meta(&self, k: &str, v: &str) -> Result<()> {
         self.conn

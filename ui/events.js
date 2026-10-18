@@ -380,30 +380,42 @@ window.addEventListener('DOMContentLoaded', async () => {
       const p = PS.all.find((x) => x.path === card.dataset.path);
       if (!p) return;
       const act = e.target.closest('button')?.dataset.act;
-      if (act === 'detail') { PS.pinned = true; openDetail(p); return; }
-      // 点横幅 = 全局选中 + 打开。选中之后依赖栏、文件树、记录、流水线都跟着换，
-      // 不用再回「概览」手动找一次。
+      if (act === 'detail') { PS.pinned = true; openInline(p); return; }
+      // **点横幅 = 全局选中 + 行内展开详情**（用户 2026-10-18 的要求）：
+      // 卡片长在**这一条下面**，换一个项目旧卡自动消失、新卡在它下面长出来。
       PS.pinned = false;
       sfx('click');
+      openInline(p);
       load(p.path).catch((err) => toast(String(err), true));
     });
-    // 停留预览：鼠标停 220ms 展开附属卡。不用先点进去，也就不会打断你手上正在做的事。
+    // **悬停 = 跟手的浮卡**（2026-10-18 用户要求，比 IDEA 的提示更克制）：
+    // 只有 4 行关键信息、指针事件穿透（不挡点击）、120ms 进 120ms 出。
+    // 悬停**不再**展开整块详情——那是点击的事，两者混在一起会"一动就变脸"。
     pl.addEventListener('mouseover', (e) => {
-      if (!SET.hover || PS.pinned) return;
+      if (!SET.hover) return;
       const card = e.target.closest('.banner');
       if (!card) return;
       const p = PS.all.find((x) => x.path === card.dataset.path);
-      if (!p || (PS.sel && PS.sel.path === p.path)) return;
+      if (!p) return;
       clearTimeout(PS.hoverTimer);
-      PS.hoverTimer = setTimeout(() => { if (!PS.pinned) openDetail(p); }, 220);
+      PS.hoverTimer = setTimeout(() => showHover(p, PS.mx || 0, PS.my || 0), 140);
+    });
+    pl.addEventListener('mousemove', (e) => {
+      PS.mx = e.clientX; PS.my = e.clientY;
+      const el = $('#projHover');
+      if (el && el.classList.contains('on')) moveHover(e.clientX, e.clientY);
+    });
+    pl.addEventListener('mouseout', (e) => {
+      // 只有真正离开卡片（不是移到卡片内部元素）才收
+      const card = e.target.closest('.banner');
+      if (!card) return;
+      if (card.contains(e.relatedTarget)) return;
+      clearTimeout(PS.hoverTimer);
+      hideHover();
     });
     pl.addEventListener('mouseleave', () => {
       clearTimeout(PS.hoverTimer);
-      if (PS.pinned || !PS.sel) return;
-      PS.sel = null;
-      const d = $('#projDetail');
-      if (d) d.hidden = true;
-      paintProjectBanners();
+      hideHover();
     });
   }
   const pg = $('#projPager');
@@ -416,13 +428,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       analyzeRange(PS.page * PAGE_SIZE, (PS.page + 1) * PAGE_SIZE);
     });
   }
-  const pd = $('#projDetail');
-  if (pd) {
-    pd.addEventListener('click', (e) => {
-      const a = e.target.closest('button')?.dataset.pd;
-      if (a) detailAct(a);
-    });
-  }
+  // 展开卡的按钮（data-pd）与旧详情卡共用一套动作
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('button')?.dataset.pd;
+    if (!a || !e.target.closest('.b-expand')) return;
+    detailAct(a);
+  });
+
+  // 常见位置：一把扫几个放项目的地方
+  const bcommon = $('#btnScanCommon');
+  if (bcommon) bcommon.addEventListener('click', () => guard(scanCommon));
   // 一进来先把「你手上有哪些项目」摆出来，不用先点任何东西
   if (SET.scan) await guard(scanInit);
 

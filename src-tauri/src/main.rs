@@ -430,6 +430,8 @@ fn default_parent() -> Value {
     let home = std::env::var("USERPROFILE").unwrap_or_default();
     let mut cands: Vec<PathBuf> = vec![
         PathBuf::from(r"D:\projects"),
+        // **GitHub 克隆常放这**（2026-10-18 用户反馈"扫不到拉下来的项目"）。
+        PathBuf::from(r"D:\research"),
         PathBuf::from(r"D:\code"),
         PathBuf::from(r"D:\dev"),
         PathBuf::from(r"E:\projects"),

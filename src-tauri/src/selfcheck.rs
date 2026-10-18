@@ -159,6 +159,36 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             // 而 `ui/graph.js` 每次画完把 nodes/edges/半径分布挂在 window 上。
             // 没有就是 null——**"没画"不许伪装成"画了 0 个"**。
             canvas: window.__graphDrawn || null,
+            // **扫描面板常驻 + 点击行内展开**（2026-10-18 用户报的真问题）：
+            // 这两件事只有"点一下"才看得出来，所以自检里**真点一次**再把结果报上去。
+            // 点完立刻把展开卡摘掉，不污染后面的断言。
+            scan: (function () {{
+              const rect = (el) => {{
+                if (!el) return null;
+                const b = el.getBoundingClientRect();
+                return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+              }};
+              const panel = document.querySelector('#scanPanel');
+              const list = document.querySelector('#projList');
+              const out = {{
+                panel: rect(panel),
+                list: rect(list),
+                banners: list ? list.querySelectorAll('.banner').length : 0,
+                expand: false,
+                panelAfter: null,
+              }};
+              const first = list && list.querySelector('.banner');
+              if (first) {{
+                try {{
+                  first.dispatchEvent(new MouseEvent('click', {{ bubbles: true }}));
+                  const ex = list.querySelector('.b-expand');
+                  out.expand = !!ex;
+                  out.panelAfter = rect(document.querySelector('#scanPanel'));
+                  if (ex) ex.remove();
+                }} catch (e) {{ out.err = String(e); }}
+              }}
+              return out;
+            }})(),
             activeView: (document.querySelector('.view.on') || {{}}).id || null,
             navOn: (document.querySelector('#nav button.on') || {{}}).dataset
               ? document.querySelector('#nav button.on').dataset.tab : null,

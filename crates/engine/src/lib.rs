@@ -24,6 +24,9 @@
 pub mod facts;
 pub mod launch;
 
+/// **最小 LSP**：只做"跳到定义"，位置来自图谱而不是重新解析。
+pub mod lsp;
+
 /// L0 · 纯工具：不涉及任何业务概念，谁都该能用，而它谁都不依赖。
 pub mod util {
     /// **读用户文件先去掉 UTF-8 BOM**（Windows 上记事本/PowerShell 默认写它）。

@@ -12,6 +12,7 @@ static MORE: AtomicBool = AtomicBool::new(false);
 mod cmd_clean;
 mod cmd_doctor;
 mod cmd_graph;
+mod cmd_lsp;
 mod cmd_guide;
 mod cmd_machine;
 mod cmd_project;
@@ -354,6 +355,8 @@ fn run() -> i32 {
         // 原来 `graph index` 是"故意没做"的（理由是"两处实现迟早不一致"），
         // 而这里是一处实现两条外壳——不冲突，而缺它的代价是每次看图都要手点。
         "index" | "index-graph" => cmd_graph(&root, json, &["index".to_string()]),
+        // **最小 LSP**：编辑器通过 stdio 说话，只做"跳到定义"（读图谱，不重新解析）。
+        "lsp" => cmd_lsp::cmd_lsp(&root),
         other => {
             eprintln!("不认识子命令：{}", other);
             help();
@@ -444,6 +447,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "Node / 前端：包管理器、依赖装到哪去了、版本要求写在哪",
     ),
     ("init", &[], "给已有项目补一份 env.contract.json"),
+    (
+        "lsp",
+        &[],
+        "**最小 LSP（stdio）**：给编辑器用，只做「跳到定义」——位置来自图谱，查不到就 null",
+    ),
     ("spec", &["machine"], "这台机器：CPU / 内存 / 磁盘 / 显卡 / 系统设置"),
     ("graph", &[], "运行历史：跑过几次、各出了什么问题、挂在哪"),
     (

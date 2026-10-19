@@ -21,6 +21,8 @@ pub struct Edit {
     pub file: String,
     pub line: u32,
     pub col: u32,
+    /// 精确字节偏移（0 = 不知道，退回按列替换）。
+    pub byte: u32,
     pub old: String,
     pub new: String,
 }
@@ -76,18 +78,22 @@ pub fn plan_rename(root: &Path, conn: &Connection, symbol_id: &str, new_name: &s
         .map_err(|e| anyhow::anyhow!("找不到符号 {symbol_id}：{e}"))?;
 
     // 出现位置：定义行 + 调用点表（与 lsp 的引用查询同一套事实）
-    let mut sites: BTreeSet<(String, u32)> = BTreeSet::new();
+    let mut sites: BTreeSet<(String, u32, u32)> = BTreeSet::new();
     if let (Some(f), Some(l)) = (&def_file, def_line) {
-        sites.insert((f.clone(), l as u32));
+        sites.insert((f.clone(), l as u32, 0));
     }
     if let Ok(mut st) = conn.prepare(
-        "SELECT s.file, s.line FROM edge_sites s \
+        "SELECT s.file, s.line, COALESCE(s.byte,0) FROM edge_sites s \
          JOIN edges e ON e.src=s.src AND e.dst=s.dst AND e.kind=s.kind \
          WHERE s.dst=?1 AND s.kind IN ('calls','references') AND e.expires_at IS NULL",
     ) {
         if let Ok(mut rows) = st.query(rusqlite::params![symbol_id]) {
             while let Ok(Some(r)) = rows.next() {
-                sites.insert((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u32));
+                sites.insert((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)? as u32,
+                    r.get::<_, i64>(2).unwrap_or(0) as u32,
+                ));
             }
         }
     }
@@ -120,7 +126,7 @@ pub fn plan_rename(root: &Path, conn: &Connection, symbol_id: &str, new_name: &s
     let mut plan = RenamePlan::default();
     // 同一个文件只读一次
     let mut cache: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
-    for (file, line) in sites {
+    for (file, line, byte) in sites {
         let lines = cache.entry(file.clone()).or_insert_with(|| {
             std::fs::read_to_string(root.join(&file))
                 .map(|t| t.lines().map(|l| l.to_string()).collect())
@@ -134,12 +140,33 @@ pub fn plan_rename(root: &Path, conn: &Connection, symbol_id: &str, new_name: &s
             });
             continue;
         };
+        // **优先用字节偏移**（tree-sitter 给的）：同一行多处同名也能唯一命中。
+        if byte > 0 {
+            let b = byte as usize;
+            if text
+                .as_bytes()
+                .get(b..b + name.len())
+                .map(|s| s == name.as_bytes())
+                .unwrap_or(false)
+            {
+                plan.edits.push(Edit {
+                    file,
+                    line,
+                    col: byte + 1,
+                    byte,
+                    old: name.clone(),
+                    new: new_name.to_string(),
+                });
+                continue;
+            }
+        }
         let hits = word_hits(text, &name);
         match hits.len() {
             1 => plan.edits.push(Edit {
                 file,
                 line,
                 col: hits[0] as u32 + 1,
+                byte: 0,
                 old: name.clone(),
                 new: new_name.to_string(),
             }),
@@ -159,7 +186,7 @@ pub fn plan_rename(root: &Path, conn: &Connection, symbol_id: &str, new_name: &s
 }
 
 /// 找出 `needle` 作为**完整标识符**出现在 `hay` 里的字节偏移（0 起始）。
-fn plan_guard(_s: &mut BTreeSet<(String, u32)>) {}
+fn plan_guard(_s: &mut BTreeSet<(String, u32, u32)>) {}
 
 fn word_hits(hay: &str, needle: &str) -> Vec<usize> {
     let b = hay.as_bytes();

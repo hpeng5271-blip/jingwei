@@ -74,12 +74,12 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
     }
 
     // 按文件分组改：同一文件只读一次、写一次
-    let mut by_file: BTreeMap<String, Vec<(u32, u32, String)>> = BTreeMap::new();
+    let mut by_file: BTreeMap<String, Vec<(u32, u32, u32, String)>> = BTreeMap::new();
     for e in &plan.edits {
         by_file
             .entry(e.file.clone())
             .or_default()
-            .push((e.line, e.col, e.new.clone()));
+            .push((e.line, e.col, e.byte, e.new.clone()));
     }
     for (file, mut edits) in by_file {
         let path = root.join(&file);
@@ -90,29 +90,30 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
                 return 2;
             }
         };
-        let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
-        // 同一行多处时**从右往左**改，避免列号漂移
+        // 列号来自解析器（**行内字节列**）；同一行内**从右往左**改，避免列号漂移。
         edits.sort_by_key(|e| std::cmp::Reverse(e.1));
-        for (line, col, new) in edits {
+        let mut by_col: Vec<(u32, u32, String)> = Vec::new();
+        for (line, col, _byte, new) in &edits {
+            by_col.push((*line, *col, new.clone()));
+        }
+        let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+        by_col.sort_by_key(|e| std::cmp::Reverse(e.1));
+        for (line, col, new) in by_col {
             let idx = (line.saturating_sub(1)) as usize;
             if let Some(l) = lines.get_mut(idx) {
                 let start = (col.saturating_sub(1)) as usize;
-                // 用"替换到词尾"的方式，长度按旧名字算
-                let old_len = {
-                    let bytes = l.as_bytes();
-                    let mut n = 0;
-                    while start + n < bytes.len()
-                        && (bytes[start + n].is_ascii_alphanumeric() || bytes[start + n] == b'_')
-                    {
-                        n += 1;
-                    }
-                    n
-                };
-                if old_len == 0 {
-                    eprintln!("警告：{file}:{line}:{col} 不在词边界上，跳过这一处");
+                let bytes = l.as_bytes();
+                let mut n = 0;
+                while start + n < bytes.len()
+                    && (bytes[start + n].is_ascii_alphanumeric() || bytes[start + n] == b'_')
+                {
+                    n += 1;
+                }
+                if n == 0 {
+                    eprintln!("警告：{file}:{line}:{col} 不在词边界，跳过");
                     continue;
                 }
-                l.replace_range(start..start + old_len, &new);
+                l.replace_range(start..start + n, &new);
             }
         }
         let out = lines.join("\n") + "\n";

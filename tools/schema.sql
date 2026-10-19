@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS edge_sites (
   dst  TEXT NOT NULL,
   kind TEXT NOT NULL,
   file TEXT NOT NULL,
-  line INTEGER NOT NULL
+  line INTEGER NOT NULL,
+  byte INTEGER
 );
 
 -- files：增量检测与校验的落脚点
@@ -167,4 +168,4 @@ CREATE VIEW IF NOT EXISTS live_edges AS
 
 -- ── 版本戳 ─────────────────────────────────────────────────────────
 -- schema_version 是唯一的版本真相源（《数据层设计》§9）。迁移脚本读它决定跑哪几步。
-INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '2');
+INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '3');

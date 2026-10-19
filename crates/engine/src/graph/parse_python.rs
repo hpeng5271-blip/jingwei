@@ -85,7 +85,7 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
     let mut calls = Vec::new();
     let mut refs = Vec::new();
-    let mut call_sites: Vec<(String, String, u32)> = Vec::new();
+    let mut call_sites: Vec<(String, String, u32, u32)> = Vec::new();
     let mut cscope: Vec<String> = Vec::new();
     let mut ccontainer: Vec<String> = Vec::new();
     collect_calls(
@@ -435,7 +435,7 @@ fn collect_calls(
     by_path: &std::collections::BTreeMap<String, String>,
     calls: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
-    call_sites: &mut Vec<(String, String, u32)>,
+    call_sites: &mut Vec<(String, String, u32, u32)>,
     module_caller: Option<&str>,
 ) {
     let mut cursor = n.walk();
@@ -507,7 +507,7 @@ fn collect_calls(
                                     // scope 里存的就是完整 id（带 `symbol:`），别再拼一次
                                     if *id != *caller {
                                         calls.push((caller.clone(), id.clone()));
-                                    call_sites.push((caller.clone(), id.clone(), line));
+                                    call_sites.push((caller.clone(), id.clone(), line, f.start_position().column as u32));
                                     }
                                 }
                             }
@@ -558,7 +558,7 @@ fn collect_calls(
                             if let Some(caller) = caller {
                                 // scope 里存的就是完整 id，直接比、直接用
                                 if caller.as_str() != *id {
-                                    call_sites.push((caller.clone(), (*id).to_string(), line));
+                                    call_sites.push((caller.clone(), (*id).to_string(), line, f.start_byte() as u32));
                                     calls.push((caller, (*id).to_string()));
                                 }
                             }

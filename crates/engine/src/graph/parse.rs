@@ -36,7 +36,7 @@ pub struct ParseOutcome {
     pub calls: Vec<(String, String)>,
     /// **调用点的行号**（`(调用者, 被调者, 行)`）：重命名要按行改（债表 0.25）。
     /// 与 `calls` 一一对应；分开存是为了不动既有断言。
-    pub call_sites: Vec<(String, String, u32)>,
+    pub call_sites: Vec<(String, String, u32, u32)>,
     /// **解析不了的引用**——不只是计数，是事实本身。
     ///
     /// 这一条是读完 stack-graphs 之后改的。它那边的原话是：
@@ -154,7 +154,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
     let mut calls = Vec::new();
     let mut refs = Vec::new();
-    let mut call_sites: Vec<(String, String, u32)> = Vec::new();
+    let mut call_sites: Vec<(String, String, u32, u32)> = Vec::new();
     let mut scope: Vec<String> = Vec::new();
     // **本文件内"路径 → id"的反查表**：`L::post` → `symbol:a.rs#L::post`。
     //
@@ -225,7 +225,7 @@ fn collect_calls(
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
-    sites: &mut Vec<(String, String, u32)>,
+    sites: &mut Vec<(String, String, u32, u32)>,
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -310,6 +310,8 @@ fn collect_calls(
                 };
                 // 调用点行号：重命名要靠它把"改哪一行"算准（债表 0.25）。
                 let call_line = child.start_position().row as u32 + 1;
+                // 被调者的**行内字节列**（tree-sitter Point.column）：绝对偏移会被 CRLF 归一化搞错。
+                let call_byte = f.start_position().column as u32;
                 let txt = f.utf8_text(src.as_bytes()).unwrap_or("").trim().to_string();
 
                 // ① **`self.m()` —— 接收者类型就在眼前，不用推断**。
@@ -333,7 +335,7 @@ fn collect_calls(
                             if let Some(caller) = scope.last() {
                                 if id != caller {
                                     out.push((caller.clone(), id.clone()));
-                                    sites.push((caller.clone(), id.clone(), call_line));
+                                    sites.push((caller.clone(), id.clone(), call_line, call_byte));
                                 }
                             }
                             continue;
@@ -351,7 +353,7 @@ fn collect_calls(
                         Some(callee) => {
                             // 自己调自己不算一条边——那是递归，不是关系。
                             if *callee != caller.as_str() {
-                                sites.push((caller.clone(), (*callee).to_string(), call_line));
+                                sites.push((caller.clone(), (*callee).to_string(), call_line, call_byte));
                                 out.push((caller, (*callee).to_string()));
                             }
                         }

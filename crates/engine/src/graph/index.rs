@@ -435,7 +435,7 @@ pub fn index_source(
     let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::imports::ImportFact>> =
         std::collections::BTreeMap::new();
 
-    let mut direct_sites: Vec<(String, String, u32)> = Vec::new();
+    let mut direct_sites: Vec<(String, String, u32, u32)> = Vec::new();
     // **这次真的重解析过的文件**：调用点表按文件替换，不能整表清空——
     // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
     let mut processed: Vec<String> = Vec::new();
@@ -663,7 +663,8 @@ pub fn index_source(
     // **自下而上**：从每条引用出发去找定义（rust-analyzer 讲的 IDE 做法），
     // 而不是从头把每个文件再遍历一遍（那是编译器的做法）。
     // 调用点（含同文件直接调用）：**不管有没有待解析引用都要写**（债表 0.25）。
-    let mut sites: Vec<(String, String, u32)> = Vec::new();
+    // resolved sites 只有行、没有字节 → 字节记 0（表示"不知道精确列"，重命名会退回行内扫描）
+    let mut sites: Vec<(String, String, u32, u32)> = Vec::new();
     if !pending_refs.is_empty() {
         let empty = crate::graph::resolve::SymbolTable::new();
         let mut extra: Vec<Edge> = Vec::new();
@@ -680,7 +681,7 @@ pub fn index_source(
             rep.external += res.external;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
             // **调用点**：写进小表，给 LSP 找引用用（跳到调用那一行，而不是函数定义）
-            sites.extend(res.sites.iter().cloned());
+            sites.extend(res.sites.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
         }
         // **依赖边**（2026-10-19）：文件 → 它 import 的根模块。
         //
@@ -778,7 +779,7 @@ pub fn index_source(
             .execute("DELETE FROM edge_sites WHERE file=?1", rusqlite::params![rel])
             .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
     }
-    for (src, dst, line) in sites.iter().chain(direct_sites.iter()) {
+    for (src, dst, line, byte) in sites.iter().chain(direct_sites.iter()) {
         let Some(file) = src
             .strip_prefix("symbol:")
             .and_then(|r| r.split('#').next())
@@ -789,8 +790,8 @@ pub fn index_source(
         store
             .conn
             .execute(
-                "INSERT INTO edge_sites(src,dst,kind,file,line) VALUES(?1,?2,'calls',?3,?4)",
-                rusqlite::params![src, dst, file, *line as i64],
+                "INSERT INTO edge_sites(src,dst,kind,file,line,byte) VALUES(?1,?2,'calls',?3,?4,?5)",
+                rusqlite::params![src, dst, file, *line as i64, *byte as i64],
             )
             .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
     }

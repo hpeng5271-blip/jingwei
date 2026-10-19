@@ -12,7 +12,7 @@
 pub const SCHEMA_SQL: &str = include_str!("../../../../tools/schema.sql");
 
 /// 当前 schema 版本。与 `schema.sql` 末尾写进 `meta` 的那个值必须一致，有测试守着。
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 use anyhow::{Context, Result};
 use jingwei_model::{Edge, EdgeKind, Node, NodeKind, Source};
@@ -69,8 +69,7 @@ impl Store {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("打开图谱库失败：{}", path.display()))?;
-        conn.execute_batch(SCHEMA_SQL)
-            .context("建库/迁移失败——DDL 与现有库不兼容？")?;
+        crate::graph::schema_meta::prepare(&conn)?;
         Ok(Store { conn })
     }
 

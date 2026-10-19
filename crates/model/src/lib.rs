@@ -1,4 +1,4 @@
-﻿//! 经纬的领域模型。
+//! 经纬的领域模型。
 //!
 //! 这一层要守住设计里最贵的四条线，而且是**用类型守住**，不是靠自觉：
 //!
@@ -112,11 +112,17 @@ pub enum EdgeKind {
     Produced,
     /// 这次运行遵循哪份契约
     Follows,
+    /// **注册**：文件把某个函数注册给了外部框架（Python 装饰器 `@app.route` / `@click.command`）。
+    ///
+    /// 为什么单独一条（D-20261019-02）：它既不是 `defines`（装饰器不是定义），
+    /// 也不是 `calls`（不是函数体在执行），但它是 **flask 这类项目的入口/路由核心信号**。
+    /// 混进 `calls` 会污染角色的入/出度。
+    Registers,
 }
 
 impl EdgeKind {
     /// 全部取值；理由同 `NodeKind::ALL`。
-    pub const ALL: [EdgeKind; 16] = [
+    pub const ALL: [EdgeKind; 17] = [
         EdgeKind::Contains,
         EdgeKind::Defines,
         EdgeKind::Implements,
@@ -133,6 +139,7 @@ impl EdgeKind {
         EdgeKind::SnapshottedAt,
         EdgeKind::Produced,
         EdgeKind::Follows,
+        EdgeKind::Registers,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -153,6 +160,7 @@ impl EdgeKind {
             EdgeKind::SnapshottedAt => "snapshotted_at",
             EdgeKind::Produced => "produced",
             EdgeKind::Follows => "follows",
+            EdgeKind::Registers => "registers",
         }
     }
 
@@ -210,6 +218,8 @@ impl EdgeKind {
             // 快照可以指向任何实体
             E::SnapshottedAt => src == N::Snapshot,
             E::Follows => matches!((src, dst), (N::Run, N::Contract)),
+            // 注册：**文件 → 函数**。装饰器写在哪个文件里，注册就属于哪个文件。
+            E::Registers => matches!((src, dst), (N::File, N::Symbol)),
             E::Produced => matches!((src, dst), (N::Run, N::Diagnostic)),
         }
     }
@@ -814,7 +824,7 @@ mod tests {
     #[test]
     fn kind_tables_are_unique_and_complete() {
         assert_eq!(NodeKind::ALL.len(), 13);
-        assert_eq!(EdgeKind::ALL.len(), 16);
+        assert_eq!(EdgeKind::ALL.len(), 17);
         let mut names: Vec<&str> = NodeKind::ALL.iter().map(|k| k.as_str()).collect();
         names.sort_unstable();
         let uniq = {

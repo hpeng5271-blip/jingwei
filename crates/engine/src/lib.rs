@@ -112,6 +112,8 @@ pub mod graph {
     /// 图谱的三种角色（框架.md §4.8）。从 `store::dump` 里拆出来，
     /// 因为那个文件已经一千行、而这段判据是一块独立的"读懂图"的逻辑。
     pub mod roles;
+    /// schema 版本与整库重建（store 的邻居，不是 store 的一部分）。
+    pub mod schema_meta;
     pub mod store;
     /// **位置回读**：图谱里记的行号回去读原文对不对（用文件当裁判，不自证）。
     pub mod verify;

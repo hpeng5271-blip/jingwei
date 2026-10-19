@@ -90,6 +90,9 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         None,
     );
 
+    let mut registers: Vec<(String, String)> = Vec::new();
+    collect_registers(root, src, rel, &by_name, &mut registers);
+
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
     symbols.dedup_by(|a, b| a.id == b.id);
     calls.sort();
@@ -101,10 +104,57 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         calls,
         references: refs,
         imports,
+        registers,
         complete,
     }
 }
 
+/// 收集**装饰器注册**（D-20261019-02）：`@app.route"/"` / `@click.command()` 这类，
+/// 把紧跟其后的函数"注册给外部框架"。
+///
+/// 只收**带调用**的装饰器（文本里有 `(`）：`@staticmethod` 不算"注册"。
+/// 只认顶层定义——嵌套在函数里的装饰器不是路由入口，收了会污染角色。
+fn collect_registers<'a>(
+    root: TsNode<'_>,
+    src: &str,
+    rel: &str,
+    by_name: &std::collections::BTreeMap<&'a str, &'a str>,
+    out: &mut Vec<(String, String)>,
+) {
+    let file_id = format!("file:{rel}");
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "decorated_definition" {
+            continue;
+        }
+        let Some(def) = child.child_by_field_name("definition") else {
+            continue;
+        };
+        let Some(name) = def
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(src.as_bytes()).ok())
+        else {
+            continue;
+        };
+        // 装饰器本身：有 "(...)" 才算"注册给框架"
+        let mut has_call = false;
+        let mut dc = child.walk();
+        for d in child.children(&mut dc) {
+            if d.kind() == "decorator" {
+                let txt = d.utf8_text(src.as_bytes()).unwrap_or("");
+                if txt.contains('(') {
+                    has_call = true;
+                }
+            }
+        }
+        if !has_call {
+            continue;
+        }
+        if let Some(id) = by_name.get(name) {
+            out.push((file_id.clone(), (*id).to_string()));
+        }
+    }
+}
 /// 符号 key 的拼法——**与 `parse.rs::symbol_key` 同一份格式**
 /// （`rel#scope::Container::name`）。两份格式一旦分家，解析层就永远对不上。
 fn symbol_key(rel: &str, scope: &[String], container: Option<&str>, name: &str) -> String {

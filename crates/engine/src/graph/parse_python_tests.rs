@@ -212,3 +212,18 @@ fn 只有_main_块里的顶层调用才算_调用者是文件() {
     let o2 = parse_python("a.py", src2, 1);
     assert!(o2.calls.is_empty(), "顶层非 __main__ 的调用不该收，实际 {:?}", o2.calls);
 }
+#[test]
+fn 带调用的装饰器记成注册_文件到函数() {
+    // D-20261019-02 第 2 项：`@app.route("/")` 这类装饰器 = 把函数注册给外部框架。
+    // 边是 File→Symbol（registers），不混进 calls，避免污染角色的出入度。
+    let src = "from flask import Flask\n\napp = Flask(__name__)\n\n@app.route(\"/\")\ndef index():\n    return \"hi\"\n\n@staticmethod\ndef plain():\n    pass\n";
+    let o = parse_python("a.py", src, 1);
+    assert_eq!(
+        o.registers.len(),
+        1,
+        "只该收带调用的装饰器；实际 {:?}",
+        o.registers
+    );
+    assert_eq!(o.registers[0].0, "file:a.py");
+    assert_eq!(o.registers[0].1, "symbol:a.py#index");
+}

@@ -49,6 +49,13 @@ pub struct ParseOutcome {
     /// 就把"本文件里的 `which` 指那条路径"写死了，**不需要看别的文件**。
     /// （跨文件的那一步是"路径 → 符号 id"——那个才要全图。）
     pub imports: Vec<ImportFact>,
+    /// **装饰器注册**：`(文件 id, 被注册的符号 id)`。
+    ///
+    /// 只收"带调用的装饰器"（`@app.route("/")`、`@click.command()`）——
+    /// `@staticmethod` 这类不带调用的不算"注册给外部框架"。
+    /// 依据：D-20261019-02。
+    pub registers: Vec<(String, String)>,
+
     /// 语法树里**没有**错误/缺失子树。
     ///
     /// 调用方拿它决定"能不能建调用关系"：`false` 时只出符号，不出关系。
@@ -172,6 +179,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         calls,
         references: refs,
         imports,
+        registers: Vec::new(),
         complete,
     }
 }

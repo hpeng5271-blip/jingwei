@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS edges (
   kind       TEXT NOT NULL CHECK (kind IN (
                'contains','defines','implements','calls','references','depends_on',
                'needs','diagnosed_at','reported_by','causes','affects','noted_at',
-               'changed_at','snapshotted_at','produced','follows')),
+               'changed_at','snapshotted_at','produced','follows','registers')),
   source     TEXT CHECK (source IS NULL OR source IN ('ts','lsp','meta','user','self')),
   confidence REAL NOT NULL DEFAULT 1.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
   created_at INTEGER NOT NULL,
@@ -167,4 +167,4 @@ CREATE VIEW IF NOT EXISTS live_edges AS
 
 -- ── 版本戳 ─────────────────────────────────────────────────────────
 -- schema_version 是唯一的版本真相源（《数据层设计》§9）。迁移脚本读它决定跑哪几步。
-INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '2');

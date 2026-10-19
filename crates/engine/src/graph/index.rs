@@ -540,6 +540,8 @@ pub fn index_source(
         }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
         let calls = parsed.calls.clone();
+        // 装饰器注册（D-20261019-02）：File → Symbol，单独一条边 kind。
+        let registers = parsed.registers.clone();
 
         let mut nodes: Vec<Node> = Vec::with_capacity(symbols + 1);
         let mut edges: Vec<Edge> = Vec::with_capacity(symbols + 1 + calls.len());
@@ -587,6 +589,20 @@ pub fn index_source(
                 now,
             )?);
             rep.calls += 1;
+        }
+        // **装饰器注册**：`@app.route("/")` 这类把函数注册给外部框架。
+        // 不混进 `calls`——否则角色的入/出度会被路由函数带偏。
+        for (file_id, sym_id) in &registers {
+            edges.push(edge(
+                file_id,
+                sym_id,
+                EdgeKind::Registers,
+                NodeKind::File,
+                NodeKind::Symbol,
+                Source::TreeSitter,
+                Confidence::High,
+                now,
+            )?);
         }
         nodes.push(file_node);
 

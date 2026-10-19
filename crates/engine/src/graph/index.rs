@@ -436,6 +436,9 @@ pub fn index_source(
         std::collections::BTreeMap::new();
 
     let mut direct_sites: Vec<(String, String, u32)> = Vec::new();
+    // **这次真的重解析过的文件**：调用点表按文件替换，不能整表清空——
+    // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
+    let mut processed: Vec<String> = Vec::new();
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
             rep.unreadable += 1;
@@ -540,6 +543,7 @@ pub fn index_source(
             pending_refs.push((rel.clone(), parsed.references.clone()));
         }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
+        processed.push(rel.clone());
         let calls = parsed.calls.clone();
         direct_sites.extend(parsed.call_sites.iter().cloned());
         // 装饰器注册（D-20261019-02）：File → Symbol，单独一条边 kind。
@@ -766,12 +770,14 @@ pub fn index_source(
         }
     }
 
-    // 调用点表是**派生数据**：每次重建前清空，再按本次结果写。
-    // **同文件直接调用点**也在里面——重命名靠它（债表 0.25）。
-    store
-        .conn
-        .execute("DELETE FROM edge_sites", [])
-        .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
+    // 调用点表是**派生数据**：**按文件**替换（不能整表清空——一次"全部跳过"的重索引
+    // 会把没处理文件的 sites 抹掉，2026-10-19 实测踩到：flask sites 变 0）。
+    for rel in &processed {
+        store
+            .conn
+            .execute("DELETE FROM edge_sites WHERE file=?1", rusqlite::params![rel])
+            .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
+    }
     for (src, dst, line) in sites.iter().chain(direct_sites.iter()) {
         let Some(file) = src
             .strip_prefix("symbol:")

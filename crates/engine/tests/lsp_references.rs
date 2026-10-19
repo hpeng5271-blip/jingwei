@@ -106,3 +106,32 @@ fn 坏文件会推一条错误诊断() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **重命名**（债表 0.25）：定义 + 跨文件调用点都要出编辑；判不准时不发编辑。
+#[test]
+fn 重命名返回跨文件编辑() {
+    let root = fixture("rename");
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let uri = lsp::path_to_uri(&root.join("src/a.rs"));
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 11 },
+            "newName": "renamed"
+        }
+    });
+    let resp = lsp::handle(Some(&s), &root, &msg).expect("rename 要有响应");
+    let changes = resp
+        .get("result")
+        .and_then(|r| r.get("changes"))
+        .expect("应当返回 changes");
+    let files = changes.as_object().expect("changes 是对象");
+    assert!(
+        files.len() >= 2,
+        "定义文件与调用文件都该有编辑，实际 {files:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

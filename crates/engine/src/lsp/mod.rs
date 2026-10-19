@@ -325,11 +325,59 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             "jsonrpc": "2.0",
             "id": id?,
             "result": {
-                "capabilities": { "definitionProvider": true, "referencesProvider": true, "hoverProvider": true },
+                "capabilities": { "definitionProvider": true, "referencesProvider": true, "hoverProvider": true, "renameProvider": true },
                 "serverInfo": { "name": "jingwei", "version": env!("CARGO_PKG_VERSION") }
             }
         })),
         "shutdown" => Some(json!({ "jsonrpc": "2.0", "id": id?, "result": Value::Null })),
+        // **重命名**（债表 0.25）：把 `plan_rename` 的结果变成 WorkspaceEdit。
+        // 判不准的位置（一行多处同名等）→ 返回空 changes + 错误消息，**不发编辑**；
+        // 编辑器的规矩是"要么全改要么不改"，半截重命名比不改更糟。
+        "textDocument/rename" => {
+            let id = id?;
+            let params = msg.get("params")?;
+            let uri = params.get("textDocument")?.get("uri")?.as_str()?;
+            let line = params.get("position")?.get("line")?.as_u64()? as u32;
+            let new_name = params.get("newName")?.as_str()?;
+            let Some(store) = store else {
+                return Some(json!({ "jsonrpc": "2.0", "id": id, "result": Value::Null }));
+            };
+            let Some(file) = rel_of(root, uri) else {
+                return Some(json!({ "jsonrpc": "2.0", "id": id, "result": Value::Null }));
+            };
+            let Some((sym_id, _name, _ln)) = symbol_near(store, &file, line + 1) else {
+                return Some(json!({ "jsonrpc": "2.0", "id": id, "result": Value::Null }));
+            };
+            match store.plan_rename(root, &sym_id, new_name) {
+                Ok(plan) if plan.ambiguous.is_empty() => {
+                    let mut changes = serde_json::Map::new();
+                    for e in &plan.edits {
+                        let abs = root.join(e.file.replace('/', std::path::MAIN_SEPARATOR_STR));
+                        let key = path_to_uri(&abs);
+                        let start = e.col.saturating_sub(1) as u64;
+                        let end = start + e.old.len() as u64;
+                        let arr = changes.entry(key).or_insert_with(|| json!([]));
+                        if let Some(a) = arr.as_array_mut() {
+                            a.push(json!({
+                                "range": { "start": { "line": e.line - 1, "character": start },
+                                            "end": { "line": e.line - 1, "character": end } },
+                                "newText": e.new
+                            }));
+                        }
+                    }
+                    Some(json!({ "jsonrpc": "2.0", "id": id, "result": { "changes": changes } }))
+                }
+                Ok(_) => Some(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "result": Value::Null,
+                    "error": { "code": -32002, "message": "有判不准的位置，未生成编辑（避免半截重命名）" }
+                })),
+                Err(e) => Some(json!({
+                    "jsonrpc": "2.0", "id": id, "result": Value::Null,
+                    "error": { "code": -32002, "message": format!("规划失败：{e}") }
+                })),
+            }
+        }
         "textDocument/definition" => {
             let id = id?;
             let params = msg.get("params")?;

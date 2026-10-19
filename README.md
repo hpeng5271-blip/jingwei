@@ -109,6 +109,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-trial.ps1   # →
 - [tools/motives.json](tools/motives.json) —— 动机清单：用户当初要什么、落在设计哪一处。
   **由 `gate.mjs` 检查**，指不到落点就报错。
 - [使用说明.md](使用说明.md) —— 给使用者看的（打包进发行版）。
-- [史料/V0-旧合稿.md](docs/史料/V0-旧合稿.md) —— **历史过程稿**（早于《总稿》的那一版合稿，
+- [docs/archive/V0-旧合稿.md](docs/archive/V0-旧合稿.md) —— **历史过程稿**（早于《总稿》的那一版合稿，
   2026-10-16 收纳进 `史料/`，头上加了一版说明）。**只作档案，不作为依据**；
   有几条设计要求仅存于此（例如过滤系统的两个出口），引用时要指明"设计要求、未实现"。

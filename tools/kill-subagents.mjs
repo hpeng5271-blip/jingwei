@@ -18,14 +18,15 @@ import { execSync } from 'node:child_process';
 
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const PARENT = 'session-9e05082a-ded8-4b99-ae65-06298a3a9dd0';
+// **保留 39862a7d（baseline-v1-plan，用户要用的那个）**，只清这 5 个。
 const IDS = [
   '3a6e12ad-8c7d-45f2-aa14-992feb4f7147',
   '0617577e-3af4-4d80-8ba2-d6b32a518302',
   '4ed45418-c452-4948-984a-5cfd19aab296',
   'd87d3c5a-10ec-4dcc-87f7-2e10947046ee',
   '3a302cba-1108-4b4d-9f4b-d19a9ad5e30b',
-  '39862a7d-5329-46c8-8316-f8f693969b28',
 ];
+const KEEP = ['39862a7d-5329-46c8-8316-f8f693969b28'];
 
 const dry = process.argv.includes('--dry-run');
 const force = process.argv.includes('--force');

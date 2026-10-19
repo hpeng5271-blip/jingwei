@@ -240,3 +240,18 @@ fn 类体里的常量赋值也是符号() {
     let dbg = o.symbols.iter().find(|s| s.name == "DEBUG").expect("DEBUG");
     assert_eq!(dbg.line, Some(2), "DEBUG 在第 2 行");
 }
+#[test]
+fn 函数体里的类常量访问记成引用() {
+    // 债表 0：`Cfg.DEBUG` 是"只用不调"，要有一条 references 边，否则"改了它影响谁"答不出来。
+    let src = "class Cfg:\n    DEBUG = True\n\ndef f():\n    return Cfg.DEBUG\n";
+    let o = parse_python("a.py", src, 1);
+    assert_eq!(
+        o.refs_local,
+        vec![(
+            "symbol:a.py#f".to_string(),
+            "symbol:a.py#Cfg::DEBUG".to_string()
+        )],
+        "实际 {:?}",
+        o.refs_local
+    );
+}

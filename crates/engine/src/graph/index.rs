@@ -369,7 +369,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 /// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
 /// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
 /// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
-pub const EXTRACTOR_VERSION: &str = "parse@9";
+pub const EXTRACTOR_VERSION: &str = "parse@10";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -542,6 +542,8 @@ pub fn index_source(
         let calls = parsed.calls.clone();
         // 装饰器注册（D-20261019-02）：File → Symbol，单独一条边 kind。
         let registers = parsed.registers.clone();
+        // 属性访问（债表 0）：Symbol→Symbol 的 references 边。
+        let refs_local = parsed.refs_local.clone();
 
         let mut nodes: Vec<Node> = Vec::with_capacity(symbols + 1);
         let mut edges: Vec<Edge> = Vec::with_capacity(symbols + 1 + calls.len());
@@ -571,8 +573,7 @@ pub fn index_source(
         // **调用关系**：只收文件内能确定的那部分（裸标识符且本文件有定义）。
         // 跨文件的要等"解析期"——见设计 §6.2.1。
         for (caller, callee) in calls {
-            // `caller` 可能是**文件本身**（Python 的 `if __name__ == "__main__":` 块）——
-            // 那种边是 File→Symbol，矩阵为它开了一格（D-20261019-02）。
+            // `caller` 可能是文件本身（`__main__` 块），那种边是 File→Symbol。
             let src_kind = if caller.starts_with("file:") {
                 NodeKind::File
             } else {
@@ -590,8 +591,20 @@ pub fn index_source(
             )?);
             rep.calls += 1;
         }
-        // **装饰器注册**：`@app.route("/")` 这类把函数注册给外部框架。
-        // 不混进 `calls`——否则角色的入/出度会被路由函数带偏。
+        // 属性访问（债表 0）：`Cfg.DEBUG` 这种"只用不调" → references 边。
+        for (caller, target) in &refs_local {
+            edges.push(edge(
+                caller,
+                target,
+                EdgeKind::References,
+                NodeKind::Symbol,
+                NodeKind::Symbol,
+                Source::TreeSitter,
+                Confidence::High,
+                now,
+            )?);
+        }
+        // 装饰器注册：不混进 `calls`，否则角色的入/出度会被路由函数带偏。
         for (file_id, sym_id) in &registers {
             edges.push(edge(
                 file_id,

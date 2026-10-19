@@ -102,6 +102,8 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
     );
 
     let mut registers: Vec<(String, String)> = Vec::new();
+    let mut refs_local: Vec<(String, String)> = Vec::new();
+    collect_attr_refs(root, src, rel, &by_path, &mut refs_local);
     collect_registers(root, src, rel, &by_name, &mut registers);
 
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
@@ -116,10 +118,82 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         references: refs,
         imports,
         registers,
+        refs_local,
         complete,
     }
 }
 
+/// 收集**属性访问**（债表 0）：`Cfg.DEBUG` 这类"只用不调"。
+///
+/// 只收**本文件内可解析**的：接收者名字 + 属性名能在 `by_path`（`C::X`）里找到。
+/// 跨文件的（`os.sep`）不在这里编——那是 `resolve` 的活，猜错了比不收更糟。
+/// 只在**符号体内**收（`scope` 非空）：模块级属性访问是 import 期副作用，
+/// 与 D-20261019-02 的规矩一致。
+fn collect_attr_refs(
+    n: TsNode<'_>,
+    src: &str,
+    rel: &str,
+    by_path: &std::collections::BTreeMap<String, String>,
+    out: &mut Vec<(String, String)>,
+) {
+    let mut scope: Vec<String> = Vec::new();
+    walk_attr(n, src, rel, by_path, &mut scope, out);
+}
+
+fn walk_attr(
+    n: TsNode<'_>,
+    src: &str,
+    rel: &str,
+    by_path: &std::collections::BTreeMap<String, String>,
+    scope: &mut Vec<String>,
+    out: &mut Vec<(String, String)>,
+) {
+    let mut cursor = n.walk();
+    for child in n.children(&mut cursor) {
+        match child.kind() {
+            "function_definition" => {
+                let name = child
+                    .child_by_field_name("name")
+                    .and_then(|x| x.utf8_text(src.as_bytes()).ok())
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                let key = symbol_key(rel, &[], None, name);
+                if let Some(body) = child.child_by_field_name("body") {
+                    scope.push(format!("symbol:{key}"));
+                    walk_attr(body, src, rel, by_path, scope, out);
+                    scope.pop();
+                }
+            }
+            "attribute" => {
+                let is_call_fn = child
+                    .parent()
+                    .map(|p| p.kind() == "call")
+                    .unwrap_or(false);
+                if !is_call_fn {
+                    if let Some(caller) = scope.last() {
+                        let recv = child
+                            .child_by_field_name("object")
+                            .and_then(|v| v.utf8_text(src.as_bytes()).ok())
+                            .map(|s| s.trim().to_string());
+                        let attr = child
+                            .child_by_field_name("attribute")
+                            .and_then(|v| v.utf8_text(src.as_bytes()).ok())
+                            .map(|s| s.trim().to_string());
+                        if let (Some(recv), Some(attr)) = (recv, attr) {
+                            if let Some(id) = by_path.get(&format!("{recv}::{attr}")) {
+                                out.push((caller.clone(), id.clone()));
+                            }
+                        }
+                    }
+                }
+                walk_attr(child, src, rel, by_path, scope, out);
+            }
+            _ => walk_attr(child, src, rel, by_path, scope, out),
+        }
+    }
+}
 /// 收集**装饰器注册**（D-20261019-02）：`@app.route"/"` / `@click.command()` 这类，
 /// 把紧跟其后的函数"注册给外部框架"。
 ///

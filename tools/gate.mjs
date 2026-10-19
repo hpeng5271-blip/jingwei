@@ -140,6 +140,10 @@ const KNOWN_LONG = new Map([
   // 这条规矩的意义就在这儿：登记不是豁免，是"记着要还"。
   // 1120：Q6 拆循环，Finding/Severity 上移到 model（-27 行）。
   ['crates/engine/src/understand/rules.rs', 1120],
+  // 1007（2026-10-19）：加"属性访问 → references 边"与"装饰器 registers 边"，
+  // 每种关系一个循环，涨了 17 行**都在必要处**（不是堆杂项）。下一步按"关系种类"拆
+  // `graph/link.rs`（calls/registers/references 三个写边函数各归各位），拆完删掉这一行。
+  ['crates/engine/src/graph/index.rs', 1007],
   // `src-tauri/src/main.rs`（原来 1005）**债已还清，登记删掉**：
   // 把"一次体检的全部材料"整段搬成 `src-tauri/src/payload.rs`（88 行）。
   // 那一段本来就是一个完整的话题——它只负责把引擎那边十几个数据源收成一份

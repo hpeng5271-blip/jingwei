@@ -43,6 +43,12 @@ pub struct ParseOutcome {
     /// 所以"解析不了"不该只留一个数字——**那个引用本身是有用的料**：
     /// 名字、在哪个函数里、第几行。跨文件解析那一步就靠它。
     pub references: Vec<RefFact>,
+    /// **本文件内能确定的"只用不调"**：`(使用者 id, 被用的符号 id)`。
+    ///
+    /// 典型：`Cfg.DEBUG` 这种属性访问——它不是调用（没有调用边），但**确实用了**。
+    /// 债表 0：以前这类关系一条都不收，于是"改了它会影响谁"答不出来。
+    pub refs_local: Vec<(String, String)>,
+
     /// 本文件的 `use` 语句——索引期就能确定的"名字 → 路径"映射。
     ///
     /// **为什么它属于索引期**：`use crate::util::winutil::which;` 这句话本身
@@ -180,6 +186,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         references: refs,
         imports,
         registers: Vec::new(),
+        refs_local: Vec::new(),
         complete,
     }
 }

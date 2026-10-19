@@ -383,7 +383,6 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
                         let byte_col = if e.byte > 0 { e.byte as usize } else { e.col.saturating_sub(1) as usize };
                         // 起点用 UTF-16；终点 = 起点 + 旧名字在 UTF-16 下的长度（全是 ASCII 时相同）。
                         let start = utf16_col(&line_text, byte_col) as u64;
-                        let start_byte = byte_col;
                         let end = start + e.old.encode_utf16().count() as u64;
                         let arr = changes.entry(key).or_insert_with(|| json!([]));
                         if let Some(a) = arr.as_array_mut() {

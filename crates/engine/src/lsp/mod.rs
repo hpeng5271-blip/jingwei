@@ -394,6 +394,55 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
     }
 }
 
+/// **诊断推送**（2026-10-19）：把这个文件的已知问题翻成 LSP 的 `Diagnostic`。
+///
+/// 三件事，都**有出处**：
+/// 1. 索引比文件旧 → 警告（位置不可信）；
+/// 2. 这个文件上次没解析完 → 错误（`files.incomplete = 1`）；
+/// 3. 上次 doctor 在**这个文件**上报过的问题（图谱里 `kind='diagnostic'` 的节点）。
+///
+/// 刻意**不**在这里跑构建/规则：那要几秒钟，编辑器会以为服务端卡死。
+/// 诊断推送只反映"库里已经有的结论"，跑新结论仍然由 `jingwei doctor` 干。
+pub fn diagnostics_for(store: &Store, root: &Path, rel: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    let diag = |line: u32, severity: u8, msg: String| {
+        json!({
+            "range": { "start": { "line": line.saturating_sub(1), "character": 0 },
+                       "end":   { "line": line.saturating_sub(1), "character": 0 } },
+            "severity": severity, "source": "jingwei", "message": msg
+        })
+    };
+
+    // 1) 库旧了：这句话必须出现，否则用户会信旧行号
+    if !up_to_date(store, root, rel) {
+        out.push(diag(1, 2, "索引比这个文件旧：位置与引用数可能是旧的，先跑 `jingwei index`".to_string()));
+    }
+
+    // 2) 上次没解析完
+    let incomplete: i64 = store
+        .conn
+        .query_row("SELECT incomplete FROM files WHERE path=?1", rusqlite::params![rel], |r| r.get(0))
+        .unwrap_or(0);
+    if incomplete == 1 {
+        out.push(diag(1, 1, "这个文件上次没解析完（语法坏了？）：符号与关系可能不全".to_string()));
+    }
+
+    // 3) doctor 报过的问题（只取这个文件的）
+    if let Ok(mut st) = store.conn.prepare(
+        "SELECT name, line FROM nodes WHERE kind='diagnostic' AND file_path=?1 \
+         ORDER BY coalesce(line, 0) LIMIT 50",
+    ) {
+        if let Ok(mut rows) = st.query(rusqlite::params![rel]) {
+            while let Ok(Some(r)) = rows.next() {
+                let msg: String = r.get(0).unwrap_or_default();
+                let line: i64 = r.get(1).unwrap_or(1);
+                out.push(diag(line as u32, 1, msg));
+            }
+        }
+    }
+    out
+}
+
 /// **悬停**（2026-10-19）：这个符号是什么、定义在哪、**被几处调用**。
 ///
 /// 为什么值得做：编辑器里最常问的一句就是"这是啥、谁在用"。
@@ -456,6 +505,28 @@ pub fn serve<R: BufRead, W: Write>(root: &Path, mut r: R, mut w: W) -> std::io::
     while let Some(msg) = read_message(&mut r)? {
         if msg.get("method").and_then(|m| m.as_str()) == Some("exit") {
             break;
+        }
+        // **诊断推送**（2026-10-19）：编辑器打开/保存时，把这个文件的已知问题推过去。
+        // 用通知（没有 id）——LSP 里 publishDiagnostics 规定就是通知。
+        let method_now = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        if matches!(method_now, "textDocument/didOpen" | "textDocument/didSave") {
+            if let (Some(store), Some(uri)) = (
+                store.as_ref(),
+                msg.get("params")
+                    .and_then(|p| p.get("textDocument"))
+                    .and_then(|d| d.get("uri"))
+                    .and_then(|u| u.as_str()),
+            ) {
+                if let Some(rel) = rel_of(root, uri) {
+                    let diags = diagnostics_for(store, root, &rel);
+                    let note = json!({
+                        "jsonrpc": "2.0",
+                        "method": "textDocument/publishDiagnostics",
+                        "params": { "uri": uri, "diagnostics": diags }
+                    });
+                    write_message(&mut w, &note)?;
+                }
+            }
         }
         if let Some(out) = handle(store.as_ref(), root, &msg) {
             write_message(&mut w, &out)?;

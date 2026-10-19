@@ -85,3 +85,24 @@ fn hover_说清是什么和在哪() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **诊断推送**：坏文件（上次没解析完）必须推一条 error；干净文件不推噪音。
+#[test]
+fn 坏文件会推一条错误诊断() {
+    let root = fixture("diag");
+    std::fs::write(root.join("src/broken.rs"), "fn broken( { }\n").unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let bad = lsp::diagnostics_for(&s, &root, "src/broken.rs");
+    assert!(!bad.is_empty(), "坏文件该有诊断");
+    assert!(
+        bad.iter().any(|d| d.get("severity").and_then(|v| v.as_u64()) == Some(1)),
+        "至少一条是 error：{bad:?}"
+    );
+
+    let ok = lsp::diagnostics_for(&s, &root, "src/a.rs");
+    assert!(ok.is_empty(), "干净文件不该有诊断，实际 {ok:?}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

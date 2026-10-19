@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 事 | 落点 | 证据 |
 |---|---|---|
-| **扫盘真能用**：多根、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | `discover --depth 3 D:\projects D:\research` → **186 目录 / 133 项目 / 0.3s**；界面门禁 3 条绿 |
+| **扫盘真能用**：多根、整盘、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | **整机 C:+D: 深度 6 → 423 项目 / 5929 目录 / 6.1s**；`--why` 报跳过原因；界面门禁 5 条绿 |
 | **首页按类型×体量分组**（可折叠） | `ui/scan.js::groupFound` + `.grp-head` | 界面门禁：`heads ≥ 2` 且终态说"扫完" |
 | **tauri 索引崩溃修复**（trait 默认方法） | `graph/parse.rs` | 整个 tauri **329 文件 / 5,916 符号 / 3.2s**；单测 347 绿 |
 | **项目指纹 + 同源检测**（Merkle + Jaccard≥0.8） | `understand/fingerprint.rs` + `discover --similar` | 实机 133 项目：**2 组完全相同**、**5 对同源**（含 `jingwei\src-tauri` ↔ `pylaunch-rs\src-tauri` **88%**）；5 条单测 |

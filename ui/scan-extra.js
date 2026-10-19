@@ -11,7 +11,7 @@ async function scanDrives() {
   scanProgress('<span class="sp-bar"></span><span>正在整盘扫（C:\\ · D:\\）…系统目录会自动跳过</span>');
   let started;
   try {
-    started = await invoke('scan_start', { roots: roots, depth: 5 });
+    started = await invoke('scan_start', { roots: roots, depth: 6 });
   } catch (e) {
     scanProgress('<span>启动失败：' + esc(String(e)) + '</span>', true);
     return;

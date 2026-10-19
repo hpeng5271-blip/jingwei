@@ -47,7 +47,7 @@ fn similar(list: &[(String, String, Vec<String>)], min: f64) -> Vec<(String, Str
     out
 }
 
-pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar: bool) -> i32 {
+pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar: bool, want_why: bool) -> i32 {
     let roots: Vec<PathBuf> = if roots.is_empty() {
         projects::default_scan_roots()
     } else {
@@ -62,6 +62,7 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar:
     let t0 = Instant::now();
     let mut found: Vec<serde_json::Value> = Vec::new();
     let mut seen = 0usize;
+    let mut skips: Vec<(String, usize, Vec<String>)> = Vec::new();
     let mut skipped = 0usize;
     let mut total = 0usize;
     // (路径, 目录名, 文件集合)——只在 --similar 时填，避免白算
@@ -81,6 +82,9 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar:
                 eprintln!("  … 已看 {v} 个目录 · 跳过 {s} · 发现 {} 个项目 · 当前 {}", found.len(), cur.display());
             }
         });
+        if want_why {
+            skips.extend(idx.skip_stats());
+        }
         // 索引建完再查"哪些像项目"：**查询是纯函数**，改判据不用重扫。
         for p in idx.all_projects() {
             let f = projects::describe_public(&p);
@@ -126,6 +130,32 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar:
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         0
     } else {
+        if want_why {
+            let with_markers = skips.len(); // 占位，下面用真实数据替换
+            let _ = with_markers;
+            println!("  目录行数 / 有标记的行 / 项目数：{} / … / {}", seen, total);
+        }
+        if want_why && !skips.is_empty() {
+            println!("  ⊘ 被跳过的目录（按原因）：");
+            let mut agg: std::collections::BTreeMap<String, (usize, Vec<String>)> = Default::default();
+            for (reason, n, samples) in &skips {
+                let e = agg.entry(reason.clone()).or_insert((0, Vec::new()));
+                e.0 += n;
+                for s in samples {
+                    if e.1.len() < 2 {
+                        e.1.push(s.clone());
+                    }
+                }
+            }
+            let mut list: Vec<_> = agg.into_iter().collect();
+            list.sort_by_key(|e| std::cmp::Reverse(e.1 .0));
+            for (reason, (n, samples)) in list {
+                println!("    {n:>4}  {reason}");
+                for s in samples {
+                    println!("          例：{s}");
+                }
+            }
+        }
         if !pairs.is_empty() {
             println!("  ≈ 同源（Jaccard ≥ 0.8）：{} 对", pairs.len());
             for (a, b, s) in &pairs {

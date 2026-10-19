@@ -299,6 +299,27 @@ fn walk(root: &Path, dir: &Path, level: usize, max: usize, idx: &mut DirsIndex) 
 }
 
 impl DirsIndex {
+    /// **按原因统计被跳过的目录**（最多带 3 个样例路径）。
+    ///
+    /// 为什么要有它：用户问"为什么这个项目没扫到"时，最没用的回答是"没扫到"。
+    /// 这个函数让答案变成"这一类目录被跳过了，例如 …"。
+    pub fn skip_stats(&self) -> Vec<(String, usize, Vec<String>)> {
+        let mut m: std::collections::BTreeMap<String, (usize, Vec<String>)> = Default::default();
+        for (path, row) in &self.rows {
+            if let Some(reason) = row.skipped {
+                let e = m.entry(reason.to_string()).or_insert((0, Vec::new()));
+                e.0 += 1;
+                if e.1.len() < 3 {
+                    e.1.push(path.display().to_string());
+                }
+            }
+        }
+        let mut out: Vec<(String, usize, Vec<String>)> =
+            m.into_iter().map(|(k, (n, s))| (k, n, s)).collect();
+        out.sort_by_key(|e| std::cmp::Reverse(e.1));
+        out
+    }
+
     /// **查询**：这一层下面所有"像项目"的目录（含嵌套的）。
     ///
     /// 与 `projects::discover` 的差别：那个遇到项目就停；这个**全都给**——

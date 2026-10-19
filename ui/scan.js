@@ -124,7 +124,7 @@ async function scanAll() {
   scanProgress('<span class="sp-bar"></span><span>正在扫…</span>');
   let started;
   try {
-    started = await invoke('scan_start', { roots: [], depth: 4 });
+    started = await invoke('scan_start', { roots: [], depth: 6 });
   } catch (e) {
     scanProgress('<span>启动失败：' + esc(String(e)) + '</span>', true);
     return;

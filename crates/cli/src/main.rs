@@ -231,6 +231,8 @@ fn run() -> i32 {
             }
             // **扫盘的同源检测**（2026-10-19）：只对同名目录算 Jaccard，代价可控
             "--similar" => rest.push("--similar".to_string()),
+            // **为什么没扫到**：扫完按原因统计被跳过的目录
+            "--why" => rest.push("--why".to_string()),
             "--help" | "-h" => return help(),
             "--version" | "-V" => {
                 println!("jingwei {}", env!("CARGO_PKG_VERSION"));
@@ -353,19 +355,20 @@ fn run() -> i32 {
         "graph" => cmd_graph(&root, json, &rest),
         // **扫盘找项目**：可扫多个根、边扫边出、有终态（与界面同一套引擎）。
         "discover" => {
-            let depth = rest.iter().position(|a| a == "--depth")
-                .and_then(|i| rest.get(i + 1)).and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(4);
+            // **深度要用全局解析出来的 `depth_arg`**（2026-10-19 抓到）：
+            // `--depth` 在全局参数解析里就被消费了，rest 里根本没有它，
+            // 于是本地解析永远 fallback 到默认值 —— 整盘扫时看起来"扫不深"。
             let mut roots: Vec<std::path::PathBuf> = Vec::new();
-            let mut i = 0;
-            while i < rest.len() {
-                if rest[i] == "--depth" { i += 2; continue; }
-                if !rest[i].starts_with(")--") { roots.push(std::path::PathBuf::from(&rest[i])); }
-                i += 1;
+            for a in &rest {
+                if !a.starts_with("--") {
+                    roots.push(std::path::PathBuf::from(a));
+                }
             }
             let want_similar = rest.iter().any(|a| a == "--similar");
-            cmd_discover::cmd_discover(roots, depth, json, want_similar)
+            let want_why = rest.iter().any(|a| a == "--why");
+            cmd_discover::cmd_discover(roots, depth_arg, json, want_similar, want_why)
         }
+
         // **`jingwei index` = 把项目带到"图谱可用"的状态。**
         // 与界面「索引一次」同一个内核入口（`graph::index::index_source`）。
         //

@@ -90,8 +90,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 现在最该做的三件 | 一句话 |
 |---|---|
 | **信息复用/检验层**（内容哈希 + 解析器版本 + 结果哈希） | 二次启动不重算；扫描/抽取结果可复用 |
-| **LSP 找引用** | `textDocument/references` 还没做（只到 definition） |
-| **LSP 只到 definition** | 找引用 / hover 还没有 |
+| **LSP 只到 definition** | `textDocument/references` 与 hover 还没有 |
 
 ## 6. 要什么读什么（**别一次读进去**）
 

@@ -138,12 +138,20 @@ pub fn cmd_discover(
                   for start in (0..n).step_by(chunk) {
                       let end = (start + chunk).min(n);
                       let pl = &project_list;
+                      let have_json = json;
                       handles.push(s.spawn(move || {
                           let mut local = Vec::with_capacity(end - start);
                           for (i, p) in pl.iter().enumerate().take(end).skip(start) {
                               let f = projects::describe_public(p);
                               let m = projects::measure(p);
-                              let (fp, set) = fingerprint::of_detailed(p);
+                              // **只在需要时算指纹**（2026-10-20 性能）：它要把项目里每个文件读一遍
+                              // 算哈希，温缓存下 422 个项目要 5s，冷缓存更贵。
+                              // 只有 --json（界面要 hash）和 --similar（要集合）才用得上。
+                              let (fp, set) = if have_json || want_similar {
+                                  fingerprint::of_detailed(p)
+                              } else {
+                                  (fingerprint::Fingerprint::default(), Vec::new())
+                              };
                               local.push((i, f, m, fp, set));
                           }
                           local

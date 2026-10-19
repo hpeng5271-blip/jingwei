@@ -7,6 +7,8 @@
 //! 本项目的边界是"绿色免安装、不提权"。`ReadDirectoryChangesW` 不需要提权，
 //! 代价是：**进程活着才收得到事件**；没在跑时"没有记录"≠"没有变化"。
 //!
+#![allow(clippy::let_underscore_must_use)]
+
 //! **缓冲区溢出**（`ERROR_NOTIFY_ENUM_DIR`）：变更太多时 Windows 会丢事件。
 //! 处理方式是**写一行 `overflow`**，读的一侧据此退回全量——比"漏了还当最新"安全。
 
@@ -51,12 +53,14 @@ pub fn parse_notify(buf: &[u8]) -> Vec<(u32, String)> {
         let action = u32::from_le_bytes(buf[off + 4..off + 8].try_into().unwrap_or([0; 4]));
         let name_len = u32::from_le_bytes(buf[off + 8..off + 12].try_into().unwrap_or([0; 4])) as usize;
         let name_start = off + 12;
-        if name_len % 2 != 0 || name_start + name_len > buf.len() {
+        if !name_len.is_multiple_of(2) || name_start + name_len > buf.len() {
             break;
         }
         let units: Vec<u16> = buf[name_start..name_start + name_len]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
             .collect();
         out.push((action, String::from_utf16_lossy(&units)));
         if next == 0 {
@@ -71,6 +75,7 @@ pub fn parse_notify(buf: &[u8]) -> Vec<(u32, String)> {
 /// 但要把原因打到 stderr（静默失败是这个项目最反对的事）。
 fn append_line(journal: &Path, value: serde_json::Value) {
     if let Some(dir) = journal.parent() {
+        // 建目录失败不该让监听线程死；真正写失败会在下面打 stderr。
         let _ = std::fs::create_dir_all(dir);
     }
     match std::fs::OpenOptions::new()
@@ -79,6 +84,7 @@ fn append_line(journal: &Path, value: serde_json::Value) {
         .open(journal)
     {
         Ok(mut f) => {
+            // 单行写失败不 panic（磁盘满等），但也**不静默**：下面 err 分支会打出来。
             let _ = writeln!(f, "{value}");
         }
         Err(e) => eprintln!("journal 写不进去（{}）：{e}", journal.display()),
@@ -107,6 +113,7 @@ mod win {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
+        // SAFETY: 句柄由本函数独占，路径是 NUL 结尾的 UTF-16；参数与 Win32 契约一致。
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
@@ -140,6 +147,7 @@ mod win {
         let mut buf = vec![0u8; 64 * 1024];
         while !stop.load(Ordering::Relaxed) {
             let mut bytes: u32 = 0;
+            // SAFETY: `buf` 在本循环内独占可变借用；`bytes` 指向栈上变量；未用重叠 I/O。
             let ok = unsafe {
                 ReadDirectoryChangesW(
                     handle,
@@ -172,6 +180,7 @@ mod win {
                 );
             }
         }
+        // SAFETY: handle 来自 CreateFileW 且此前未关闭；关闭一次是本函数的收尾。
         unsafe { CloseHandle(handle) };
     }
 

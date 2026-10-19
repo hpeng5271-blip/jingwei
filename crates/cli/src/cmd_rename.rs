@@ -19,12 +19,17 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
         }
     };
 
-    // 名字 → 符号 id。**同名多义就停下报出来**，不替用户挑。
-    let ids = match store.symbol_ids_by_name(name) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("查符号失败：{e}");
-            return 2;
+    // 名字 → 符号 id；也接受直接给 `symbol:...` 形式的 id。
+    // **同名多义就停下报出来**，不替用户挑。
+    let ids = if name.starts_with("symbol:") {
+        vec![name.to_string()]
+    } else {
+        match store.symbol_ids_by_name(name) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("查符号失败：{e}");
+                return 2;
+            }
         }
     };
     if ids.is_empty() {
@@ -123,5 +128,29 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
         }
         println!("已改：{file}");
     }
+
+    // **写完回读**：每一处都要真的以新名字开头——写入不等于改对（编码/换行都可能坑）。
+    let mut bad = 0;
+    for e in &plan.edits {
+        let Ok(text) = std::fs::read_to_string(root.join(&e.file)) else {
+            bad += 1;
+            continue;
+        };
+        let Some(line) = text.lines().nth((e.line.saturating_sub(1)) as usize) else {
+            bad += 1;
+            continue;
+        };
+        let start = (e.col.saturating_sub(1)) as usize;
+        if !line.get(start..).map(|s| s.starts_with(&e.new)).unwrap_or(false) {
+            eprintln!("回读不符：{}:{} 期望以 `{}` 开头", e.file, e.line, e.new);
+            bad += 1;
+        }
+    }
+    if bad > 0 {
+        eprintln!("有 {bad} 处回读不符——已写入但需要人工看一眼");
+        return 1;
+    }
+    println!("回读通过：{} 处都已是 `{}`", plan.edits.len(), to);
+
     if plan.ambiguous.is_empty() { 0 } else { 1 }
 }

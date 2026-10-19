@@ -15,6 +15,7 @@ mod cmd_deps;
 mod cmd_discover;
 mod cmd_positions;
 mod cmd_rename;
+mod cmd_watch;
 mod cmd_graph;
 mod cmd_lsp;
 mod cmd_guide;
@@ -106,6 +107,8 @@ fn run() -> i32 {
     let mut show_all = false;
     // `rename` 用：--to <新名>（新名可能在全局解析阶段就被消费，所以放这里）
     let mut to_arg: Option<String> = None;
+    // `watch` 用：--journal <路径>（同样会被全局解析器先吃掉）
+    let mut journal_arg: Option<String> = None;
     let mut write_files = false;
 
     let mut i = 0;
@@ -161,6 +164,16 @@ fn run() -> i32 {
                 }
             }
             "--write" => write_files = true,
+            "--journal" => {
+                i += 1;
+                match argv.get(i) {
+                    Some(v) => journal_arg = Some(v.clone()),
+                    None => {
+                        eprintln!("--journal 后面要跟路径");
+                        return 2;
+                    }
+                }
+            }
             "--more" => MORE.store(true, Ordering::Relaxed),
             "--recommended" => recommended_only = true,
             "--template" | "-t" => {
@@ -361,6 +374,15 @@ fn run() -> i32 {
         // **依赖对账**：清单 vs 锁文件（2026-10-19）
         "deps" => cmd_deps::cmd_deps(&root, json),
         "positions" => cmd_positions::cmd_positions(&root, json),
+    "watch" => {
+        let roots: Vec<String> = rest
+            .iter()
+            .filter(|a| !a.starts_with("--"))
+            .cloned()
+            .collect();
+        let journal = journal_arg.clone();
+        cmd_watch::cmd_watch(&root, &roots, journal.as_deref())
+    }
     "rename" => {
         let name = rest.first().map(|s| s.as_str()).unwrap_or("");
         let to = to_arg.clone().unwrap_or_default();

@@ -27,5 +27,15 @@ tree-sitter = "0.27"
 tree-sitter-rust = "0.24"
 tree-sitter-python = "0.23"
 
+# **只为了一个 Win32 调用**：`ReadDirectoryChangesW`（增量扫的变更事实，D-03）。
+# 不用 `winapi`：它已经多年不更新；`windows-sys` 与本机 cargo 缓存里的版本一致，离线可编。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_IO",
+] }
+
 [lints]
 workspace = true

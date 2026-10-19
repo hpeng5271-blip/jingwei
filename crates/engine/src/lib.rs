@@ -80,6 +80,9 @@ pub mod understand {
     pub mod scan_cache;
     /// **依赖对账**：清单声明的 vs 锁文件锁到的（两边都是外部真值）。
     pub mod deps_check;
+    /// **变更监听**（Win32 `ReadDirectoryChangesW`）：给增量扫提供"变过什么"的事实。
+    /// 不提权、不碰 USN；没在跑时"没有记录"≠"没有变化"。见 `D-20261020-03`。
+    pub mod dirwatch;
     pub mod fix;
     /// **项目指南**：一句话回答"现在能不能跑、卡在哪、下一步敲什么"。
     /// 与 `rules` 的分工：那边是**清单**（我知道的都告诉你），这边是**排序**

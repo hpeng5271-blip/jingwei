@@ -227,3 +227,16 @@ fn 带调用的装饰器记成注册_文件到函数() {
     assert_eq!(o.registers[0].0, "file:a.py");
     assert_eq!(o.registers[0].1, "symbol:a.py#index");
 }
+#[test]
+fn 类体里的常量赋值也是符号() {
+    // 债表 0：`class Cfg: DEBUG = True` 之后 `Cfg.DEBUG` 才有东西可指。
+    let src = "class Cfg:\n    DEBUG = True\n    NAME = \"x\"\n\n    def m(self):\n        self.y = 1\n";
+    let o = parse_python("a.py", src, 1);
+    let ids: Vec<&str> = o.symbols.iter().map(|s| s.id.as_str()).collect();
+    assert!(ids.contains(&"symbol:a.py#Cfg::DEBUG"), "{:?}", ids);
+    assert!(ids.contains(&"symbol:a.py#Cfg::NAME"), "{:?}", ids);
+    // `self.y` 不是类属性，不许冒出来
+    assert!(!ids.iter().any(|i| i.contains("Cfg::y")), "{:?}", ids);
+    let dbg = o.symbols.iter().find(|s| s.name == "DEBUG").expect("DEBUG");
+    assert_eq!(dbg.line, Some(2), "DEBUG 在第 2 行");
+}

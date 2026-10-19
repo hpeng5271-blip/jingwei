@@ -62,6 +62,17 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
     // 名字 → 符号 id（本文件内）。同名只留第一个——与 Rust 那边同一套规矩。
     let mut by_name: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
     for s in &symbols {
+        // **类属性不进"可被调用"的名字表**：`X = 1` 之后 `X()` 是调用一个值，
+        // 不是调用我们的符号；放进去会凭空多出调用边（flask 实测 +16 条）。
+        let is_attr = s
+            .data
+            .as_ref()
+            .and_then(|d| d.get("sym"))
+            .and_then(|v| v.as_str())
+            == Some("attr");
+        if is_attr {
+            continue;
+        }
         by_name.entry(s.name.as_str()).or_insert(s.id.as_str());
     }
     // 路径 → id（`C::m`）。`self.m()` 靠它落地。
@@ -279,6 +290,48 @@ fn collect_defs(
                     collect_defs(body, src, rel, now, scope, container, out);
                     container.pop();
                 }
+            }
+            // **类体里的 `NAME = ...` 也是符号**（2026-10-19，债表 0）：
+            // `class Cfg: DEBUG = True` 之后 `Cfg.DEBUG` 才有东西可指。
+            // 只收**简单标识符**赋值；`self.x = 1` / `a[0] = 1` 不是类属性。
+            "expression_statement" if !container.is_empty() => {
+                let Some(assign) = child.named_child(0) else {
+                    continue;
+                };
+                if assign.kind() != "assignment" {
+                    continue;
+                }
+                let Some(left) = assign.child_by_field_name("left") else {
+                    continue;
+                };
+                if left.kind() != "identifier" {
+                    continue;
+                }
+                let Some(name) = left.utf8_text(src.as_bytes()).ok() else {
+                    continue;
+                };
+                if name.is_empty() {
+                    continue;
+                }
+                let key = symbol_key(rel, scope, container.last().map(|s| s.as_str()), name);
+                let mut node = Node::new(
+                    NodeKind::Symbol,
+                    &key,
+                    name.to_string(),
+                    Source::TreeSitter,
+                    Confidence::High,
+                    now,
+                );
+                node.file_path = Some(rel.to_string());
+                node.line = Some(assign.start_position().row as u32 + 1);
+                node.data = Some(serde_json::json!({ "sym": "attr" }));
+                node.checksum = Some(crate::facts::stable_hash([
+                    NodeKind::Symbol.as_str(),
+                    name,
+                    "attr",
+                    rel,
+                ]));
+                out.push(node);
             }
             // 缩进块是 Python 的结构，`if` / `for` / `try` 里面也可能有 `def`
             // （少见但合法：条件定义）。往下钻，别漏。

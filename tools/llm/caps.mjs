@@ -13,9 +13,9 @@ export const PRICES = {
 /** 每轮 pro 咨询的**硬上限**：输入 8K token、输出 2K token。超了拒绝，不截断。 */
 export const CAPS = {
   inputTokens: 8000,
-  outputTokens: 2000,
-  proPerDay: 20, // 一天最多 20 次升级
-  cnyPerDay: 3.0, // 一天最多花 ¥3 在 pro 咨询上
+  outputTokens: 4000,
+  proPerDay: 60, // 一天最多 60 次升级（2026-10-19 放宽：思考该花钱）
+  cnyPerDay: 15.0, // 一天最多花 ¥15 在 pro 咨询上（2026-10-19 放宽）
 };
 
 /** 粗估 token：中文 1 字≈1 token，其余按 4 字符≈1 token。**只用于闸门，不用于账单**。 */

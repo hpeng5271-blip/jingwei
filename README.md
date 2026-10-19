@@ -60,7 +60,7 @@ tools            门禁与探针脚本（gates.json 是门禁清单的唯一真�
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
-一条命令跑完七道门禁（测试 / 文档测试 / 静态检查 / 工程门禁 / 外壳测试 / 交付门禁 / 界面门禁），
+一条命令跑完八道门禁（测试 / 文档测试 / 静态检查 / 工程门禁 / 外壳测试 / 交付门禁 / 界面门禁 / 真源门禁），
 每道写清它守着什么、失败给原始输出、结束给一张表。清单的唯一真源是
 `tools/gates.json`——**改门禁只改那一份**，脚本只负责跑。
 想单独跑哪一道，`tools/gates.json` 里每一行都写着原命令。

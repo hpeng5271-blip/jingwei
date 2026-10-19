@@ -15,7 +15,7 @@
 use std::path::Path;
 
 /// 指纹 + 形成它的证据。
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Fingerprint {
     /// 精确指纹（相同 = 内容与相对路径完全一致）
     pub hash: String,

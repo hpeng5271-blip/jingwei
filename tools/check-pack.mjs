@@ -180,13 +180,18 @@ export function checkPack(zipPath) {
     const exeMs = newestExe.mtimeMs;
     const src = newestSourceMtime();
     const TOLERANCE_MS = 10 * 60_000;
-    if (src > 0 && exeMs + TOLERANCE_MS < src) {
-      const d = ((src - exeMs) / 60000).toFixed(1);
-      problems.push(
-        `包里的 exe 比源码旧 ${d} 分钟（exe ${new Date(exeMs).toLocaleString('zh-CN')}，`
-        + `最新源码 ${new Date(src).toLocaleString('zh-CN')}）——重新构建再打包`,
-      );
-    }
+      // **节奏变了（2026-10-20）**：默认不打包，"包比源码旧"是常态，不该天天红。
+      // 只有收束打包时才要求新鲜：JINGWEI_DELIVER=1。
+      if (src > 0 && exeMs + TOLERANCE_MS < src) {
+        const d = ((src - exeMs) / 60000).toFixed(1);
+        const msg = '包里的 exe 比源码旧 ' + d + ' 分钟（exe ' + new Date(exeMs).toLocaleString('zh-CN')
+          + '，最新源码 ' + new Date(src).toLocaleString('zh-CN') + '）';
+        if (process.env.JINGWEI_DELIVER === '1') {
+          problems.push(msg + '——收束打包时不允许旧包，重新构建再打包');
+        } else {
+          console.log('  · 提示：' + msg + '（未收束打包，允许）');
+        }
+      }
   }
 
   return { problems, entries: rows.length, zip };
@@ -211,5 +216,5 @@ if (process.argv[1] && process.argv[1].endsWith('check-pack.mjs')) {
     for (const p of r.problems) console.log('   × ' + p);
     process.exit(1);
   }
-  console.log(`交付门禁通过：${relative(ROOT, r.zip)} 里 ${r.entries} 个条目，该有的都在、不该有的没有、exe 不比源码旧。`);
+  console.log(`交付门禁通过：${relative(ROOT, r.zip)} 里 ${r.entries} 个条目，该有的都在、不该有的没有、exe 新鲜度见上面的提示。`);
 }

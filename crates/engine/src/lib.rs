@@ -76,6 +76,8 @@ pub mod understand {
     pub mod dirs_index;
     /// 项目指纹：判断"两份目录是不是同一个项目"。
     pub mod fingerprint;
+    /// **指纹缓存**：只看元数据的树签名命中就复用（债 0.30）。
+    pub mod fp_cache;
     /// 扫盘结果的持久化（下次打开界面不必从头扫）。
     pub mod scan_cache;
     /// **依赖对账**：清单声明的 vs 锁文件锁到的（两边都是外部真值）。

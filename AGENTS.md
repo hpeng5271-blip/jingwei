@@ -23,6 +23,7 @@
 ## 0.5 工作节奏（2026-10-20 用户定的）
 
 - **不默认打包、不写详细报告**；只有用户说"收束打包"（用来验证分工是否可行）才打包。
+  收束打包时带 `JINGWEI_DELIVER=1` 跑门禁（交付门禁会严格检查"包比源码旧"）。
 - **每 12 小时**一份过程报告 + 项目现状（由定时任务聚合 `docs/process/要点-<日期>.md`）。
 - 干活途中**只记要点**（一行一条：时间 + 做了什么 + 数字/结论），不求精确、不重复验证。
 - 结论仍进仓库（债表/事故账本/要点），会话只留一句引用。
@@ -44,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->465<!-- /fact --> 条：engine <!-- fact:engine_unit -->377<!-- /fact --> /
+**8 道**：单测+集成（<!-- fact:tests_total -->467<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
 集成 <!-- fact:integration -->69<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 

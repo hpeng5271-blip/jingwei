@@ -102,6 +102,11 @@ pub fn cmd_discover(
     let mut last_print = 0usize;
     // 计时（JINGWEI_SCAN_TIMING=1 才打印）。
 
+    // **指纹缓存**（债 0.30）：签名没变就复用，省掉"把项目里每个文件读一遍"。
+    let fp_cache = std::sync::Arc::new(std::sync::Mutex::new(
+        jingwei_engine::understand::fp_cache::FpCache::open(),
+    ));
+
     for root in &roots {
         if !root.is_dir() {
             eprintln!("跳过（目录不存在）：{}", root.display());
@@ -139,6 +144,7 @@ pub fn cmd_discover(
                       let end = (start + chunk).min(n);
                       let pl = &project_list;
                       let have_json = json;
+                      let fp_cache = fp_cache.clone();
                       handles.push(s.spawn(move || {
                           let mut local = Vec::with_capacity(end - start);
                           for (i, p) in pl.iter().enumerate().take(end).skip(start) {
@@ -147,8 +153,21 @@ pub fn cmd_discover(
                               // **只在需要时算指纹**（2026-10-20 性能）：它要把项目里每个文件读一遍
                               // 算哈希，温缓存下 422 个项目要 5s，冷缓存更贵。
                               // 只有 --json（界面要 hash）和 --similar（要集合）才用得上。
-                              let (fp, set) = if have_json || want_similar {
+                              let (fp, set) = if want_similar {
+                                  // 相似检测要"文件集合"，缓存里没有，老实算。
                                   fingerprint::of_detailed(p)
+                              } else if have_json {
+                                  use jingwei_engine::understand::fp_cache::tree_sig;
+                                  let sig = tree_sig(p);
+                                  let hit = { fp_cache.lock().unwrap().get(p, &sig) };
+                                  match hit {
+                                      Some(f) => (f, Vec::new()),
+                                      None => {
+                                          let f = fingerprint::of(p);
+                                          fp_cache.lock().unwrap().put(p, sig, f.clone());
+                                          (f, Vec::new())
+                                      }
+                                  }
                               } else {
                                   (fingerprint::Fingerprint::default(), Vec::new())
                               };
@@ -196,6 +215,14 @@ pub fn cmd_discover(
     }
 
     let pairs = if want_similar { similar(&sets, 0.8) } else { Vec::new() };
+    {
+        let c = fp_cache.lock().unwrap();
+        c.save();
+        let (hits, misses) = c.stats();
+        if std::env::var_os("JINGWEI_SCAN_TIMING").is_some() {
+            eprintln!("  指纹缓存：命中 {hits} / 未命中 {misses}");
+        }
+    }
     let secs = t0.elapsed().as_secs_f64();
     if json {
         let out = serde_json::json!({

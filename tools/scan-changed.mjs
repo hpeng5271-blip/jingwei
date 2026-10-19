@@ -21,6 +21,30 @@ const get = (k, d) => {
 const dry = args.includes('--dry');
 const exe = get('exe', path.join('target', 'release', process.platform === 'win32' ? 'jingwei.exe' : 'jingwei'));
 
+/** 从某个目录往上找"项目根"：含清单文件或 .git 的那一层；找不到就返回起点。 */
+const MARKERS = [
+  'Cargo.toml',
+  'package.json',
+  'pyproject.toml',
+  'setup.py',
+  'requirements.txt',
+  'go.mod',
+  'pom.xml',
+  'build.gradle',
+  '.git',
+];
+function project_root_of(start) {
+  let d = start;
+  for (let i = 0; i < 12; i += 1) {
+    for (const m of MARKERS) {
+      if (fs.existsSync(path.join(d, m))) return d;
+    }
+    const parent = path.dirname(d);
+    if (parent === d) break;
+    d = parent;
+  }
+  return start;
+}
 const base = process.env.LOCALAPPDATA || path.join(os.tmpdir(), 'jingwei-local');
 const journal = path.join(base, 'jingwei', 'watch.jsonl');
 if (!fs.existsSync(journal)) {
@@ -28,7 +52,12 @@ if (!fs.existsSync(journal)) {
   process.exit(2);
 }
 
-const lines = fs.readFileSync(journal, 'utf8').split(/\r?\n/).filter(Boolean);
+// 去 BOM：PowerShell 的 utf8 会带 BOM，JSON.parse 会把它当坏数据。
+const lines = fs
+  .readFileSync(journal, 'utf8')
+  .replace(/^\uFEFF/, '')
+  .split(/\r?\n/)
+  .filter(Boolean);
 let bad = 0;
 const dirs = new Set();
 for (const l of lines) {
@@ -40,9 +69,11 @@ for (const l of lines) {
     continue;
   }
   if (!o || !o.path) continue;
-  // 变更的是文件 → 父目录；变更的是目录本身 → 它自己
   const p = path.resolve(o.path);
-  dirs.add(fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : path.dirname(p));
+  const start = fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : path.dirname(p);
+  // **往上找到项目根**：改的是 `src/lib.rs`，要扫的是它所在项目，不是 `src/`。
+  // 找不到根（没有清单/.git）就用最近的一层——那也是我们唯一知道的事实。
+  dirs.add(project_root_of(start));
 }
 
 // 只保留仍然存在的目录（删掉的目录扫它没有意义）

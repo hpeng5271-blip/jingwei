@@ -435,6 +435,7 @@ pub fn index_source(
     let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::imports::ImportFact>> =
         std::collections::BTreeMap::new();
 
+    let mut direct_sites: Vec<(String, String, u32)> = Vec::new();
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
             rep.unreadable += 1;
@@ -540,6 +541,7 @@ pub fn index_source(
         }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
         let calls = parsed.calls.clone();
+        direct_sites.extend(parsed.call_sites.iter().cloned());
         // 装饰器注册（D-20261019-02）：File → Symbol，单独一条边 kind。
         let registers = parsed.registers.clone();
         // 属性访问（债表 0）：Symbol→Symbol 的 references 边。
@@ -656,10 +658,11 @@ pub fn index_source(
     // 到这里所有节点都进库了，才有资格回答"这个名字指谁"。
     // **自下而上**：从每条引用出发去找定义（rust-analyzer 讲的 IDE 做法），
     // 而不是从头把每个文件再遍历一遍（那是编译器的做法）。
+    // 调用点（含同文件直接调用）：**不管有没有待解析引用都要写**（债表 0.25）。
+    let mut sites: Vec<(String, String, u32)> = Vec::new();
     if !pending_refs.is_empty() {
         let empty = crate::graph::resolve::SymbolTable::new();
         let mut extra: Vec<Edge> = Vec::new();
-        let mut sites: Vec<(String, String, u32)> = Vec::new();
         for (rel, refs) in &pending_refs {
             let ft = file_tables.get(rel).unwrap_or(&empty);
             let no_imports: Vec<crate::graph::imports::ImportFact> = Vec::new();
@@ -761,27 +764,29 @@ pub fn index_source(
             let w = store.upsert(&[], &extra)?;
             rep.edges_written += w.edges;
         }
-        // 调用点表是**派生数据**：每次重建前清空，再按本次结果写。
+    }
+
+    // 调用点表是**派生数据**：每次重建前清空，再按本次结果写。
+    // **同文件直接调用点**也在里面——重命名靠它（债表 0.25）。
+    store
+        .conn
+        .execute("DELETE FROM edge_sites", [])
+        .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
+    for (src, dst, line) in sites.iter().chain(direct_sites.iter()) {
+        let Some(file) = src
+            .strip_prefix("symbol:")
+            .and_then(|r| r.split('#').next())
+            .map(|s| s.to_string())
+        else {
+            continue;
+        };
         store
             .conn
-            .execute("DELETE FROM edge_sites", [])
-            .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
-        for (src, dst, line) in sites {
-            let Some(file) = src
-                .strip_prefix("symbol:")
-                .and_then(|r| r.split('#').next())
-                .map(|s| s.to_string())
-            else {
-                continue;
-            };
-            store
-                .conn
-                .execute(
-                    "INSERT INTO edge_sites(src,dst,kind,file,line) VALUES(?1,?2,'calls',?3,?4)",
-                    rusqlite::params![src, dst, file, line as i64],
-                )
-                .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
-        }
+            .execute(
+                "INSERT INTO edge_sites(src,dst,kind,file,line) VALUES(?1,?2,'calls',?3,?4)",
+                rusqlite::params![src, dst, file, *line as i64],
+            )
+            .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
     }
 
     // **把"理解覆盖度"存进库**（2026-10-18）：界面上的角色图例要能说

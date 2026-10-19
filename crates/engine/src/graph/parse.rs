@@ -34,6 +34,9 @@ pub struct ParseOutcome {
     /// 宏调用（`println!`）也不会被收进来——它是 `macro_invocation` 不是 `call_expression`，
     /// 这一条正好落在设计 §6.1 说的"`format!` 是宏不是函数"上，**语法层直接帮我们挡住了**。
     pub calls: Vec<(String, String)>,
+    /// **调用点的行号**（`(调用者, 被调者, 行)`）：重命名要按行改（债表 0.25）。
+    /// 与 `calls` 一一对应；分开存是为了不动既有断言。
+    pub call_sites: Vec<(String, String, u32)>,
     /// **解析不了的引用**——不只是计数，是事实本身。
     ///
     /// 这一条是读完 stack-graphs 之后改的。它那边的原话是：
@@ -151,6 +154,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
     let mut calls = Vec::new();
     let mut refs = Vec::new();
+    let mut call_sites: Vec<(String, String, u32)> = Vec::new();
     let mut scope: Vec<String> = Vec::new();
     // **本文件内"路径 → id"的反查表**：`L::post` → `symbol:a.rs#L::post`。
     //
@@ -173,6 +177,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         &by_path,
         &mut calls,
         &mut refs,
+          &mut call_sites,
     );
     // 同一个调用点可能在多处出现（同一个函数调 `helper()` 两次）——
     // 图上只该有一条边：**边表达的是"有关系"，不是"关系发生了几次"**。
@@ -183,6 +188,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     ParseOutcome {
         symbols,
         calls,
+        call_sites,
         references: refs,
         imports,
         registers: Vec::new(),
@@ -219,6 +225,7 @@ fn collect_calls(
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
+    sites: &mut Vec<(String, String, u32)>,
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -251,6 +258,7 @@ fn collect_calls(
                         by_path,
                         out,
                         refs,
+                        sites,
                     );
                     if own.is_some() {
                         scope.pop();
@@ -265,7 +273,7 @@ fn collect_calls(
                     .map(|s| s.trim().to_string());
                 if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
                     // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
-                    collect_calls(body, src, rel, Some(&tname), scope, by_name, by_path, out, refs);
+                    collect_calls(body, src, rel, Some(&tname), scope, by_name, by_path, out, refs, sites);
                 }
             }
             "impl_item" => {
@@ -285,13 +293,14 @@ fn collect_calls(
                         by_path,
                         out,
                         refs,
+                        sites,
                     );
                 }
             }
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
                     collect_calls(
-                        body, src, rel, container, scope, by_name, by_path, out, refs,
+                        body, src, rel, container, scope, by_name, by_path, out, refs, sites,
                     );
                 }
             }
@@ -299,6 +308,8 @@ fn collect_calls(
                 let Some(f) = child.child_by_field_name("function") else {
                     continue;
                 };
+                // 调用点行号：重命名要靠它把"改哪一行"算准（债表 0.25）。
+                let call_line = child.start_position().row as u32 + 1;
                 let txt = f.utf8_text(src.as_bytes()).unwrap_or("").trim().to_string();
 
                 // ① **`self.m()` —— 接收者类型就在眼前，不用推断**。
@@ -322,6 +333,7 @@ fn collect_calls(
                             if let Some(caller) = scope.last() {
                                 if id != caller {
                                     out.push((caller.clone(), id.clone()));
+                                    sites.push((caller.clone(), id.clone(), call_line));
                                 }
                             }
                             continue;
@@ -339,6 +351,7 @@ fn collect_calls(
                         Some(callee) => {
                             // 自己调自己不算一条边——那是递归，不是关系。
                             if *callee != caller.as_str() {
+                                sites.push((caller.clone(), (*callee).to_string(), call_line));
                                 out.push((caller, (*callee).to_string()));
                             }
                         }
@@ -377,7 +390,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, by_name, by_path, out, refs);
+                collect_calls(child, src, rel, container, scope, by_name, by_path, out, refs, sites);
             }
         }
     }

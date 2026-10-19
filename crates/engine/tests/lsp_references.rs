@@ -173,3 +173,37 @@ fn 中文行的重命名列号按_utf16_算() {
     assert_ne!(expect, byte_pos as u64, "含中文时两列必须不同，否则这条测试没意义");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **Python 跨文件模块属性也能被 LSP 找到**（债 0.28 的端到端）：问 `DEBUG` 的引用，
+/// 应返回 `main.py`（那是 `cfg.DEBUG` 的调用点所在文件）。
+#[test]
+fn python_模块属性出现在_references_里() {
+    let root = std::env::temp_dir().join(format!("jw-lspref-py-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("pkg")).unwrap();
+    std::fs::write(root.join("pkg/cfg.py"), "DEBUG = True\n").unwrap();
+    std::fs::write(root.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(
+        root.join("main.py"),
+        "from pkg import cfg\n\n\ndef run():\n    return cfg.DEBUG\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let uri = lsp::path_to_uri(&root.join("pkg/cfg.py"));
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 9, "method": "textDocument/references",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 1 },
+            "context": { "includeDeclaration": false }
+        }
+    });
+    let resp = lsp::handle(Some(&s), &root, &msg).expect("references 要有响应");
+    let locs = resp["result"].as_array().cloned().unwrap_or_default();
+    let main_uri = lsp::path_to_uri(&root.join("main.py"));
+    let hit = locs.iter().any(|l| l["uri"] == main_uri);
+    assert!(hit, "应在 main.py 里找到对 DEBUG 的引用；实际 {locs:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}

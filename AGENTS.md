@@ -37,8 +37,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->454<!-- /fact --> 条：engine <!-- fact:engine_unit -->371<!-- /fact --> /
-集成 <!-- fact:integration -->64<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->455<!-- /fact --> 条：engine <!-- fact:engine_unit -->371<!-- /fact --> /
+集成 <!-- fact:integration -->65<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
@@ -93,7 +93,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 现在最该做的三件 | 一句话 |
 |---|---|
-| **重命名的精度**（0.25 已通） | CLI 与 LSP 都能改（定义 + 调用点）；**列号是"行内扫出来的"**，一行多处同名时拒改；下一步才是真正的列号 |
 | **冷缓存 146s**（债表 0.13） | 并行已上；合并 `read_dir` 试过、无证据收益已撤；**在应用层测不出来，搁置** |
 
 ## 6. 要什么读什么（**别一次读进去**）

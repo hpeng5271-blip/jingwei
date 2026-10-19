@@ -135,3 +135,41 @@ fn 重命名返回跨文件编辑() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+/// **UTF-16 换算**（债表 0.26）：同一行里 `alpha` 前面有中文时，
+/// LSP 的 `character` 必须按 UTF-16 code unit 数，而不是按字节数。
+#[test]
+fn 中文行的重命名列号按_utf16_算() {
+    let root = fixture("utf16");
+    // caller 换成"同一行里有中文注释 + 调用"——只有这样才分得出字节列与 UTF-16 列。
+    std::fs::write(
+        root.join("src/b.rs"),
+        "pub fn caller() { /*\u{4e2d}\u{6587}*/ crate::a::helper(); }\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let uri = lsp::path_to_uri(&root.join("src/a.rs"));
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 7 },
+            "newName": "renamed"
+        }
+    });
+    let resp = lsp::handle(Some(&s), &root, &msg).expect("rename 要有响应");
+    let changes = resp.get("result").and_then(|r| r.get("changes")).expect("changes");
+    let curi = lsp::path_to_uri(&root.join("src/b.rs"));
+    let edits = &changes[curi];
+    assert!(!edits.is_null(), "b.rs 应有编辑，实际 {changes}");
+    let ch = edits[0]["range"]["start"]["character"].as_u64().expect("character");
+    // **期望值从磁盘上的真文件算**，不在测试里抄一份字符串（抄一份就多一个会漂的副本）。
+    let real = std::fs::read_to_string(root.join("src/b.rs")).expect("读 b.rs");
+    let real_line = real.lines().next().expect("第一行");
+    let byte_pos = real_line.find("helper").expect("找得到 helper");
+    let expect = real_line[..byte_pos].encode_utf16().count() as u64;
+    assert_eq!(ch, expect, "character 要按 UTF-16 算（字节列 {byte_pos}，UTF-16 列 {expect}）");
+    assert_ne!(expect, byte_pos as u64, "含中文时两列必须不同，否则这条测试没意义");
+    let _ = std::fs::remove_dir_all(&root);
+}

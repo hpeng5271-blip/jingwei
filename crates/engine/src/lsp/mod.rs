@@ -316,6 +316,20 @@ fn mentions(line: &str, name: &str) -> bool {
     false
 }
 
+
+/// **字节列 → UTF-16 code unit 列**（债表 0.26）。
+///
+/// LSP 的 `Position.character` 单位是 UTF-16 code unit，而我们的列号是**字节列**（tree-sitter 的
+/// `Point.column`）。含中文/emoji 的行两者不同：`"中文"` 是 6 字节、2 个 UTF-16 单元。
+/// 不换算就会把编辑落到错位置——改用户代码，宁可多一层转换。
+fn utf16_col(line: &str, byte_col: usize) -> usize {
+    let end = byte_col.min(line.len());
+    // 列落在字符中间说明上游算错了：退回行首，别切出半个字符。
+    let Some(prefix) = line.get(..end) else {
+        return 0;
+    };
+    prefix.encode_utf16().count()
+}
 /// 处理一条消息：请求 → 回消息；通知 → `None`。
 pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> {
     let method = msg.get("method")?.as_str()?;
@@ -351,11 +365,26 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             match store.plan_rename(root, &sym_id, new_name) {
                 Ok(plan) if plan.ambiguous.is_empty() => {
                     let mut changes = serde_json::Map::new();
+                    // 同一个文件只读一次，用来把字节列换成 UTF-16 列。
+                    let mut line_cache: std::collections::BTreeMap<String, Vec<String>> =
+                        std::collections::BTreeMap::new();
                     for e in &plan.edits {
                         let abs = root.join(e.file.replace('/', std::path::MAIN_SEPARATOR_STR));
                         let key = path_to_uri(&abs);
-                        let start = e.col.saturating_sub(1) as u64;
-                        let end = start + e.old.len() as u64;
+                        let lines = line_cache.entry(e.file.clone()).or_insert_with(|| {
+                            std::fs::read_to_string(root.join(&e.file))
+                                .map(|t| t.lines().map(|l| l.to_string()).collect())
+                                .unwrap_or_default()
+                        });
+                        let line_text = lines
+                            .get((e.line.saturating_sub(1)) as usize)
+                            .cloned()
+                            .unwrap_or_default();
+                        let byte_col = if e.byte > 0 { e.byte as usize } else { e.col.saturating_sub(1) as usize };
+                        // 起点用 UTF-16；终点 = 起点 + 旧名字在 UTF-16 下的长度（全是 ASCII 时相同）。
+                        let start = utf16_col(&line_text, byte_col) as u64;
+                        let start_byte = byte_col;
+                        let end = start + e.old.encode_utf16().count() as u64;
                         let arr = changes.entry(key).or_insert_with(|| json!([]));
                         if let Some(a) = arr.as_array_mut() {
                             a.push(json!({

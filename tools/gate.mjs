@@ -13,6 +13,7 @@ import { checkFacts, selftest as selftestFacts } from './check_facts.mjs';
 import { checkDocs, selftest as selftestDocs } from './check-docs.mjs';
 import { checkUiDoc } from './check-ui-doc.mjs';
 import { checkToolScripts } from './check-scripts.mjs';
+import { checkRepo } from './check-repo.mjs';
 import { checkDocLinks } from './check-doc-links.mjs';
 import { checkToolchains, selftest as selftestToolchains } from './check-toolchains.mjs';
 import { checkSkillsTree } from './check-skills.mjs';
@@ -511,6 +512,8 @@ checkPageList();
   for (const p of r.problems) problems.push(p);
   if (r.checked && !r.problems.length) console.log(`  · 工具脚本：${r.checked} 个（.mjs 用 node --check，.ps1 用 PowerShell 解析器）都通过`);
 }
+{ const r = checkRepo("."); for (const p of r.problems) problems.push(p); if (r.files) console.log(r.line); }
+
 if (problems.length) {
   console.log('门禁未通过：');
   for (const p of problems) console.log('  × ' + p);

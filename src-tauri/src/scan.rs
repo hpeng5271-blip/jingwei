@@ -131,6 +131,42 @@ pub fn scan_cancel() -> Value {
     json!({ "ok": true })
 }
 
+/// **找同源**（2026-10-19）：对当前扫到的项目里**同名目录**算 Jaccard（≥0.8）。
+///
+/// 为什么按需算而不是扫描时算：集合要对每个项目再走一遍目录，
+/// 全盘时这会把扫描变慢一倍。**用户点"找同源"才付这个钱。**
+#[tauri::command]
+pub fn scan_similar(min: Option<f64>) -> Value {
+    let min = min.unwrap_or(0.8);
+    let found = scan_slot().lock().unwrap().found.clone();
+    // 候选：同名目录（跨机器/克隆最常见的那一类）
+    let mut by_name: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for p in &found {
+        if let (Some(path), Some(name)) = (p.get("path").and_then(|v| v.as_str()), p.get("name").and_then(|v| v.as_str())) {
+            by_name.entry(name.to_string()).or_default().push(path.to_string());
+        }
+    }
+    let mut pairs = Vec::new();
+    for (_name, paths) in by_name {
+        if paths.len() < 2 {
+            continue;
+        }
+        let sets: Vec<(String, Vec<String>)> = paths
+            .iter()
+            .map(|p| (p.clone(), fingerprint::set_of(std::path::Path::new(p))))
+            .collect();
+        for i in 0..sets.len() {
+            for j in (i + 1)..sets.len() {
+                let s = fingerprint::jaccard(&sets[i].1, &sets[j].1);
+                if s >= min {
+                    pairs.push(json!({ "a": sets[i].0, "b": sets[j].0, "score": s }));
+                }
+            }
+        }
+    }
+    json!({ "min": min, "pairs": pairs })
+}
+
 /// 默认扫描根（给界面显示"要扫哪儿"）。
 #[tauri::command]
 pub fn scan_roots() -> Value {

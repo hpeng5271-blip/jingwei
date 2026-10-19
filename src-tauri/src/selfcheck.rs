@@ -196,7 +196,25 @@ pub(crate) fn start_report(handle: AppHandle, path: String, sweep: Vec<String>) 
             const heads = document.querySelectorAll('.grp-head').length;
             const cards = document.querySelectorAll('#projList .banner').length;
             const text = ((prog && prog.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 160);
-            return {{ ok: heads > 0 && cards > 0, heads, cards, text }};
+
+            // **找同源**（2026-10-19）：真点一次，等徽章出现；
+            // 它按需算 Jaccard，所以给 20 秒余量（133 个项目约 3 秒）。
+            const simBtn = document.querySelector('#btnFindSimilar');
+            let sim = 0;
+            if (simBtn) {{
+              simBtn.click();
+              const t1 = Date.now();
+              while (Date.now() - t1 < 20000) {{
+                sim = document.querySelectorAll('.b-sim').length;
+                if (sim > 0) break;
+                await rest(200);
+              }}
+            }}
+            const hasDrives = !!document.querySelector('#btnScanDrives');
+            const hasSimBtn = !!simBtn;
+            const prog2 = document.querySelector('#scanProg');
+            const simText = ((prog2 && prog2.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+            return {{ ok: heads > 0 && cards > 0, heads, cards, text, sim, simText, hasDrives, hasSimBtn }};
           }};
 
           const snapshot = (tab) => ({{

@@ -435,6 +435,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     detailAct(a);
   });
 
+  // **整盘扫描**：C:\ + D:\（跳过规则在引擎里，可随时停）
+  const bdrv = $('#btnScanDrives');
+  if (bdrv) bdrv.addEventListener('click', () => guard(scanDrives));
+
+  // **找同源**：按需算 Jaccard，不拖慢正常扫描
+  const bsim = $('#btnFindSimilar');
+  if (bsim) bsim.addEventListener('click', () => guard(findSimilar));
+
   // **全盘扫描**：默认位置一次扫完（先出结果、后台继续）
   const ball = $('#btnScanAll');
   if (ball) ball.addEventListener('click', () => guard(scanAll));

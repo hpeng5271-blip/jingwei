@@ -114,7 +114,9 @@
       <b>扫描项目</b>
       <span class="hint" id="spHint">选一个父目录，看它下面有哪些项目</span>
       <span class="grow"></span>
+      <button class="btn ghost sm" id="btnScanDrives" data-tip="扫 C:\ 与 D:\（系统目录自动跳过，可随时停）">整盘扫描</button>
       <button class="btn sm" id="btnScanAll" data-tip="扫默认位置（D:\\projects、D:\\research、源码目录），先出结果再后台扫完">全盘扫描</button>
+      <button class="btn ghost sm" id="btnFindSimilar" data-tip="同名目录 + Jaccard ≥ 0.8：同源不同版本也能认出来">找同源</button>
       <button class="btn ghost sm" id="btnScanCommon" data-tip="常见位置一把扫：D:\projects、D:\research、源码目录">常见位置</button>
     </div>
         <div class="scanbar">
@@ -550,6 +552,7 @@
 <script src="core.js?v=22"></script>
 <script src="shell.js?v=22"></script>
 <script src="scan.js?v=1"></script>
+<script src="scan-extra.js?v=1"></script>
 <script src="projects.js?v=22"></script>
 <script src="notes.js?v=22"></script>
 <script src="events.js?v=22"></script>

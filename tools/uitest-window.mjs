@@ -674,6 +674,13 @@ async function main() {
       ok('全盘扫描：按类型+体量分组了（不是一坨）', (sa.heads || 0) >= 2, 'heads=' + (sa.heads || 0));
       ok('全盘扫描：终态句子里说了扫完' , /扫完/.test(sa.text || ''), (sa.text || '').slice(0, 60));
 
+      // **同源徽章**（2026-10-19）：按需算 Jaccard，真点一次按钮后徽章要出现。
+      // **数据可以是 0**（夹具里未必有同名副本）；要钉的是"点完有事发生"。
+      ok('找同源：按钮在，点完给出结果句',
+        sa.hasSimBtn === true && /找同源：\d+ 对/.test(sa.simText || ''),
+        JSON.stringify({ hasSimBtn: sa.hasSimBtn, text: (sa.simText || '').slice(0, 50), sim: sa.sim }));
+      ok('整盘扫描入口在', sa.hasDrives === true, 'hasDrives=' + sa.hasDrives);
+
       const audit = pick(rep, '#audit');
       const prob = pick(rep, '#probList');
       // **`#audit` 的尺寸这一轮暂时不断言**（2026-10-17）。

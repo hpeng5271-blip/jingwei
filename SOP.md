@@ -839,3 +839,17 @@ jingwei index --root <目录>    # 错：不认 --root
 
 **判据**：说"更好"时，必须能给出两行数字；给不出 → 明说"这条只能靠人看"，不要装成可判。
 **不适用**：一次性的排版微调（改个间距）——那时成本大于收益。
+
+### S33 · 改前端"挂点"必须当场数一遍（2026-10-19，一天栽两次）
+
+**两次同一个坑**：① `<script src="scan.js">` 没插进 `index.html`（锚点没匹配，脚本根本没加载）
+② `#btnFindSimilar` 的事件接线没插进 `events.js`（脚本无条件打印"接好"，实际没写）。
+两次的症状都是"功能像没做"，而代码看起来都在。
+
+**判据（做完立刻执行，不靠记性）**：每个挂点改完立刻数出现次数，**数不到就报失败**：
+```powershell
+Select-String -Path ui\index.html -Pattern "scan-extra.js|btnScanDrives|btnFindSimilar" | Measure-Object
+Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Measure-Object
+```
+**适用域**：任何"脚本/事件/样式要挂到 HTML 上"的改动。
+**失效起点**：纯 Rust 侧改动（那里编译器就是判据）。

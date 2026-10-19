@@ -947,6 +947,7 @@ fn main() {
             scan::scan_status,
             scan::scan_cancel,
             scan::scan_roots,
+            scan::scan_similar,
             initial_tab,
             selfcheck::save_report,
             sample_now,

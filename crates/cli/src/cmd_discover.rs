@@ -100,6 +100,7 @@ pub fn cmd_discover(
     // (路径, 目录名, 文件集合)——只在 --similar 时填，避免白算
     let mut sets: Vec<(String, String, Vec<String>)> = Vec::new();
     let mut last_print = 0usize;
+    // 计时（JINGWEI_SCAN_TIMING=1 才打印）。
 
     for root in &roots {
         if !root.is_dir() {
@@ -118,35 +119,72 @@ pub fn cmd_discover(
         if want_why {
             skips.extend(idx.skip_stats());
         }
-        // 索引建完再查"哪些像项目"：**查询是纯函数**，改判据不用重扫。
-        for p in idx.all_projects() {
-            let f = projects::describe_public(&p);
-            total += 1;
-            let (files, bytes, cut) = projects::measure(&p);
-            let fp = fingerprint::of(&p);
-            if want_similar {
-                sets.push((f.path.clone(), f.name.clone(), fingerprint::set_of(&p)));
-            }
-            let kind = f.kinds.first().cloned().unwrap_or_else(|| "未知".to_string());
-            if json {
-                found.push(serde_json::json!({
-                    "path": f.path, "name": f.name, "kinds": f.kinds,
-                    "markers": f.markers, "files": files, "bytes": bytes,
-                    "size": size_class(files), "size_cut": cut,
-                    "fp": fp.hash, "fp_truncated": fp.truncated,
-                    "lockfile": fp.lockfile,
-                    "age_days": f.age_days,
-                }));
-            } else {
-                println!(
-                    "  + {:<9} {:<6} {:>5} 文件  {}",
-                    kind,
-                    size_class(files),
-                    files,
-                    f.path
-                );
-            }
-        }
+          // **项目级三件事并行**（2026-10-20 性能）：describe / measure / fingerprint
+          // 都是"读这个项目自己的文件"，彼此独立；串行时 fingerprint 一项就占了 86%（实测 5.08s/422 项）。
+          let project_list: Vec<std::path::PathBuf> = idx.all_projects();
+          let n = project_list.len();
+          type Spec = (projects::Found, (u64, u64, bool), fingerprint::Fingerprint, Vec<String>);
+          let mut specs: Vec<Option<Spec>> = (0..n).map(|_| None).collect();
+          let t_proj = std::time::Instant::now();
+          if n > 0 {
+              let threads = std::thread::available_parallelism()
+                  .map(|v| v.get())
+                  .unwrap_or(4)
+                  .min(8)
+                  .min(n);
+              let chunk = n.div_ceil(threads);
+              std::thread::scope(|s| {
+                  let mut handles = Vec::new();
+                  for start in (0..n).step_by(chunk) {
+                      let end = (start + chunk).min(n);
+                      let pl = &project_list;
+                      handles.push(s.spawn(move || {
+                          let mut local = Vec::with_capacity(end - start);
+                          for (i, p) in pl.iter().enumerate().take(end).skip(start) {
+                              let f = projects::describe_public(p);
+                              let m = projects::measure(p);
+                              let (fp, set) = fingerprint::of_detailed(p);
+                              local.push((i, f, m, fp, set));
+                          }
+                          local
+                      }));
+                  }
+                  for h in handles {
+                      for (i, f, m, fp, set) in h.join().unwrap() {
+                          specs[i] = Some((f, m, fp, set));
+                      }
+                  }
+              });
+              total += n;
+          }
+          let proj_secs = t_proj.elapsed().as_secs_f64();
+          for (f, (files, bytes, cut), fp, set) in specs.into_iter().flatten() {
+              if want_similar {
+                  sets.push((f.path.clone(), f.name.clone(), set));
+              }
+              let kind = f.kinds.first().cloned().unwrap_or_else(|| "未知".to_string());
+              if json {
+                  found.push(serde_json::json!({
+                      "path": f.path, "name": f.name, "kinds": f.kinds,
+                      "markers": f.markers, "files": files, "bytes": bytes,
+                      "size": size_class(files), "size_cut": cut,
+                      "fp": fp.hash, "fp_truncated": fp.truncated,
+                      "lockfile": fp.lockfile,
+                      "age_days": f.age_days,
+                  }));
+              } else {
+                  println!(
+                      "  + {:<9} {:<6} {:>5} 文件  {}",
+                      kind,
+                      size_class(files),
+                      files,
+                      f.path
+                  );
+              }
+          }
+          if std::env::var_os("JINGWEI_SCAN_TIMING").is_some() {
+              eprintln!("  项目级(并行)：{:.2}s / {} 项", proj_secs, n);
+          }
     }
 
     let pairs = if want_similar { similar(&sets, 0.8) } else { Vec::new() };

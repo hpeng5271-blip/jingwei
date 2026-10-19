@@ -194,6 +194,41 @@ pub fn build_with(
 /// 3. `stop` 一置位就**尽快**收手（每处理完一个目录看一次）。
 ///
 /// 回调的计数是"当前快照"，可能略滞后——进度条不需要精确到个位。
+/// **扫盘计时**（2026-10-20，性能优化第一步）：只有设置 `JINGWEI_SCAN_TIMING=1` 才打印。
+///
+/// 为什么要它：冷扫 98.7s 的瓶颈一直靠猜（"可能是 read_dir"、"可能是 stat"），
+/// 猜完改一版没有证据。先把时间**分到阶段上**，再改。
+pub struct ScanTiming {
+    pub facts_ns: u64,
+    pub list_ns: u64,
+    pub skip_ns: u64,
+}
+
+impl ScanTiming {
+    pub fn print(&self, dirs: usize) {
+        let total = self.facts_ns + self.list_ns + self.skip_ns;
+        if total == 0 {
+            return;
+        }
+        let pct = |v: u64| (v as f64 / total as f64) * 100.0;
+        println!(
+            "  扫盘计时：{} 个目录，合计 {:.2}s（每目录 {:.3}ms）",
+            dirs,
+            total as f64 / 1e9,
+            total as f64 / 1e6 / dirs.max(1) as f64
+        );
+        println!(
+            "    判事实 {:.2}s ({:.0}%) · 列子目录 {:.2}s ({:.0}%) · 判跳过 {:.2}s ({:.0}%)",
+            self.facts_ns as f64 / 1e9,
+            pct(self.facts_ns),
+            self.list_ns as f64 / 1e9,
+            pct(self.list_ns),
+            self.skip_ns as f64 / 1e9,
+            pct(self.skip_ns)
+        );
+    }
+}
+
 pub fn build_parallel(
     root: &Path,
     depth: usize,
@@ -218,6 +253,10 @@ pub fn build_parallel(
     let visited = AtomicUsize::new(0);
     let skipped = AtomicUsize::new(0);
     let on_dir = Mutex::new(on_dir);
+    // 计时（只累加，读取在收尾）
+    let facts_ns = std::sync::atomic::AtomicU64::new(0);
+    let list_ns = std::sync::atomic::AtomicU64::new(0);
+    let skip_ns = std::sync::atomic::AtomicU64::new(0);
 
     // 每个线程**本地攒**，最后一次性合并：
     // 第一版每进一个目录就抢一次全局锁，实测比串行还慢（11s → 52s）——锁争用把收益吃光了。
@@ -247,11 +286,14 @@ pub fn build_parallel(
                         if stop.load(Ordering::Relaxed) {
                             break;
                         }
+                        let t_facts = std::time::Instant::now();
                         let (row, readable) = row_for(&dir);
+                        facts_ns.fetch_add(t_facts.elapsed().as_nanos() as u64, Ordering::Relaxed);
                         local.push((dir.clone(), row));
                         let v = visited.fetch_add(1, Ordering::Relaxed) + 1;
                         (on_dir.lock().unwrap())(v, skipped.load(Ordering::Relaxed), &dir);
                         if readable && level < max {
+                            let t_list = std::time::Instant::now();
                             if let Ok(rd) = std::fs::read_dir(&dir) {
                                 let mut children: Vec<(std::path::PathBuf, usize)> = Vec::new();
                                 for e in rd.flatten() {
@@ -259,7 +301,10 @@ pub fn build_parallel(
                                         continue;
                                     }
                                     let child = e.path();
-                                    if let Some(reason) = skip_reason(&child, root) {
+                                    let t_skip = std::time::Instant::now();
+                                    let sr = skip_reason(&child, root);
+                                    skip_ns.fetch_add(t_skip.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                                    if let Some(reason) = sr {
                                         local.push((
                                             child.clone(),
                                             DirRow {
@@ -278,6 +323,7 @@ pub fn build_parallel(
                                     queue.lock().unwrap().extend(children);
                                 }
                             }
+                            list_ns.fetch_add(t_list.elapsed().as_nanos() as u64, Ordering::Relaxed);
                         }
                         pending.fetch_sub(1, Ordering::Release);
                     }
@@ -286,6 +332,15 @@ pub fn build_parallel(
             });
         }
     });
+
+    if std::env::var_os("JINGWEI_SCAN_TIMING").is_some() {
+        ScanTiming {
+            facts_ns: facts_ns.load(Ordering::Relaxed),
+            list_ns: list_ns.load(Ordering::Relaxed),
+            skip_ns: skip_ns.load(Ordering::Relaxed),
+        }
+        .print(visited.load(Ordering::Relaxed));
+    }
 
     for (path, row) in collected.into_inner().unwrap() {
         idx.rows.insert(path, row);

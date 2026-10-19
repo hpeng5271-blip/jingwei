@@ -441,6 +441,9 @@ pub fn index_source(
     // **这次真的重解析过的文件**：调用点表按文件替换，不能整表清空——
     // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
     let mut processed: Vec<String> = Vec::new();
+    // 分阶段计时（JINGWEI_INDEX_TIMING=1）：解析 vs 落库，别猜。
+    let mut index_parse_ns: u128 = 0;
+    let mut index_write_ns: u128 = 0;
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
             rep.unreadable += 1;
@@ -497,11 +500,13 @@ pub fn index_source(
         //
         // 这两门语言的"符号"定义不一样，所以是两个解析器而不是一个带开关的解析器：
         // 一个函数里塞两套规则，改一门必然碰到另一门。
+        let t_parse = std::time::Instant::now();
         let parsed = if rel.ends_with(".py") {
             crate::graph::parse_python::parse_python(&rel, &file.text, now)
         } else {
             crate::parse::parse_rust(&rel, &file.text, now)
         };
+        index_parse_ns += t_parse.elapsed().as_nanos();
         // **先算解析结果指纹**（之后 `parsed` 的字段会被逐个借走/移走）
         let result_sha = parsed_result_sha(&parsed);
         // 截断分支要用行号，但后面 `parsed.symbols` 会被移走 → 先留一份
@@ -627,6 +632,8 @@ pub fn index_source(
             continue;
         }
 
+        let t_write = std::time::Instant::now();
+
         let w = store.apply_file_update(
             &rel,
             &state,
@@ -636,6 +643,7 @@ pub fn index_source(
             now,
             !parsed.complete,
         )?;
+        index_write_ns += t_write.elapsed().as_nanos();
         rep.nodes_written += w.nodes;
         crate::graph::query::set_result_sha(store, &rel, &result_sha, now)?;
         rep.edges_written += w.edges;
@@ -660,6 +668,15 @@ pub fn index_source(
                 .push(entry.clone());
             all_names.entry(name).or_default().push(entry);
         }
+    }
+
+    if std::env::var_os("JINGWEI_INDEX_TIMING").is_some() {
+        eprintln!(
+            "  index 计时：解析 {:.2}s · 落库 {:.2}s（{} 文件）",
+            index_parse_ns as f64 / 1e9,
+            index_write_ns as f64 / 1e9,
+            processed.len()
+        );
     }
 
     // ── 阶段 2：全局解析 ────────────────────────────────────────────

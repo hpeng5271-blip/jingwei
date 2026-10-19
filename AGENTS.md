@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 事 | 落点 | 证据 |
 |---|---|---|
 | **扫描结果持久化**（下次打开不必从头扫） | `understand/scan_cache.rs` + `scan.rs` | 实测：第一次跑落盘 **133 项目 / 266 目录 / 跳过 63**；第二次启动立刻有卡片；坏缓存当没有（4 条单测） |
-| **扫盘真能用**：多根、整盘、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | **整机 C:+D: 深度 6 → 423 项目 / 5929 目录 / 6.1s**；`--why` 报跳过原因；界面门禁 5 条绿 |
+| **扫盘真能用**：多根、整盘、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | 整机 C:+D: → **423 项目**；**首条结果 0.8s**（≤5s 判据）；总时长 **6s 热缓存 / 146s 冷缓存**（诚实两档）；`--why` 报跳过原因 |
 | **首页按类型×体量分组**（可折叠） | `ui/scan.js::groupFound` + `.grp-head` | 界面门禁：`heads ≥ 2` 且终态说"扫完" |
 | **tauri 索引崩溃修复**（trait 默认方法） | `graph/parse.rs` | 整个 tauri **329 文件 / 5,916 符号 / 3.2s**；单测 347 绿 |
 | **早期截断**（内容变了但解析结果没变 → 图不重写） | `graph/index.rs` + `store::file_results` | 实测：只加一行注释 → `skipped_same_result=1`、图逐字节相同；再跑 **处理 0**；测试 3 条等价性全绿 |

@@ -11,6 +11,7 @@ static MORE: AtomicBool = AtomicBool::new(false);
 // 拆的边界不是"大小平均切"：同一个文件里的东西该回答同一类问题。
 mod cmd_clean;
 mod cmd_doctor;
+mod cmd_deps;
 mod cmd_discover;
 mod cmd_positions;
 mod cmd_graph;
@@ -342,6 +343,8 @@ fn run() -> i32 {
         "test" => cmd_task(&root, "test", None),
         "verify" | "build" => cmd_verify::cmd_verify(&root, json),
         // **位置回读**：用原文当裁判核图谱（2026-10-19）
+        // **依赖对账**：清单 vs 锁文件（2026-10-19）
+        "deps" => cmd_deps::cmd_deps(&root, json),
         "positions" => cmd_positions::cmd_positions(&root, json),
         "projects" | "list" => cmd_projects::cmd_projects(&root, depth_arg, show_all, json),
         "snap" | "snapshot" => cmd_snap(&root, json, diff_only),

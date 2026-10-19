@@ -78,6 +78,8 @@ pub mod understand {
     pub mod fingerprint;
     /// 扫盘结果的持久化（下次打开界面不必从头扫）。
     pub mod scan_cache;
+    /// **依赖对账**：清单声明的 vs 锁文件锁到的（两边都是外部真值）。
+    pub mod deps_check;
     pub mod fix;
     /// **项目指南**：一句话回答"现在能不能跑、卡在哪、下一步敲什么"。
     /// 与 `rules` 的分工：那边是**清单**（我知道的都告诉你），这边是**排序**

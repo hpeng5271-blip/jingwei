@@ -66,6 +66,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 事 | 落点 | 证据 |
 |---|---|---|
+| **Python 的"使用"层补全**（2026-10-19 夜） | `parse_python` + `graph/link.rs` + `registers` 边 | `__main__` 块内调用 → File→Symbol；装饰器注册 → `registers`（flask **82 条**）；类体常量 → 符号（flask 1,580→**1,920**）；`Cfg.DEBUG` → `references`；positions **1920/1920** |
 | **LSP：定义 / 引用（精确到调用点）/ hover / 诊断推送** | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：引用落在 `cmd_graph.rs:491`（真调用行）；hover 出"是什么/在哪/被 2 个符号调用"；**didOpen 后主动推诊断**（坏文件 1 条 error、好文件 0 条）；单测 7 条 |
 | **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |

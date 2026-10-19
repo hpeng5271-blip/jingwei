@@ -63,6 +63,18 @@ try {
     console.log('  GUI 冒烟通过：起来 3 秒没退');
   }
 
+
+  // **重命名也要能在包里跑通**：拷一份 demo（别改包里的原件）→ index → rename --write → 回读。
+  const copy = path.join(tmp, '__rename_demo');
+  fs.cpSync(demo, copy, { recursive: true });
+  execFileSync(exe, ['index'], { cwd: copy, encoding: 'utf8' });
+  const ren = execFileSync(exe, ['rename', 'greet', '--to', 'welcome', '--write'], {
+    cwd: copy,
+    encoding: 'utf8',
+  });
+  if (!/回读通过/.test(ren)) throw new Error(`rename 没回读通过：${ren.slice(0, 300)}`);
+  console.log('  重命名冒烟通过：3 处改完并回读');
+
   console.log(`包冒烟通过：${path.basename(zip)}`);
   console.log(`  demo 索引：${(idx.match(/.*个文件 ·.*/) || [''])[0].trim()}`);
   console.log(`  位置回读：核了 ${checked} 个符号，对不上 0`);

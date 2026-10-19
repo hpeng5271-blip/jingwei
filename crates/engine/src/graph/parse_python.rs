@@ -87,6 +87,7 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         &by_path,
         &mut calls,
         &mut refs,
+        None,
     );
 
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
@@ -254,6 +255,7 @@ fn collect_calls(
     by_path: &std::collections::BTreeMap<String, String>,
     calls: &mut Vec<(String, String)>,
     refs: &mut Vec<RefFact>,
+    module_caller: Option<&str>,
 ) {
     let mut cursor = n.walk();
     for child in n.children(&mut cursor) {
@@ -275,7 +277,7 @@ fn collect_calls(
                     // 而且下面 `caller` 直接就是 id，不用再加前缀。
                     scope.push(format!("symbol:{key}"));
                     collect_calls(
-                        body, src, rel, scope, container, imports, by_name, by_path, calls, refs,
+                        body, src, rel, scope, container, imports, by_name, by_path, calls, refs, module_caller,
                     );
                     scope.pop();
                 }
@@ -292,7 +294,7 @@ fn collect_calls(
                 if let Some(body) = child.child_by_field_name("body") {
                     container.push(name);
                     collect_calls(
-                        body, src, rel, scope, container, imports, by_name, by_path, calls, refs,
+                        body, src, rel, scope, container, imports, by_name, by_path, calls, refs, module_caller,
                     );
                     container.pop();
                 }
@@ -365,10 +367,16 @@ fn collect_calls(
                     // ② 裸标识符：`foo()`
                     "identifier" => {
                         if let Some(id) = by_name.get(text.as_str()) {
-                            if let Some(caller) = scope.last() {
+                            // 模块级调用：D-20261019-02。__main__ 块里没有符号作用域，
+                            // 调用者是文件本身——来源是事实：脚本被执行时顶层语句确实会跑。
+                            let caller = scope
+                                .last()
+                                .cloned()
+                                .or_else(|| module_caller.map(|s| s.to_string()));
+                            if let Some(caller) = caller {
                                 // scope 里存的就是完整 id，直接比、直接用
                                 if caller.as_str() != *id {
-                                    calls.push((caller.clone(), (*id).to_string()));
+                                    calls.push((caller, (*id).to_string()));
                                 }
                             }
                         } else if !text.is_empty() {
@@ -389,13 +397,38 @@ fn collect_calls(
                 // 参数里的调用也要收（`f(g())`）
                 if let Some(args) = child.child_by_field_name("arguments") {
                     collect_calls(
-                        args, src, rel, scope, container, imports, by_name, by_path, calls, refs,
+                        args, src, rel, scope, container, imports, by_name, by_path, calls, refs, module_caller,
+                    );
+                }
+            }
+            "if_statement" => {
+                // 条件取**整个 if 节点的文本**：`__name__ == "__main__"` 在语法里是
+                // comparison_operator，字段名在不同 grammar 版本里不一定叫 condition——
+                // 这里要的是"这是不是那条判据"，不是取子节点。
+                let cond = child.utf8_text(src.as_bytes()).unwrap_or("");
+                if cond.contains("__name__") && cond.contains("__main__") {
+                    // tree-sitter-python 的 if 语句里，块叫 consequence，不叫 body
+                    // （field 名写错时 child_by_field_name 返回 None，症状是「什么都没发生」）。
+                    let body = child
+                        .child_by_field_name("consequence")
+                        .or_else(|| child.child_by_field_name("body"));
+                    if let Some(body) = body {
+                        let fid = format!("file:{rel}");
+                        collect_calls(
+                            body, src, rel, scope, container, imports, by_name, by_path, calls,
+                            refs, Some(fid.as_str()),
+                        );
+                    }
+                } else {
+                    collect_calls(
+                        child, src, rel, scope, container, imports, by_name, by_path, calls, refs,
+                        module_caller,
                     );
                 }
             }
             _ => {
                 collect_calls(
-                    child, src, rel, scope, container, imports, by_name, by_path, calls, refs,
+                    child, src, rel, scope, container, imports, by_name, by_path, calls, refs, module_caller,
                 );
             }
         }

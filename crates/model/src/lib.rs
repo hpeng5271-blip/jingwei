@@ -176,7 +176,12 @@ impl EdgeKind {
             ),
             E::Defines => matches!((src, dst), (N::File, N::Symbol) | (N::Module, N::Symbol)),
             E::Implements => matches!((src, dst), (N::Symbol, N::Symbol)),
-            E::Calls | E::References => matches!((src, dst), (N::Symbol, N::Symbol)),
+            // **`(File, Symbol)` 只为"模块级调用"开**（2026-10-19，D-20261019-02）：
+            // Python 的 `if __name__ == "__main__":` 块里，调用者在语法上不是符号，
+            // 而是这个文件——脚本被执行时顶层语句确实会跑，这是事实不是猜。
+            // 只给 Calls 开；References 仍要求 Symbol→Symbol。
+            E::Calls => matches!((src, dst), (N::Symbol, N::Symbol) | (N::File, N::Symbol)),
+            E::References => matches!((src, dst), (N::Symbol, N::Symbol)),
             E::DependsOn => matches!(
                 (src, dst),
                 (N::Dependency, N::Dependency) | (N::File, N::Dependency)

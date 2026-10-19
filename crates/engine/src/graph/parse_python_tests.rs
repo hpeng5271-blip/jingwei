@@ -194,3 +194,21 @@ fn 符号要带文件名与行号_不然位置回读核不到() {
     let c = o.symbols.iter().find(|s| s.name == "C").expect("C 该在符号里");
     assert_eq!(c.line, Some(6), "C 在第 6 行");
 }
+#[test]
+fn 只有_main_块里的顶层调用才算_调用者是文件() {
+    // D-20261019-02：模块级调用只收 `if __name__ == "__main__":` 块内的，
+    // 调用者是文件本身（`file:a.py`）；裸 import 期副作用调用不收（否则入口判定被污染）。
+    let src = "def f():\n    pass\n\nif __name__ == \"__main__\":\n    x = f()\n";
+    let o = parse_python("a.py", src, 1);
+    assert_eq!(
+        o.calls,
+        vec![("file:a.py".to_string(), "symbol:a.py#f".to_string())],
+        "应恰好一条 File→Symbol 调用，实际 {:?}",
+        o.calls
+    );
+
+    // 同样的调用，放在 __main__ 外面 → 不收
+    let src2 = "def f():\n    pass\n\nx = f()\n";
+    let o2 = parse_python("a.py", src2, 1);
+    assert!(o2.calls.is_empty(), "顶层非 __main__ 的调用不该收，实际 {:?}", o2.calls);
+}

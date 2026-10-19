@@ -569,11 +569,18 @@ pub fn index_source(
         // **调用关系**：只收文件内能确定的那部分（裸标识符且本文件有定义）。
         // 跨文件的要等"解析期"——见设计 §6.2.1。
         for (caller, callee) in calls {
+            // `caller` 可能是**文件本身**（Python 的 `if __name__ == "__main__":` 块）——
+            // 那种边是 File→Symbol，矩阵为它开了一格（D-20261019-02）。
+            let src_kind = if caller.starts_with("file:") {
+                NodeKind::File
+            } else {
+                NodeKind::Symbol
+            };
             edges.push(edge(
                 &caller,
                 &callee,
                 EdgeKind::Calls,
-                NodeKind::Symbol,
+                src_kind,
                 NodeKind::Symbol,
                 Source::TreeSitter,
                 Confidence::High,

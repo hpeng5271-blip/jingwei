@@ -116,6 +116,10 @@ pub mod graph {
     /// 重命名规划（债表 0.25）：算准"出现在哪一列"，判不准的不收。
     pub mod rename;
     pub mod resolve;
+    /// Rust 的 `use` → 符号（从 resolve 拆出，避免 1000 行上限）。
+    pub mod resolve_imports;
+    /// Python 的模块属性 `mod.CONST`（从 resolve 拆出）。
+    pub mod resolve_pyattr;
     /// 图谱的三种角色（框架.md §4.8）。从 `store::dump` 里拆出来，
     /// 因为那个文件已经一千行、而这段判据是一块独立的"读懂图"的逻辑。
     pub mod roles;

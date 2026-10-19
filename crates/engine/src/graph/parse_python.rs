@@ -105,7 +105,9 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
 
     let mut registers: Vec<(String, String)> = Vec::new();
     let mut refs_local: Vec<(String, String)> = Vec::new();
-    collect_attr_refs(root, src, rel, &by_path, &mut refs_local);
+    let mut attr_refs: Vec<RefFact> = Vec::new();
+    let aliases: std::collections::BTreeSet<String> = imports.iter().map(|i| i.local.clone()).collect();
+    collect_attr_refs(root, src, rel, &by_path, &aliases, &mut refs_local, &mut attr_refs);
     collect_registers(root, src, rel, &by_name, &mut registers);
 
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
@@ -121,9 +123,34 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         references: refs,
         imports,
         registers,
+        attr_refs,
         refs_local,
         complete,
     }
+}
+
+
+/// 模块级常量的名字判据：`[A-Z][A-Z0-9_]*`（全大写）。
+///
+/// 只收全大写是**故意窄**：`x = 1` 这种普通变量在真项目里到处都是，
+/// 收进来会让"谁被谁用"这张表被噪音淹没（pro 的判据，见 D-04）。
+fn is_const_name(name: &str) -> bool {
+    let mut it = name.chars();
+    match it.next() {
+        Some(c) if c.is_ascii_uppercase() => {}
+        _ => return false,
+    }
+    it.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// 值判据：**字面量**才收。`True` / `None` / 数字 / 字符串（含相邻拼接）。
+///
+/// 不含调用、下标、属性访问——那些的"值"要运行时才知道，收成符号就是编。
+fn is_literal(n: TsNode<'_>) -> bool {
+    matches!(
+        n.kind(),
+        "true" | "false" | "none" | "integer" | "float" | "string" | "concatenated_string"
+    )
 }
 
 /// 收集**属性访问**（债表 0）：`Cfg.DEBUG` 这类"只用不调"。
@@ -137,19 +164,24 @@ fn collect_attr_refs(
     src: &str,
     rel: &str,
     by_path: &std::collections::BTreeMap<String, String>,
+    aliases: &std::collections::BTreeSet<String>,
     out: &mut Vec<(String, String)>,
+    refs: &mut Vec<RefFact>,
 ) {
     let mut scope: Vec<String> = Vec::new();
-    walk_attr(n, src, rel, by_path, &mut scope, out);
+    walk_attr(n, src, rel, by_path, aliases, &mut scope, out, refs);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_attr(
     n: TsNode<'_>,
     src: &str,
     rel: &str,
     by_path: &std::collections::BTreeMap<String, String>,
+    aliases: &std::collections::BTreeSet<String>,
     scope: &mut Vec<String>,
     out: &mut Vec<(String, String)>,
+    refs: &mut Vec<RefFact>,
 ) {
     let mut cursor = n.walk();
     for child in n.children(&mut cursor) {
@@ -165,7 +197,7 @@ fn walk_attr(
                 let key = symbol_key(rel, &[], None, name);
                 if let Some(body) = child.child_by_field_name("body") {
                     scope.push(format!("symbol:{key}"));
-                    walk_attr(body, src, rel, by_path, scope, out);
+                    walk_attr(body, src, rel, by_path, aliases, scope, out, refs);
                     scope.pop();
                 }
             }
@@ -187,13 +219,21 @@ fn walk_attr(
                         if let (Some(recv), Some(attr)) = (recv, attr) {
                             if let Some(id) = by_path.get(&format!("{recv}::{attr}")) {
                                 out.push((caller.clone(), id.clone()));
+                            } else if aliases.contains(&recv) {
+                                // **跨文件模块属性**（债 0.28 / D-04）：只记事实，解析在 resolve。
+                                refs.push(RefFact {
+                                    name: format!("{recv}::{attr}"),
+                                    scope: vec![caller.clone()],
+                                    line: (child.start_position().row + 1) as u32,
+                                    raw: format!("{recv}.{attr}"),
+                                });
                             }
                         }
                     }
                 }
-                walk_attr(child, src, rel, by_path, scope, out);
+                walk_attr(child, src, rel, by_path, aliases, scope, out, refs);
             }
-            _ => walk_attr(child, src, rel, by_path, scope, out),
+            _ => walk_attr(child, src, rel, by_path, aliases, scope, out, refs),
         }
     }
 }
@@ -367,6 +407,55 @@ fn collect_defs(
                     collect_defs(body, src, rel, now, scope, container, out);
                     container.pop();
                 }
+            }
+            // **模块级常量**（D-20261020-04 A 路线，2026-10-20）：
+            // `DEBUG = True` 这类**顶层、全大写、值是字面量**的赋值收成 `sym:"const"`。
+            // 三条同时满足才收——判据宽一点就会把 `x = os.environ[...]` 这类
+            // 运行时才定的东西也收成符号，而那正是"猜"。
+            //
+            // 为什么需要它：跨文件 `cfg.DEBUG` 要能连到 `cfg.py` 里的 `DEBUG`，
+            // 而"符号不存在"让解析有答案也没落点（卡点见 D-04）。
+            "expression_statement" if container.is_empty() && scope.is_empty() => {
+                let Some(assign) = child.named_child(0) else {
+                    continue;
+                };
+                if assign.kind() != "assignment" {
+                    continue;
+                }
+                let (Some(left), Some(right)) = (
+                    assign.child_by_field_name("left"),
+                    assign.child_by_field_name("right"),
+                ) else {
+                    continue;
+                };
+                if left.kind() != "identifier" {
+                    continue;
+                }
+                let Some(name) = left.utf8_text(src.as_bytes()).ok() else {
+                    continue;
+                };
+                if !is_const_name(name) || !is_literal(right) {
+                    continue;
+                }
+                let key = symbol_key(rel, &[], None, name);
+                let mut node = Node::new(
+                    NodeKind::Symbol,
+                    &key,
+                    name.to_string(),
+                    Source::TreeSitter,
+                    Confidence::High,
+                    now,
+                );
+                node.file_path = Some(rel.to_string());
+                node.line = Some(assign.start_position().row as u32 + 1);
+                node.data = Some(serde_json::json!({ "sym": "const" }));
+                node.checksum = Some(crate::facts::stable_hash([
+                    NodeKind::Symbol.as_str(),
+                    name,
+                    "const",
+                    rel,
+                ]));
+                out.push(node);
             }
             // **类体里的 `NAME = ...` 也是符号**（2026-10-19，债表 0）：
             // `class Cfg: DEBUG = True` 之后 `Cfg.DEBUG` 才有东西可指。

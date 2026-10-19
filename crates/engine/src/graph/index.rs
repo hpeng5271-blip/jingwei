@@ -369,7 +369,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 /// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
 /// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
 /// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
-pub const EXTRACTOR_VERSION: &str = "parse@10";
+pub const EXTRACTOR_VERSION: &str = "parse@11";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -432,6 +432,8 @@ pub fn index_source(
     let mut all_names: crate::graph::resolve::SymbolTable =
         std::collections::BTreeMap::new();
     let mut pending_refs: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
+    // 跨文件模块属性（债 0.28）：解析成功建 references 边，不是 calls。
+    let mut pending_attr: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
     let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::imports::ImportFact>> =
         std::collections::BTreeMap::new();
 
@@ -541,6 +543,9 @@ pub fn index_source(
         }
         if !parsed.references.is_empty() {
             pending_refs.push((rel.clone(), parsed.references.clone()));
+        }
+        if !parsed.attr_refs.is_empty() {
+            pending_attr.push((rel.clone(), parsed.attr_refs.clone()));
         }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
         processed.push(rel.clone());
@@ -665,7 +670,7 @@ pub fn index_source(
     // 调用点（含同文件直接调用）：**不管有没有待解析引用都要写**（债表 0.25）。
     // resolved sites 只有行、没有字节 → 字节记 0（表示"不知道精确列"，重命名会退回行内扫描）
     let mut sites: Vec<(String, String, u32, u32)> = Vec::new();
-    if !pending_refs.is_empty() {
+    if !pending_refs.is_empty() || !pending_attr.is_empty() {
         let empty = crate::graph::resolve::SymbolTable::new();
         let mut extra: Vec<Edge> = Vec::new();
         for (rel, refs) in &pending_refs {
@@ -682,6 +687,18 @@ pub fn index_source(
             extra.extend(crate::graph::resolve::to_edges(&res, now));
             // **调用点**：写进小表，给 LSP 找引用用（跳到调用那一行，而不是函数定义）
             sites.extend(res.sites.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
+        }
+        // **跨文件模块属性的边**（债 0.28 / D-04）：解析成功建 `references`（不是 calls）。
+        // 与上面的调用解析分开：属性是"读"，调用是"调"，画错的边比不收更糟。
+        if !pending_attr.is_empty() {
+            let pairs = crate::graph::resolve::attr_pairs(&pending_attr, &file_imports, &all_names);
+            if !pairs.is_empty() {
+                rep.resolved += pairs.len();
+                let simple: Vec<(String, String)> =
+                    pairs.iter().map(|(a, b, _)| (a.clone(), b.clone())).collect();
+                crate::graph::link::references_into(&mut extra, &simple, now)?;
+                sites.extend(pairs.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
+            }
         }
         // **依赖边**（2026-10-19）：文件 → 它 import 的根模块。
         //

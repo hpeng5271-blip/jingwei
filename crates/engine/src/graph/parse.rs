@@ -50,6 +50,11 @@ pub struct ParseOutcome {
     ///
     /// 典型：`Cfg.DEBUG` 这种属性访问——它不是调用（没有调用边），但**确实用了**。
     /// 债表 0：以前这类关系一条都不收，于是"改了它会影响谁"答不出来。
+    /// **跨文件模块属性**（债 0.28 / D-04）：`mod.CONST` 这类"只用不调"的限定名。
+    ///
+    /// 与 `references` 分开存：那个是**调用**的候选，解析成功要建 `calls` 边；
+    /// 这个解析成功建的是 `references` 边。混在一起会把"读常量"画成"调用"（踩过）。
+    pub attr_refs: Vec<RefFact>,
     pub refs_local: Vec<(String, String)>,
 
     /// 本文件的 `use` 语句——索引期就能确定的"名字 → 路径"映射。
@@ -192,7 +197,8 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         references: refs,
         imports,
         registers: Vec::new(),
-        refs_local: Vec::new(),
+          attr_refs: Vec::new(),
+          refs_local: Vec::new(),
         complete,
     }
 }

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { checkFacts, selftest as selftestFacts } from './check_facts.mjs';
 import { checkDocs, selftest as selftestDocs } from './check-docs.mjs';
 import { checkUiDoc } from './check-ui-doc.mjs';
+import { checkToolScripts } from './check-scripts.mjs';
 import { checkDocLinks } from './check-doc-links.mjs';
 import { checkToolchains, selftest as selftestToolchains } from './check-toolchains.mjs';
 import { checkSkillsTree } from './check-skills.mjs';
@@ -504,6 +505,12 @@ checkPageList();
   if (r.checked) console.log('  · 自检选择器：' + r.checked + ' 个，界面上都有对应元素');
 }
 
+// **工具脚本必须能被 node 解析**（2026-10-20 加，实现见 check-scripts.mjs）。
+{
+  const r = checkToolScripts(".");
+  for (const p of r.problems) problems.push(p);
+  if (r.checked && !r.problems.length) console.log(`  · 工具脚本：${r.checked} 个 .mjs 全部能被 node 解析`);
+}
 if (problems.length) {
   console.log('门禁未通过：');
   for (const p of problems) console.log('  × ' + p);

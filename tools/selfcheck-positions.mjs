@@ -11,7 +11,9 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const exe =\n  process.env.JINGWEI_EXE ||\n  path.join('target', 'release', process.platform === 'win32' ? 'jingwei.exe' : 'jingwei');
+const exe =
+  process.env.JINGWEI_EXE ||
+  path.join('target', 'release', process.platform === 'win32' ? 'jingwei.exe' : 'jingwei');
 const root = process.cwd();
 
 if (!fs.existsSync(exe)) {

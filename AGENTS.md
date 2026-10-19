@@ -70,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | **LSP：定义 / 引用（精确到调用点）/ hover / 诊断推送** | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：引用落在 `cmd_graph.rs:491`（真调用行）；hover 出"是什么/在哪/被 2 个符号调用"；**didOpen 后主动推诊断**；**rename 返回 WorkspaceEdit**（判不准不发编辑）；单测 7 条 |
 | **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |
-| **位置回读**（用原文当裁判核图谱行号） | `graph/verify.rs` + `jingwei positions` | 经纬自己：**1760 对 / 0 错 / 13 位置不准**（修闭包行号前是 **300 错**）；正例+反例测试 |
+| **位置回读**（用原文当裁判核图谱行号） | `graph/verify.rs` + `jingwei positions` | 经纬自己：**1878 对 / 0 错 / 7 位置不准**（修闭包行号前是 **300 错**）；正例+反例测试 |
 | **扫描结果持久化**（下次打开不必从头扫） | `understand/scan_cache.rs` + `scan.rs` | 实测：第一次跑落盘 **133 项目 / 266 目录 / 跳过 63**；第二次启动立刻有卡片；坏缓存当没有（4 条单测） |
 | **扫盘真能用**：多根、整盘、**并行**、边扫边出、可中断、有终态 | `jingwei discover` + `understand/dirs_index::build_parallel` | 整机 C:+D: → **423 项目**；**首条结果 0.8s**（≤5s 判据）；总时长 **6s 热缓存 / 146s 冷缓存**（诚实两档）；`--why` 报跳过原因 |
 | **首页按类型×体量分组**（可折叠） | `ui/scan.js::groupFound` + `.grp-head` | 界面门禁：`heads ≥ 2` 且终态说"扫完" |

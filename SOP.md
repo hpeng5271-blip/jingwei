@@ -865,4 +865,16 @@ Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Meas
 **记账**：`node tools/llm/record.mjs --model deepseek-v4-pro --task X --in N --out M`；日限 **20 次 / ¥3**。
 **纪律**：pro 只读；结论必须带"可验证的下一步"；**没记账不算升级**。
 
+
+**分工（2026-10-19 定）**：**决策归 pro，执行归 flash**。
+- **先有决策记录，才允许动手**：`docs/decisions/D-YYYYMMDD-NN.md`（格式见该目录 README）；
+  没有记录就开工 = 违规。执行层**不许自行改判据、不许扩大范围**；发现记录与门禁冲突 → 停下报冲突。
+- 执行层只回"改了哪些文件 / 哪条红 / 错误首行"，不写长报告。
+
+**两边日限**（`node tools/llm/limits.mjs check`，超了退出码 1，不许继续）：
+
+| 谁 | 上限 |
+|---|---|
+| pro（决策） | **20 次 / ¥3 / 每次输出 ≤2K tokens** |
+| flash（执行） | **12 轮 / 6 次门禁 / 4 条决策记录 / 总花费 ¥10** |
 **实测（2026-10-19）**：digest 674 tokens；一次"下一步做什么"咨询产出 473 字符、¥0.008。

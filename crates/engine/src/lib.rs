@@ -76,6 +76,8 @@ pub mod understand {
     pub mod dirs_index;
     /// 项目指纹：判断"两份目录是不是同一个项目"。
     pub mod fingerprint;
+    /// 扫盘结果的持久化（下次打开界面不必从头扫）。
+    pub mod scan_cache;
     pub mod fix;
     /// **项目指南**：一句话回答"现在能不能跑、卡在哪、下一步敲什么"。
     /// 与 `rules` 的分工：那边是**清单**（我知道的都告诉你），这边是**排序**

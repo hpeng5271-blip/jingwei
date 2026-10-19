@@ -154,6 +154,12 @@ async function scanAll() {
       const stopBtn = $('#btnScanStop');
       if (stopBtn) stopBtn.addEventListener('click', () => invoke('scan_cancel'));
       setTimeout(tick, 300);
+    } else if (st.cached) {
+      // **上次落盘的结果**（2026-10-19）：先让人有东西看；点「全盘扫描」才会重扫
+      PS.scanning = false;
+      const mins = Math.max(1, Math.round((Date.now() / 1000 - (st.cached_at || 0)) / 60));
+      const when = '上次扫的结果（' + mins + ' 分钟前）';
+      scanProgress('<span>' + when + '：<b>' + found.length + '</b> 个项目 · 看了 ' + st.visited + ' 个目录</span>', true);
     } else {
       PS.scanning = false;
       scanProgress('<span>' + (st.cancelled ? '已停止' : '✓ 扫完') + '：看了 <b>' + st.visited
@@ -167,3 +173,16 @@ async function scanAll() {
   };
   tick();
 }
+
+// **启动就把上次结果画出来**（2026-10-19）：用户要「下次不必从头扫」。
+// 有缓存 → 立刻有卡片；没有/坏了 → 什么都不做（不许拿坏数据充数）。
+(function loadCachedScan() {
+  if (typeof invoke !== 'function' || typeof renderGrouped !== 'function') return;
+  invoke('scan_status').then((st) => {
+    if (!st || !st.cached || !(st.found || []).length) return;
+    PS.all = st.found.slice();
+    renderGrouped(PS.all);
+    const when = '上次扫的结果';
+    scanProgress('<span>' + when + '：<b>' + PS.all.length + '</b> 个项目 · 看了 ' + st.visited + ' 个目录（点「全盘扫描」重扫）</span>', true);
+  }).catch(() => {});
+})();

@@ -5,7 +5,7 @@
 //!
 //! 纪律：**终态只由这里写**（running/done/cancelled），前端不许靠"多久没收到"去猜。
 
-use jingwei_engine::understand::{dirs_index, fingerprint, projects};
+use jingwei_engine::understand::{dirs_index, fingerprint, projects, scan_cache};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 /// **后台扫盘的共享状态**（2026-10-19）。
@@ -23,6 +23,10 @@ struct ScanState {
     found: Vec<serde_json::Value>,
     current: String,
     seconds: f64,
+    /// 这次结果是上次落盘的（还没重新扫）
+    cached: bool,
+    /// 缓存写于何时（秒级）
+    cached_at: u64,
 }
 
 static SCAN: std::sync::OnceLock<std::sync::Mutex<ScanState>> = std::sync::OnceLock::new();
@@ -62,13 +66,21 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
             ..Default::default()
         };
     }
+    if let Ok(mut st) = scan_slot().lock() {
+        st.cached = false;
+        st.cached_at = 0;
+    }
     stop_flag().store(false, std::sync::atomic::Ordering::Relaxed);
     let stop = stop_flag().clone();
     let roots_for_json: Vec<String> = roots.iter().map(|p| p.display().to_string()).collect();
+    let roots_for_json_for_cache = roots_for_json.clone();
     std::thread::spawn(move || {
         let t0 = std::time::Instant::now();
         let mut all: Vec<serde_json::Value> = Vec::new();
         let mut seen_paths: std::collections::BTreeSet<String> = Default::default();
+        // 跨根累加（闭包里的 v 是"当前根"的计数）
+        let mut total_visited = 0u64;
+        let mut total_skipped = 0u64;
         for root in &roots {
             if !root.is_dir() {
                 continue;
@@ -80,6 +92,8 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
                     st.current = cur.display().to_string();
                 }
             });
+            total_visited += idx.visited as u64;
+            total_skipped += idx.skipped as u64;
             for p in idx.all_projects() {
                 let path = p.display().to_string();
                 if !seen_paths.insert(path.clone()) {
@@ -101,6 +115,25 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
             }
         }
         let cancelled = stop.load(std::sync::atomic::Ordering::Relaxed);
+        // **落盘**：下次打开界面不必从头扫（用户明确要求的"结果持久化"）
+        // 目录数/跳过数要在清空状态前取出来（否则缓存里记成"项目数"，口径就错了）
+        let final_stats = (total_visited as usize, total_skipped as usize);
+        let saved_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let cache = scan_cache::ScanCache {
+            saved_at,
+            roots: roots_for_json_for_cache.clone(),
+            depth,
+            visited: final_stats.0 as u64,
+            skipped: final_stats.1 as u64,
+            found: all.clone(),
+        };
+        // 落盘失败不影响这次扫描的结论（下次重扫就是了）
+        if let Err(e) = scan_cache::save(&scan_cache::cache_path(), &cache) {
+            eprintln!("扫盘缓存没写成：{e}");
+        }
         if let Ok(mut st) = scan_slot().lock() {
             st.found = all;
             st.running = false;
@@ -115,11 +148,26 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
 /// 轮询用：当前扫到哪儿、发现了什么。**done 是唯一终态判据。**
 #[tauri::command]
 pub fn scan_status() -> Value {
+    {
+        let mut st = scan_slot().lock().unwrap();
+        // **持久化**（2026-10-19）：内存空 + 没在扫 → 用上次落盘的结果，
+        // 先让界面有东西看；真扫描开始时会被覆盖。
+        if st.found.is_empty() && !st.running {
+            if let Some(c) = scan_cache::load(&scan_cache::cache_path()) {
+                st.found = c.found;
+                st.visited = c.visited as usize;
+                st.skipped = c.skipped as usize;
+                st.done = true;
+                st.cached = true;
+                st.cached_at = c.saved_at;
+            }
+        }
+    }
     let st = scan_slot().lock().unwrap().clone();
     json!({
         "running": st.running, "done": st.done, "cancelled": st.cancelled,
         "visited": st.visited, "skipped": st.skipped,
-        "current": st.current, "seconds": st.seconds,
+        "current": st.current, "seconds": st.seconds, "cached": st.cached, "cached_at": st.cached_at,
         "found": st.found,
     })
 }

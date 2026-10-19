@@ -570,53 +570,10 @@ pub fn index_source(
             )?);
             nodes.push(s);
         }
-        // **调用关系**：只收文件内能确定的那部分（裸标识符且本文件有定义）。
-        // 跨文件的要等"解析期"——见设计 §6.2.1。
-        for (caller, callee) in calls {
-            // `caller` 可能是文件本身（`__main__` 块），那种边是 File→Symbol。
-            let src_kind = if caller.starts_with("file:") {
-                NodeKind::File
-            } else {
-                NodeKind::Symbol
-            };
-            edges.push(edge(
-                &caller,
-                &callee,
-                EdgeKind::Calls,
-                src_kind,
-                NodeKind::Symbol,
-                Source::TreeSitter,
-                Confidence::High,
-                now,
-            )?);
-            rep.calls += 1;
-        }
-        // 属性访问（债表 0）：`Cfg.DEBUG` 这种"只用不调" → references 边。
-        for (caller, target) in &refs_local {
-            edges.push(edge(
-                caller,
-                target,
-                EdgeKind::References,
-                NodeKind::Symbol,
-                NodeKind::Symbol,
-                Source::TreeSitter,
-                Confidence::High,
-                now,
-            )?);
-        }
-        // 装饰器注册：不混进 `calls`，否则角色的入/出度会被路由函数带偏。
-        for (file_id, sym_id) in &registers {
-            edges.push(edge(
-                file_id,
-                sym_id,
-                EdgeKind::Registers,
-                NodeKind::File,
-                NodeKind::Symbol,
-                Source::TreeSitter,
-                Confidence::High,
-                now,
-            )?);
-        }
+        // 三类关系各写各的（债表 0.24：从 index 里拆到 graph/link.rs）。
+        rep.calls += crate::graph::link::calls_into(&mut edges, &calls, now)?;
+        crate::graph::link::references_into(&mut edges, &refs_local, now)?;
+        crate::graph::link::registers_into(&mut edges, &registers, now)?;
         nodes.push(file_node);
 
         // 截断分支还要用 content_sha，先留一份（state 会把 sha 移走）

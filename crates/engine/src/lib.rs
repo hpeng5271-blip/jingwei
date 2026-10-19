@@ -102,6 +102,8 @@ pub mod understand {
 pub mod graph {
     pub mod envelope;
     pub mod imports;
+    /// 写边（calls / references / registers），从 index 里拆出来（债表 0.24）。
+    pub mod link;
     pub mod index;
     pub mod parse;
     /// Python 的语法树遍历。**第二门语言**（2026-10-16）。

@@ -509,7 +509,7 @@ checkPageList();
 {
   const r = checkToolScripts(".");
   for (const p of r.problems) problems.push(p);
-  if (r.checked && !r.problems.length) console.log(`  · 工具脚本：${r.checked} 个 .mjs 全部能被 node 解析`);
+  if (r.checked && !r.problems.length) console.log(`  · 工具脚本：${r.checked} 个（.mjs 用 node --check，.ps1 用 PowerShell 解析器）都通过`);
 }
 if (problems.length) {
   console.log('门禁未通过：');

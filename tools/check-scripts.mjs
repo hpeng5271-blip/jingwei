@@ -20,6 +20,19 @@ export function checkToolScripts(root = '.') {
       const st = fs.statSync(p);
       if (st.isDirectory()) {
         walk(p);
+      } else if (p.endsWith('.ps1')) {
+        checked += 1;
+        const script = [
+          `$errs = $null;`,
+          `[void][System.Management.Automation.Language.Parser]::ParseFile('${p.replace(/'/g, "''")}', [ref]$null, [ref]$errs);`,
+          `if ($errs -and $errs.Count -gt 0) { Write-Output $errs[0].Message; exit 1 }`,
+        ].join(' ');
+        try {
+          execFileSync('powershell', ['-NoProfile', '-Command', script], { stdio: 'pipe' });
+        } catch (e) {
+          const first = String(e.stderr || e.stdout || e.message).split('\n')[0];
+          problems.push(`${path.relative(root, p)} 解析失败：${first}`);
+        }
       } else if (p.endsWith('.mjs')) {
         checked += 1;
         try {

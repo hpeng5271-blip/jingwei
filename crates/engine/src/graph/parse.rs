@@ -99,9 +99,9 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
     collect(root, src, rel, now, None, &mut scope, &mut symbols);
     // **闭包也收成符号**——它们有名字、有作用域，而且是"能被调用的局部绑定"。
     // 不收的话，`let has = |s| ...` 后面那句 `has("x")` 就永远找不到定义。
-    let mut closures: Vec<(String, Vec<String>)> = Vec::new();
+    let mut closures: Vec<(String, Vec<String>, u32)> = Vec::new();
     collect_closures(root, src, &[], &mut closures);
-    for (name, owner_scope) in closures {
+    for (name, owner_scope, closure_line) in closures {
         let key = symbol_key(rel, &owner_scope, None, &name);
         let mut n = Node::new(
             NodeKind::Symbol,
@@ -120,12 +120,8 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
             "local",
             rel,
         ]));
-        symbols.push(n.with_file(
-            rel,
-            // 行号在 collect_closures 里没带出来——闭包的准确行号不影响任何判断，
-            // 先给 0 会让 schema 的 CHECK（line > 0）拒绝，所以给 1。
-            1,
-        ));
+        // **用闭包自己的行号**（2026-10-19：位置回读发现这里一律写 1，300 条符号对不上）
+        symbols.push(n.with_file(rel, closure_line.max(1)));
     }
     let imports = collect_imports(root, src);
     // 按 id 去重：树没坏透时可能抽到同名的，去重比让主键撞车好。
@@ -520,13 +516,13 @@ fn symbol_class(kind: &str) -> &'static str {
 /// 而能被调用的局部绑定只有闭包。把每个 `let x = 5` 都塞进图谱，
 /// 只会让图变胖而不解决任何问题。
 ///
-/// 返回 `(名字, 它的作用域链)`——作用域链**必须一起带**：
+/// 返回 `(名字, 它的作用域链, 行号)`——作用域链**必须一起带**：
 /// 局部符号的可见性只在本函数内，跨函数同名是**两回事**。
 fn collect_closures(
     node: TsNode<'_>,
     src: &str,
     scope: &[String],
-    out: &mut Vec<(String, Vec<String>)>,
+    out: &mut Vec<(String, Vec<String>, u32)>,
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -543,7 +539,9 @@ fn collect_closures(
             if let (Some(n), true) = (name, is_closure) {
                 // 只收简单标识符：`let (a, b) = ...` 这种解构先跳过
                 if !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    out.push((n, scope.to_vec()));
+                    // **闭包的真实行号**（2026-10-19 位置回读抓到：原来一律写 1）
+                    let line = (child.start_position().row as u32) + 1;
+                    out.push((n, scope.to_vec(), line));
                 }
             }
         }
@@ -581,7 +579,8 @@ fn collect_closures(
                         .map(|s| s.trim().to_string());
                     if let Some(nm) = nm {
                         if !nm.is_empty() && nm.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                            out.push((nm, inner.clone()));
+                            let line = (child.start_position().row as u32) + 1;
+                            out.push((nm, inner.clone(), line));
                         }
                     }
                 }

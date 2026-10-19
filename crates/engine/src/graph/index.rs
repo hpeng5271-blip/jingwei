@@ -369,7 +369,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 /// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
 /// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
 /// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
-pub const EXTRACTOR_VERSION: &str = "parse@2";
+pub const EXTRACTOR_VERSION: &str = "parse@4";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -498,6 +498,12 @@ pub fn index_source(
         };
         // **先算解析结果指纹**（之后 `parsed` 的字段会被逐个借走/移走）
         let result_sha = parsed_result_sha(&parsed);
+        // 截断分支要用行号，但后面 `parsed.symbols` 会被移走 → 先留一份
+        let symbol_lines: Vec<(String, u32)> = parsed
+            .symbols
+            .iter()
+            .map(|s| (s.id.clone(), s.line.unwrap_or(1)))
+            .collect();
         if !parsed.complete {
             rep.incomplete += 1;
         }
@@ -588,6 +594,18 @@ pub fn index_source(
         // **早期截断**（2026-10-19）：内容变了但解析结果没变（改注释/格式）→ 图不重写。
         if crate::graph::query::result_sha(store, &rel)?.as_deref() == Some(result_sha.as_str()) {
             rep.skipped_same_result += 1;
+            // **截断时只更新行号**（2026-10-19，位置回读抓到的）：
+            // 结果指纹刻意不含行号（否则改注释就永远截断不了），
+            // 但这意味着"行号变了"不会被发现——所以这里单独把行号刷一遍。
+            for (id, line) in &symbol_lines {
+                if let Err(e) = store.conn.execute(
+                    "UPDATE nodes SET line=?1 WHERE id=?2",
+                    rusqlite::params![line, id],
+                ) {
+                    eprintln!("刷行号失败：{e}");
+                }
+            }
+
             // **截断时也要更新文件状态**（2026-10-19，实测抓到的）：
             // 不更新的话，下次进来 size/mtime 仍然"变了"，又要读文件+解析一遍——
             // 早期截断就变成了"每次都白解析"。

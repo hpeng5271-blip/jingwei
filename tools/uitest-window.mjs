@@ -115,7 +115,9 @@ function assertExeFresh() {
   let newest = 0;
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {
-      if (['target', 'node_modules', '.git', 'dist'].includes(name)) continue;
+      // **`tests/` 不算**（2026-10-19 误报抓出来的）：测试代码不进二进制，
+      // 改一条集成测试却逼人重建 GUI，属于同一类"原料集写宽了"的假红。
+      if (['target', 'node_modules', '.git', 'dist', 'tests'].includes(name)) continue;
       const p = join(dir, name);
       const st = statSync(p);
       if (st.isDirectory()) walk(p);

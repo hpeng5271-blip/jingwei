@@ -12,6 +12,7 @@ static MORE: AtomicBool = AtomicBool::new(false);
 mod cmd_clean;
 mod cmd_doctor;
 mod cmd_discover;
+mod cmd_positions;
 mod cmd_graph;
 mod cmd_lsp;
 mod cmd_guide;
@@ -340,6 +341,8 @@ fn run() -> i32 {
         "notes" | "log" => cmd_notes(&root, json),
         "test" => cmd_task(&root, "test", None),
         "verify" | "build" => cmd_verify::cmd_verify(&root, json),
+        // **位置回读**：用原文当裁判核图谱（2026-10-19）
+        "positions" => cmd_positions::cmd_positions(&root, json),
         "projects" | "list" => cmd_projects::cmd_projects(&root, depth_arg, show_all, json),
         "snap" | "snapshot" => cmd_snap(&root, json, diff_only),
         "run" | "start" => cmd_run(&root, run_override, rest),

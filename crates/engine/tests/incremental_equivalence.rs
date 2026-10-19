@@ -56,6 +56,27 @@ fn snapshot(s: &Store) -> String {
     format!("NODES\n{}\nEDGES\n{}\n", nodes.join("\n"), edges.join("\n"))
 }
 
+/// **只比结构**的快照：去掉行号（注释会让行号平移，那是应该变的）。
+fn snapshot_no_lines(s: &Store) -> String {
+    snapshot(s)
+        .lines()
+        .map(|l| {
+            // 粗暴但够用：把 "line":N 这一段删掉
+            let mut out = String::new();
+            let mut rest = l;
+            while let Some(i) = rest.find("\"line\":") {
+                out.push_str(&rest[..i]);
+                let tail = &rest[i + 7..];
+                let end = tail.find([',', '}']).unwrap_or(0);
+                rest = &tail[end..];
+            }
+            out.push_str(rest);
+            out
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A + B：幂等，以及"碰 mtime 不算改"。
 #[test]
 fn 内容没变时增量结果与第一次完全一致() {
@@ -127,6 +148,7 @@ fn 只改注释时图不变且走早期截断() {
 
     index::index_source(&root, &mut s).expect("首次索引失败");
     let before = snapshot(&s);
+    let before_structure = snapshot_no_lines(&s);
 
     // 只加一行注释：内容哈希变了，但符号/调用/引用/导入全不变
     let f = root.join("src/a.rs");
@@ -136,7 +158,13 @@ fn 只改注释时图不变且走早期截断() {
 
     let r = index::index_source(&root, &mut s).expect("第二次索引失败");
     assert_eq!(r.skipped_same_result, 1, "只改注释应走早期截断（实际 {}）", r.skipped_same_result);
-    assert_eq!(snapshot(&s), before, "早期截断后图必须逐字节相同");
+    assert_eq!(
+        snapshot_no_lines(&s),
+        before_structure,
+        "早期截断后图的**结构**必须不变（行号可以因为加注释平移）"
+    );
+    // 行号确实该变：加了 1 行注释，a 的行号应当是 2
+    assert_ne!(snapshot(&s), before, "行号应当随内容平移（否则位置回读会报旧行号）");
 
     let _ = std::fs::remove_dir_all(&root);
 }

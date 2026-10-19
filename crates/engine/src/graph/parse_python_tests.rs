@@ -178,3 +178,19 @@ fn 只有点py结尾才算python源码() {
     let o = parse_python("a.pyc", "\u{0}\u{1}binary junk", 1);
     assert!(!o.complete, "二进制垃圾不该被当成解析成功");
 }
+
+#[test]
+fn 符号要带文件名与行号_不然位置回读核不到() {
+    // 债表 0.13c：`positions` 在 flask 上报"核了 0 个符号"，因为 Python 符号
+    // 没写 file_path / line，被 `verify.rs` 直接跳过——不是它没符号，是它不可核。
+    let src = "import os\n\ndef f():\n    pass\n\nclass C:\n    pass\n";
+    let o = parse_python("a.py", src, 1);
+    for s in &o.symbols {
+        assert_eq!(s.file_path.as_deref(), Some("a.py"), "{} 缺 file_path", s.id);
+        assert!(s.line.is_some(), "{} 缺行号", s.id);
+    }
+    let f = o.symbols.iter().find(|s| s.name == "f").expect("f 该在符号里");
+    assert_eq!(f.line, Some(3), "f 在第 3 行");
+    let c = o.symbols.iter().find(|s| s.name == "C").expect("C 该在符号里");
+    assert_eq!(c.line, Some(6), "C 在第 6 行");
+}

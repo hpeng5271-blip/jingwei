@@ -155,6 +155,11 @@ fn collect_defs(
                     Confidence::High,
                     now,
                 );
+                // **位置回读要能核到 Python 符号**（2026-10-19，债表 0.13c）：
+                // 不写 file_path / line，`verify.rs` 会直接跳过——图谱里有 1,580 个符号
+                // 却报"核了 0 个"，等于 Python 侧完全没有位置校验。
+                node.file_path = Some(rel.to_string());
+                node.line = Some(child.start_position().row as u32 + 1);
                 // `sym` 槽位与 Rust 那边一致：这个符号是哪一类东西。
                 // Python 这边只分三种——`method`（在类里）/ `local`（在函数里）/ `other`。
                 let class = if container.is_empty() {
@@ -204,6 +209,11 @@ fn collect_defs(
                     Confidence::High,
                     now,
                 );
+                // **位置回读要能核到 Python 符号**（2026-10-19，债表 0.13c）：
+                // 不写 file_path / line，`verify.rs` 会直接跳过——图谱里有 1,580 个符号
+                // 却报"核了 0 个"，等于 Python 侧完全没有位置校验。
+                node.file_path = Some(rel.to_string());
+                node.line = Some(child.start_position().row as u32 + 1);
                 node.data = Some(serde_json::json!({ "sym": "class" }));
                 node.checksum = Some(crate::facts::stable_hash([
                     NodeKind::Symbol.as_str(),

@@ -1,0 +1,31 @@
+{
+ "ts": "2026-10-19T14:08:50.593Z",
+ "exe_sha": "404b265b4992",
+ "roots": [
+  "D:\\projects",
+  "D:\\research"
+ ],
+ "depth": 4,
+ "runs": [
+  {
+   "wallMs": 1794,
+   "firstMs": 143,
+   "dirs": 186,
+   "skipped": 28,
+   "projects": 133,
+   "terminal": "✓ 扫完：186 个目录（跳过 28）/ 133 个项目 / 用时 1.8 秒"
+  },
+  {
+   "wallMs": 1809,
+   "firstMs": 106,
+   "dirs": 186,
+   "skipped": 28,
+   "projects": 133,
+   "terminal": "✓ 扫完：186 个目录（跳过 28）/ 133 个项目 / 用时 1.8 秒"
+  }
+ ],
+ "wall_ms_mean": 1802,
+ "deviation": 0.004,
+ "reproducible": true,
+ "verdict": "可复现：偏差 ≤10%"
+}

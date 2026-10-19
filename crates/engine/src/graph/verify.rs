@@ -104,6 +104,25 @@ pub fn check_positions(root: &Path, store: &Store) -> PositionReport {
     rep
 }
 
+/// 列出所有 `depends_on` 边（File → Dependency），给"Python 的用在不在图里"一个可数的事实。
+pub fn dep_edges_of(store: &Store) -> Vec<(String, String)> {
+    let Ok(v) = store.dump(1_000_000) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in v.get("edges").and_then(|x| x.as_array()).cloned().unwrap_or_default() {
+        if e.get("kind").and_then(|k| k.as_str()) != Some("depends_on") {
+            continue;
+        }
+        let (Some(s), Some(d)) = (e.get("src").and_then(|x| x.as_str()), e.get("dst").and_then(|x| x.as_str())) else {
+            continue;
+        };
+        out.push((s.to_string(), d.to_string()));
+    }
+    out.sort();
+    out
+}
+
 /// 名字是不是**作为完整标识符**出现在这行里（`fn a` 不该被 `fn abc` 命中）。
 fn contains_word(hay: &str, needle: &str) -> bool {
     let b = hay.as_bytes();

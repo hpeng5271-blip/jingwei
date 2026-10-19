@@ -369,7 +369,7 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 /// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
 /// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
 /// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
-pub const EXTRACTOR_VERSION: &str = "parse@4";
+pub const EXTRACTOR_VERSION: &str = "parse@7";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -679,6 +679,86 @@ pub fn index_source(
             rep.external += res.external;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
         }
+        // **依赖边**（2026-10-19）：文件 → 它 import 的根模块。
+        //
+        // 判据就写在文件里（`import x` / `from x import y`），不是推断。
+        // ⚠️ 上一轮我在这一步连撞 4 次 `FOREIGN KEY constraint failed`，
+        // 根因是 **`Node::new` 会用 `node_id(kind, key)` 重算 id**，
+        // 而我把边指向了自己拼的 `dep:flask`（节点真实 id 是 `dependency:dep:flask`）。
+        // **边的 dst 必须用节点自己的 `id`**，不许再拼一遍。
+        {
+            let mut dep_nodes: std::collections::BTreeMap<String, Node> = Default::default();
+            let local_files = store.indexed_files().unwrap_or_default();
+            let mut dep_edges: Vec<Edge> = Vec::new();
+            for (rel, imps) in &file_imports {
+                if !rel.ends_with(".py") {
+                    continue;
+                }
+                for imp in imps {
+                    let root = imp
+                        .path
+                        .split([':', '.'])
+                        .next()
+                        .unwrap_or("")
+                        .trim();
+                    // **不是模块的关键字**：`from . import x` / `self` 之类不是依赖
+                    // 本地模块（项目里真有这个目录/文件）不算外部依赖
+                    // 本地判定看**任意一层目录名**：`examples/celery/src/task_app/...`
+                    // 里 `task_app` 是本地包，不是外部依赖。
+                    let is_local = local_files.iter().any(|f| {
+                        f.split('/').any(|seg| seg == root) || f.ends_with(&format!("/{root}.py"))
+                    });
+                    if is_local || root.is_empty() || root == "." || root == "self" || root == "super" {
+                        continue;
+                    }
+                    let key = format!("dep:{root}");
+                    let node = dep_nodes.entry(key.clone()).or_insert_with(|| {
+                        Node::new(
+                            NodeKind::Dependency,
+                            &key,
+                            root,
+                            Source::TreeSitter,
+                            Confidence::Certain,
+                            now,
+                        )
+                    });
+                    // **用节点自己的 id**（node_id 会加 kind 前缀）
+                    let dst = node.id.clone();
+                    dep_edges.push(edge(
+                        &jingwei_model::node_id(NodeKind::File, rel),
+                        &dst,
+                        EdgeKind::DependsOn,
+                        NodeKind::File,
+                        NodeKind::Dependency,
+                        Source::TreeSitter,
+                        Confidence::Certain,
+                        now,
+                    )?);
+                }
+            }
+            if !dep_nodes.is_empty() {
+                // **先清掉旧的依赖边/孤立依赖节点**（2026-10-19 实测抓到的）：
+                // 这批边是在 `apply_file_update` 之外写的，而它只删"本文件的旧边"——
+                // 于是删掉的 import 会永远留在图里（实测：`dep:self` 清不掉、条数不变）。
+                store
+                    .conn
+                    .execute("DELETE FROM edges WHERE kind='depends_on'", [])
+                    .map_err(|e| anyhow::anyhow!("清旧依赖边失败：{e}"))?;
+                store
+                    .conn
+                    .execute(
+                        "DELETE FROM nodes WHERE kind='dependency' AND id NOT IN (SELECT DISTINCT dst FROM edges WHERE kind='depends_on')",
+                        [],
+                    )
+                    .map_err(|e| anyhow::anyhow!("清孤立依赖节点失败：{e}"))?;
+                let nodes: Vec<Node> = dep_nodes.into_values().collect();
+                // 节点先落库，再写边（外键：指向不存在的节点进不去）
+                store.upsert(&nodes, &[])?;
+                let w = store.upsert(&[], &dep_edges)?;
+                rep.edges_written += w.edges;
+            }
+        }
+
         // 只写边不写节点——节点在上面的循环里已经落库了。
         // 外键会在这一句把关：指向不存在节点的边进不去。
         if !extra.is_empty() {

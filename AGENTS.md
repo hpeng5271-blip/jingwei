@@ -35,8 +35,8 @@ cd D:\projects\jingwei
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
-**8 道**：单测+集成（<!-- fact:tests_total -->438<!-- /fact --> 条：engine <!-- fact:engine_unit -->363<!-- /fact --> /
-集成 <!-- fact:integration -->56<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->439<!-- /fact --> 条：engine <!-- fact:engine_unit -->363<!-- /fact --> /
+集成 <!-- fact:integration -->57<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
@@ -64,6 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 事 | 落点 | 证据 |
 |---|---|---|
+| **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |
 | **位置回读**（用原文当裁判核图谱行号） | `graph/verify.rs` + `jingwei positions` | 经纬自己：**1760 对 / 0 错 / 13 位置不准**（修闭包行号前是 **300 错**）；正例+反例测试 |
 | **扫描结果持久化**（下次打开不必从头扫） | `understand/scan_cache.rs` + `scan.rs` | 实测：第一次跑落盘 **133 项目 / 266 目录 / 跳过 63**；第二次启动立刻有卡片；坏缓存当没有（4 条单测） |
@@ -89,7 +90,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 现在最该做的三件 | 一句话 |
 |---|---|
 | **信息复用/检验层**（内容哈希 + 解析器版本 + 结果哈希） | 二次启动不重算；扫描/抽取结果可复用 |
-| **Python 的"使用"没进图谱**（**卡住**，见债表 0.17） | 4 次撞 `FOREIGN KEY constraint failed`；已回退，下一步查 `upsert` 顺序与 node id 真实值 |
+| **LSP 找引用** | `textDocument/references` 还没做（只到 definition） |
 | **LSP 只到 definition** | 找引用 / hover 还没有 |
 
 ## 6. 要什么读什么（**别一次读进去**）

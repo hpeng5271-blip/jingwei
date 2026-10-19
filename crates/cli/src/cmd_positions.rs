@@ -15,6 +15,7 @@ pub fn cmd_positions(root: &Path, json: bool) -> i32 {
         }
     };
     let rep = jingwei_engine::graph::verify::check_positions(root, &store);
+    let deps = jingwei_engine::graph::verify::dep_edges_of(&store);
     if json {
         println!("{}", serde_json::to_string_pretty(&rep).unwrap_or_default());
     } else {
@@ -25,6 +26,10 @@ pub fn cmd_positions(root: &Path, json: bool) -> i32 {
         println!("    ~ 位置不准：{}（名字在文件里、不在那一行——不判错）", rep.imprecise);
         for s in &rep.samples {
             println!("    × {s}");
+        }
+        println!("  依赖边（File→Dependency）：{} 条", deps.len());
+        for (f, d) in deps.iter().take(10) {
+            println!("    {f} → {d}");
         }
     }
     if rep.pass() { 0 } else { 1 }

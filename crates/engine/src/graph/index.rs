@@ -121,7 +121,7 @@ impl IndexReport {
 }
 
 const MAX_FILES: usize = 2000;
-const MAX_FILE_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// 把一个 `IllegalPair` 变成可读的错误。
 ///
@@ -341,34 +341,6 @@ pub fn record_run(
     Ok(out)
 }
 
-/// 文件修改时间的纳秒数。
-///
-/// 用纳秒而不是秒：**秒级精度会把"同一秒里改两次"看成没变**，
-/// 而"保存一下又改一下"正是最常见的编辑节奏。
-fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
-    meta.modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as i64)
-        .unwrap_or(0)
-}
-
-/// **增量索引**：只重解析变了的文件，并把消失的文件撤掉。
-///
-/// 三级检测（数据层设计 §6.2）在这里落地：
-///
-/// | 级 | 判据 | 什么时候用 |
-/// |---|---|---|
-/// | 一级 | 大小 + 修改时间都一样 | 每次都先用它筛——**不读文件** |
-/// | 二级 | 内容哈希 | 一级说"变了"时才花这个钱（`touch` 一下不该触发重解析）|
-///
-/// 三级（变更日志 / watcher）不在这里：那是外壳的事，它把改动事件喂进来，
-/// 这里只管"给我一个目录，我把图谱对齐"。
-/// **解析器版本**：解析/抽取语义一改就 +1。
-///
-/// 为什么需要它：只按"内容哈希"判复用是不够的——**文件没变、但我们解析它的规则变了**，
-/// 旧结果就是过期数据。把它存进 meta，与当前值不一致时**强制重解析全部文件**。
-/// （学习调研的结论：版本要能定位重算范围；先做全局一个版本，够用再加语言维度。）
 pub const EXTRACTOR_VERSION: &str = "parse@11";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
@@ -442,43 +414,35 @@ pub fn index_source(
     // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
     let mut processed: Vec<String> = Vec::new();
     let mut timing = crate::graph::index_timing::IndexTiming::default();
-    for (rel, abs) in files {
-        let Ok(meta) = std::fs::metadata(&abs) else {
-            rep.unreadable += 1;
-            continue;
-        };
-        let size = meta.len() as i64;
-        let mt = mtime_ns(&meta);
-        let known = store.file_state(&rel)?;
+    // **并行准备**（债 0.31）：读文件/解码/哈希/解析都在这批线程里做；
+    // 落库仍按原顺序在这一条线程里，语义不变（pro 学习 #6）。
+    let mut states: std::collections::BTreeMap<String, crate::graph::store::FileState> = Default::default();
+    for (rel, _) in &files {
+        if let Some(k) = store.file_state(rel)? {
+            states.insert(rel.clone(), k);
+        }
+    }
+    let t_prep = std::time::Instant::now();
+    let prepared = crate::graph::parse_pool::prepare(files, &states, version_changed, now);
+    timing.add_parse(t_prep);
 
-        // 一级：大小与时间都没动 → 连读都不读
-        if let Some(k) = &known {
-            if k.size == size && k.mtime_ns == mt && !version_changed {
-                rep.skipped_unchanged += 1;
-                continue;
+    for p in prepared {
+        if let Some(s) = p.skip {
+            match s {
+                crate::graph::parse_pool::Skip::Unchanged => rep.skipped_unchanged += 1,
+                crate::graph::parse_pool::Skip::Big => rep.skipped_big += 1,
+                crate::graph::parse_pool::Skip::SameContent => rep.skipped_same_content += 1,
+                crate::graph::parse_pool::Skip::Unreadable => rep.unreadable += 1,
             }
-        }
-        if size as u64 > MAX_FILE_BYTES {
-            rep.skipped_big += 1;
             continue;
         }
-        let Ok(bytes) = std::fs::read(&abs) else {
-            rep.unreadable += 1;
-            continue;
-        };
-        let file = crate::util::textfile::decode(&bytes);
-        if !file.readable {
-            rep.unreadable += 1;
-            continue;
-        }
-        // 二级：内容哈希。`touch` 一下会让一级判"变了"，这里把它挡回去。
-        let sha = crate::facts::stable_hash([&file.text]);
-        if let Some(k) = &known {
-            if k.content_sha.as_deref() == Some(sha.as_str()) && !version_changed {
-                rep.skipped_same_content += 1;
-                continue;
-            }
-        }
+        let rel = p.rel;
+        let abs = p.abs;
+        let result_sha = p.result_sha;
+        let size = p.size;
+        let mt = p.mtime_ns;
+        let sha = p.content_sha;
+        let parsed = p.parsed.expect("skip=None 必有解析结果");
 
         let base = abs
             .file_name()
@@ -498,15 +462,7 @@ pub fn index_source(
         //
         // 这两门语言的"符号"定义不一样，所以是两个解析器而不是一个带开关的解析器：
         // 一个函数里塞两套规则，改一门必然碰到另一门。
-        let t_parse = std::time::Instant::now();
-        let parsed = if rel.ends_with(".py") {
-            crate::graph::parse_python::parse_python(&rel, &file.text, now)
-        } else {
-            crate::parse::parse_rust(&rel, &file.text, now)
-        };
-        timing.add_parse(t_parse);
         // **先算解析结果指纹**（之后 `parsed` 的字段会被逐个借走/移走）
-        let result_sha = crate::graph::result_sha::parsed_result_sha(&parsed);
         // 截断分支要用行号，但后面 `parsed.symbols` 会被移走 → 先留一份
         let symbol_lines: Vec<(String, u32)> = parsed
             .symbols

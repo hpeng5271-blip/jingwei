@@ -118,6 +118,8 @@ pub mod graph {
     /// Python 的语法树遍历。**第二门语言**（2026-10-16）。
     /// 与 `parse` 分开是因为"什么算符号"两门语言根本不是一回事——见那个文件的头。
     pub mod parse_python;
+    /// 并行准备（读+解析）与落库解耦（债 0.31）。
+    pub mod parse_pool;
     pub mod query;
     /// 重命名规划（债表 0.25）：算准"出现在哪一列"，判不准的不收。
     pub mod rename;

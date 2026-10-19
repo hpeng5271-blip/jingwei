@@ -232,6 +232,66 @@ pub fn journal_hint(p: &Path) -> String {
     format!("journal：{}", p.display())
 }
 
+
+/// 从 journal 里读出"需要重扫的项目根"（D-03 第 2 步）。
+///
+/// 规则：变更路径 → 往上找项目根（含清单/`.git` 那层）；找不到就用它所在目录。
+/// **overflow 行 = 事件丢过** → 返回 `Err`，调用方必须退回全量（不许把"漏了"当"没变"）。
+pub fn journal_roots(journal: &Path) -> Result<(Vec<PathBuf>, usize)> {
+    let text = std::fs::read_to_string(journal)
+        .map_err(|e| anyhow::anyhow!("读不到 journal（{}）：{e}", journal.display()))?;
+    let mut bad = 0usize;
+    let mut out: std::collections::BTreeSet<PathBuf> = Default::default();
+    for line in text.trim_start_matches('\u{feff}').lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            bad += 1;
+            continue;
+        };
+        if v.get("event").and_then(|e| e.as_str()) == Some("overflow") {
+            return Err(anyhow::anyhow!("journal 里有 overflow（变更太多丢了事件）"));
+        }
+        let Some(p) = v.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let path = PathBuf::from(p);
+        let start = if path.is_dir() { path } else { path.parent().map(|x| x.to_path_buf()).unwrap_or(path) };
+        // `discover` 列的是"根下面的项目"，所以传**项目根的父目录**；
+        // 传项目根本身只会扫到它的子目录，项目自己反而不在列表里（实测踩到）。
+        let root = project_root_of(&start);
+        out.insert(root.parent().map(|p| p.to_path_buf()).unwrap_or(root));
+    }
+    let live: Vec<PathBuf> = out.into_iter().filter(|d| d.is_dir()).collect();
+    Ok((live, bad))
+}
+
+/// 从某层往上找"项目根"：含清单文件或 `.git` 的那一层；找不到就返回起点。
+fn project_root_of(start: &Path) -> PathBuf {
+    const MARKERS: &[&str] = &[
+        ".git",
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "setup.py",
+        "requirements.txt",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+    ];
+    let mut d = start.to_path_buf();
+    for _ in 0..12 {
+        if MARKERS.iter().any(|m| d.join(m).exists()) {
+            return d;
+        }
+        match d.parent() {
+            Some(p) if p != d => d = p.to_path_buf(),
+            _ => break,
+        }
+    }
+    start.to_path_buf()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +312,37 @@ mod tests {
         v
     }
 
+
+    #[test]
+    fn 从_journal_读出项目根() {
+        let dir = std::env::temp_dir().join(format!("jw-jr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("p/src")).unwrap();
+        std::fs::write(dir.join("p/Cargo.toml"), "[package]\nname=\"p\"\nversion=\"0.1.0\"\n").unwrap();
+        std::fs::write(dir.join("p/src/lib.rs"), "fn f() {}").unwrap();
+        let j = dir.join("watch.jsonl");
+        let line = serde_json::json!({
+            "ts": 1, "event": "modified",
+            "path": dir.join("p/src/lib.rs").display().to_string()
+        });
+        std::fs::write(&j, format!("{line}\n")).unwrap();
+        let (roots, bad) = journal_roots(&j).unwrap();
+        assert_eq!(bad, 0);
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        assert_eq!(roots[0], dir, "要返回项目根的父目录，实际 {:?}", roots[0]);
+        let _ = std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn journal_里_overflow_要报错() {
+        let dir = std::env::temp_dir().join(format!("jw-jr2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let j = dir.join("watch.jsonl");
+        std::fs::write(&j, "{\"ts\":1,\"event\":\"overflow\"}\n").unwrap();
+        assert!(journal_roots(&j).is_err(), "overflow 必须报错，让调用方退回全量");
+        let _ = std::fs::remove_dir_all(&dir).ok();
+    }
     #[test]
     fn 解析单条记录() {
         let buf = rec(0, 1, "a.rs");

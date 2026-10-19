@@ -419,7 +419,7 @@ fn run() -> i32 {
             }
             let want_similar = rest.iter().any(|a| a == "--similar");
             let want_why = rest.iter().any(|a| a == "--why");
-            cmd_discover::cmd_discover(roots, depth_arg, json, want_similar, want_why)
+            cmd_discover::cmd_discover(roots, depth_arg, json, want_similar, want_why, journal_arg.as_deref().map(std::path::Path::new))
         }
 
         // **`jingwei index` = 把项目带到"图谱可用"的状态。**

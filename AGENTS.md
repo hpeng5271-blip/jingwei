@@ -37,7 +37,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->459<!-- /fact --> 条：engine <!-- fact:engine_unit -->375<!-- /fact --> /
+**8 道**：单测+集成（<!-- fact:tests_total -->461<!-- /fact --> 条：engine <!-- fact:engine_unit -->377<!-- /fact --> /
 集成 <!-- fact:integration -->65<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
@@ -93,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 现在最该做的三件 | 一句话 |
 |---|---|
-| **冷缓存**（0.13 → 0.27） | 并行已上；合并 `read_dir` 试过无收益已撤；出路是 **RDCW + 持久 journal**：`jingwei watch` 内核**已做**；`discover` 内建读 journal 待做（现在由 `tools/scan-changed.mjs` 承担） |
+| **冷缓存**（0.13 → 0.27） | 并行已上；合并 `read_dir` 试过无收益已撤；**已做（2026-10-20）**：`jingwei watch`（RDCW 内核）+ `discover --journal`（只扫变过的项目根；没记录/overflow 明说退回全量） |
 
 ## 6. 要什么读什么（**别一次读进去**）
 

@@ -47,7 +47,14 @@ fn similar(list: &[(String, String, Vec<String>)], min: f64) -> Vec<(String, Str
     out
 }
 
-pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar: bool, want_why: bool) -> i32 {
+pub fn cmd_discover(
+    roots: Vec<PathBuf>,
+    depth: usize,
+    json: bool,
+    want_similar: bool,
+    want_why: bool,
+    journal: Option<&std::path::Path>,
+) -> i32 {
     let roots: Vec<PathBuf> = if roots.is_empty() {
         projects::default_scan_roots()
     } else {
@@ -57,6 +64,31 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar:
         eprintln!("没有可扫的根目录——给一个，或者加 --all 从盘根扫");
         return 2;
     }
+
+    // **增量**（D-03 第 2 步）：给了 journal 就只扫"变过的项目根"。
+    // 三态：读不到/overflow/空 → **明说退回全量**，不许把"没记录"当"没变化"。
+    let (roots, depth) = match journal {
+        None => (roots, depth),
+        Some(j) => match jingwei_engine::understand::dirwatch::journal_roots(j) {
+            Ok((live, bad)) if !live.is_empty() => {
+                println!(
+                    "增量：只扫 {} 个目录（journal {} 行，坏 {}）",
+                    live.len(),
+                    std::fs::read_to_string(j).map(|s| s.lines().count()).unwrap_or(0),
+                    bad
+                );
+                (live, 1)
+            }
+            Ok((_, bad)) => {
+                eprintln!("增量查不了：journal 里没有可用目录（坏 {bad} 行）——退回全量");
+                (roots, depth)
+            }
+            Err(e) => {
+                eprintln!("增量查不了：{e}——退回全量");
+                (roots, depth)
+            }
+        },
+    };
     // 门禁里跑的时候要能**自己停**（否则一条命令能挂十分钟）
     let stop = AtomicBool::new(false);
     let t0 = Instant::now();

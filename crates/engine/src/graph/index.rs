@@ -666,6 +666,7 @@ pub fn index_source(
     if !pending_refs.is_empty() {
         let empty = crate::graph::resolve::SymbolTable::new();
         let mut extra: Vec<Edge> = Vec::new();
+        let mut sites: Vec<(String, String, u32)> = Vec::new();
         for (rel, refs) in &pending_refs {
             let ft = file_tables.get(rel).unwrap_or(&empty);
             let no_imports: Vec<crate::graph::imports::ImportFact> = Vec::new();
@@ -678,6 +679,8 @@ pub fn index_source(
                 .extend(res.namespace_mismatch.iter().cloned());
             rep.external += res.external;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
+            // **调用点**：写进小表，给 LSP 找引用用（跳到调用那一行，而不是函数定义）
+            sites.extend(res.sites.iter().cloned());
         }
         // **依赖边**（2026-10-19）：文件 → 它 import 的根模块。
         //
@@ -764,6 +767,27 @@ pub fn index_source(
         if !extra.is_empty() {
             let w = store.upsert(&[], &extra)?;
             rep.edges_written += w.edges;
+        }
+        // 调用点表是**派生数据**：每次重建前清空，再按本次结果写。
+        store
+            .conn
+            .execute("DELETE FROM edge_sites", [])
+            .map_err(|e| anyhow::anyhow!("清调用点失败：{e}"))?;
+        for (src, dst, line) in sites {
+            let Some(file) = src
+                .strip_prefix("symbol:")
+                .and_then(|r| r.split('#').next())
+                .map(|s| s.to_string())
+            else {
+                continue;
+            };
+            store
+                .conn
+                .execute(
+                    "INSERT INTO edge_sites(src,dst,kind,file,line) VALUES(?1,?2,'calls',?3,?4)",
+                    rusqlite::params![src, dst, file, line as i64],
+                )
+                .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
         }
     }
 

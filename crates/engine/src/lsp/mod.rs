@@ -189,18 +189,38 @@ pub fn references_at(
             }
         }
     }
-    // **反向走边**：谁指向我
+    // **先看调用点表**（2026-10-19）：这里存的才是"调用发生在哪一行"。
+    // 老库/没重索引时这张表可能是空的 → 退回"被引用符号的定义行"（不如精确，但不是假的）。
+    let mut precise = 0usize;
     if let Ok(mut st) = store.conn.prepare(
-        "SELECT n.file_path, n.line FROM edges e JOIN nodes n ON n.id = e.src \
-         WHERE e.dst=?1 AND e.kind IN ('calls','references') AND e.expires_at IS NULL \
-           AND n.file_path IS NOT NULL AND n.line IS NOT NULL \
-         ORDER BY n.file_path, n.line",
+        "SELECT s.file, s.line FROM edge_sites s \
+         JOIN edges e ON e.src=s.src AND e.dst=s.dst AND e.kind=s.kind \
+         WHERE s.dst=?1 AND s.kind IN ('calls','references') AND e.expires_at IS NULL \
+         ORDER BY s.file, s.line",
     ) {
         if let Ok(mut rows) = st.query(rusqlite::params![id]) {
             while let Ok(Some(r)) = rows.next() {
                 let f: String = r.get(0).unwrap_or_default();
                 let l: i64 = r.get(1).unwrap_or(0);
                 out.push((f, l as u32));
+                precise += 1;
+            }
+        }
+    }
+    // **退回**：没有调用点记录时，至少给出"哪个符号引用了它"（定义行）
+    if precise == 0 {
+        if let Ok(mut st) = store.conn.prepare(
+            "SELECT n.file_path, n.line FROM edges e JOIN nodes n ON n.id = e.src \
+             WHERE e.dst=?1 AND e.kind IN ('calls','references') AND e.expires_at IS NULL \
+               AND n.file_path IS NOT NULL AND n.line IS NOT NULL \
+             ORDER BY n.file_path, n.line",
+        ) {
+            if let Ok(mut rows) = st.query(rusqlite::params![id]) {
+                while let Ok(Some(r)) = rows.next() {
+                    let f: String = r.get(0).unwrap_or_default();
+                    let l: i64 = r.get(1).unwrap_or(0);
+                    out.push((f, l as u32));
+                }
             }
         }
     }

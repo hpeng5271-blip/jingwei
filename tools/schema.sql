@@ -80,6 +80,16 @@ CREATE TABLE IF NOT EXISTS file_results (
   result_sha TEXT NOT NULL,     -- 解析结果（符号+调用+引用+导入，排序后）的哈希
   at         INTEGER NOT NULL
 );
+-- **调用点**（2026-10-19）：边上没有行号，而编辑器要跳到"调用发生的那一行"。
+-- 单独一张小表，老库 CREATE IF NOT EXISTS 即可用，不需要 ALTER 迁移。
+CREATE TABLE IF NOT EXISTS edge_sites (
+  src  TEXT NOT NULL,
+  dst  TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  file TEXT NOT NULL,
+  line INTEGER NOT NULL
+);
+
 -- files：增量检测与校验的落脚点
 CREATE TABLE IF NOT EXISTS files (
   path       TEXT PRIMARY KEY,      -- 相对路径，统一 /

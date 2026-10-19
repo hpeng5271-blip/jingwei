@@ -44,6 +44,8 @@ use super::parse::RefFact;
 pub struct Resolution {
     /// 确定的关系：`(调用者 id, 被调者 id)`。
     pub resolved: Vec<(String, String)>,
+    /// **调用点** `(调用者, 被调者, 行号)`：LSP 要跳到调用行，不是定义行（2026-10-19）。
+    pub sites: Vec<(String, String, u32)>,
     /// 命中多个候选——**不猜**。
     ///
     /// 记的是**名字本身**，不是个数。第一版记了个计数，
@@ -119,6 +121,7 @@ pub fn resolve_file(
         if let Some(hit) = through_import(r, imports, all, rel) {
             if let Some(caller) = r.scope.last() {
                 if &hit != caller {
+                    out.sites.push((caller.clone(), hit.clone(), r.line));
                     out.resolved.push((caller.clone(), hit));
                 }
             } else {
@@ -138,6 +141,7 @@ pub fn resolve_file(
         if let Some(hit) = nearest_in_scope(r, own_file) {
             if let Some(caller) = r.scope.last() {
                 if &hit != caller {
+                    out.sites.push((caller.clone(), hit.clone(), r.line));
                     out.resolved.push((caller.clone(), hit));
                 }
             } else {
@@ -186,6 +190,7 @@ pub fn resolve_file(
                 if let Some(caller) = r.scope.last() {
                     if &values[0].id != caller {
                         out.resolved.push((caller.clone(), values[0].id.clone()));
+                    out.sites.push((caller.clone(), values[0].id.clone(), r.line));
                     }
                 } else {
                     out.module_level += 1;

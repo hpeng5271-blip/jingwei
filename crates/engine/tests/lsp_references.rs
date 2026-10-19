@@ -18,7 +18,12 @@ fn fixture(tag: &str) -> PathBuf {
     std::fs::create_dir_all(d.join("src")).unwrap();
     std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
     std::fs::write(d.join("src/a.rs"), "pub fn helper() {}\n").unwrap();
-    std::fs::write(d.join("src/b.rs"), "pub fn caller() { crate::a::helper() }\n").unwrap();
+    // **调用点在第 2 行**（不是 caller 的定义行第 1 行）——这样才分得出精确与退回
+    std::fs::write(
+        d.join("src/b.rs"),
+        "pub fn caller() {\n    crate::a::helper();\n}\n",
+    )
+    .unwrap();
     d
 }
 
@@ -38,6 +43,9 @@ fn 找得到谁引用了这个符号() {
         files.iter().any(|f| f.contains("b.rs")),
         "必须包含调用者 b.rs，实际 {files:?}"
     );
+    // **精确到调用点**：b.rs 的第 2 行（caller 定义在第 1 行）
+    let hit = locs.iter().find(|(f, _)| f.contains("b.rs")).expect("应有 b.rs");
+    assert_eq!(hit.1, 2, "要跳到**调用那一行**（第 2 行），不是定义行；实际 {:?}", locs);
 
     let _ = std::fs::remove_dir_all(&root);
 }

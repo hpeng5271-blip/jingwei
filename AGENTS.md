@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 事 | 落点 | 证据 |
 |---|---|---|
-| **LSP 找引用**（`textDocument/references`） | `lsp/mod.rs::references_at` | 真协议往返：`referencesProvider: true`，问 `index_source` 得 **3 条**；2 条单测（有引用/没引用） |
+| **LSP 找引用**（精确到**调用点**） | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：`index_source` → 3 条，位置是 `cmd_graph.rs:491` / `export_graph.rs:61`（都是**真调用行**，不是定义行）；2 条单测（含"第 2 行才算对"） |
 | **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |
 | **位置回读**（用原文当裁判核图谱行号） | `graph/verify.rs` + `jingwei positions` | 经纬自己：**1760 对 / 0 错 / 13 位置不准**（修闭包行号前是 **300 错**）；正例+反例测试 |
@@ -91,7 +91,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 现在最该做的三件 | 一句话 |
 |---|---|
 | **信息复用/检验层**（内容哈希 + 解析器版本 + 结果哈希） | 二次启动不重算；扫描/抽取结果可复用 |
-| **LSP 引用位置只到"所属符号"** | 边上没存调用点行号；要精确到调用点得先改 schema（下一步） |
+| **LSP hover / 诊断推送** | 还没有 |
 
 ## 6. 要什么读什么（**别一次读进去**）
 

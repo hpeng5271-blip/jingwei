@@ -132,7 +132,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 索引      jingwei index
 真源      node tools/collect_facts.mjs --check
 打包      powershell -File pack.ps1   → dist\jingwei-<版本>-win-x64.zip
-包冒烟    node tools\smoke-pack.mjs    （解压真包 → 对演示项目 index + positions，验"包能用"）
+包冒烟    node tools\smoke-pack.mjs [--gui]   （解压真包 → index + positions；--gui 再加"GUI 起来 3 秒没退"）
 健康      node tools/health.mjs --once
 看本钱    node tools/ctx-cost.mjs     （每轮注入成本）
 ```

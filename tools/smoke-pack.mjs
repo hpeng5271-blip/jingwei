@@ -10,7 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const zip = process.argv[2] || findDefault();
+const argZip = process.argv.slice(2).find((a) => a.endsWith('.zip'));
+const zip = argZip || findDefault();
 function findDefault() {
   const dist = path.join(process.cwd(), 'dist');
   const names = fs.readdirSync(dist).filter((n) => n.endsWith('.zip') && !n.startsWith('_'));
@@ -48,6 +49,20 @@ try {
   const checked = Number(rep.ok || 0) + bad + Number(rep.unknown || 0) + Number(rep.imprecise || 0);
   if (checked === 0) throw new Error('positions 一个符号都没核到');
 
+
+  // **GUI 也要能起来**（用户打开包第一时间点的是它）：起进程、等 3 秒、确认还活着，再杀掉。
+  const gui = path.join(root, 'jingwei-gui.exe');
+  if (process.argv.includes('--gui') && fs.existsSync(gui)) {
+    const { spawn } = await import('node:child_process');
+    const child = spawn(gui, [], { cwd: root, stdio: 'ignore', detached: false });
+    let exited = false;
+    child.on('exit', () => { exited = true; });
+    await new Promise((r) => setTimeout(r, 3000));
+    if (exited) throw new Error('GUI 起来 3 秒内就退出了（起不来）');
+    child.kill();
+    console.log('  GUI 冒烟通过：起来 3 秒没退');
+  }
+
   console.log(`包冒烟通过：${path.basename(zip)}`);
   console.log(`  demo 索引：${(idx.match(/.*个文件 ·.*/) || [''])[0].trim()}`);
   console.log(`  位置回读：核了 ${checked} 个符号，对不上 0`);
@@ -55,5 +70,10 @@ try {
   console.error(`包冒烟失败：${e.message || e}`);
   process.exit(1);
 } finally {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  // GUI 刚被杀，文件句柄可能还占着：重试几次，失败也不影响结论。
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {
+    /* 临时目录残留不算失败 */
+  }
 }

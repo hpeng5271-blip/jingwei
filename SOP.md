@@ -871,6 +871,8 @@ Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Meas
   没有记录就开工 = 违规。执行层**不许自行改判据、不许扩大范围**；发现记录与门禁冲突 → 停下报冲突。
 - 执行层只回"改了哪些文件 / 哪条红 / 错误首行"，不写长报告。
 
+**不再起子智能体**（2026-10-19 用户要求）：pro 咨询改用**独立进程**（`dsh headless`，后续补 profile），
+或直接调 API；**只有在用户明确要求时才 spawn 子智能体**。清理存量：关闭 DSH 后跑 `tools/kill-subagents.cmd`。
 **两边日限**（`node tools/llm/limits.mjs check`，超了退出码 1，不许继续）：
 
 | 谁 | 上限 |

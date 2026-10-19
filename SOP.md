@@ -56,6 +56,7 @@
 | 我要干的事 | 固定流程（直接敲） |
 |---|---|
 | 开工前跑全部门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1` |
+| **每轮记一轮** | `node tools\llm\limits.mjs round`（债 0.29：不记 = 日限形同虚设；门禁由 `gates.ps1` 自己记） |
 | **看图谱的真实质量**（跨文件依赖/枢纽） | `node tools\graph_probe.mjs <导出.json>` |
 | **把项目带到"图谱可用"** | `jingwei index --root .` |
 | 导出真实图谱数据（给渲染/探针用） | `cargo run -p jingwei-engine --example export_graph -- . <out.json>` ⚠️ **它用临时库、跑完就删** |

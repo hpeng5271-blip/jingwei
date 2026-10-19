@@ -79,8 +79,12 @@ if ($failed.Count -gt 0) {
         Write-Host ("== {0}" -f $r.Name) -ForegroundColor Red
         Write-Host $r.Tail
     }
+# **失败也算跑过**（债 0.29）：不记的话，日限会低估一半。
+& node (Join-Path $PSScriptRoot 'llm\limits.mjs') gate 2>&1 | Out-Null
     exit 1
 }
 
 Write-Host ''
+# **记账**（债 0.29）：这次门禁真的跑过，记一次。
+& node (Join-Path $PSScriptRoot 'llm\limits.mjs') gate 2>&1 | Out-Null
 Write-Host 'ALL GATES PASSED' -ForegroundColor Green

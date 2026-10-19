@@ -110,6 +110,8 @@ pub mod graph {
     /// 与 `parse` 分开是因为"什么算符号"两门语言根本不是一回事——见那个文件的头。
     pub mod parse_python;
     pub mod query;
+    /// 重命名规划（债表 0.25）：算准"出现在哪一列"，判不准的不收。
+    pub mod rename;
     pub mod resolve;
     /// 图谱的三种角色（框架.md §4.8）。从 `store::dump` 里拆出来，
     /// 因为那个文件已经一千行、而这段判据是一块独立的"读懂图"的逻辑。

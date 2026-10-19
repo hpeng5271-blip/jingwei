@@ -14,6 +14,7 @@ mod cmd_doctor;
 mod cmd_deps;
 mod cmd_discover;
 mod cmd_positions;
+mod cmd_rename;
 mod cmd_graph;
 mod cmd_lsp;
 mod cmd_guide;
@@ -103,6 +104,9 @@ fn run() -> i32 {
     // `projects` 用：--depth N（往下几层）与 --all（连嵌套的一起给）
     let mut depth_arg: usize = 2;
     let mut show_all = false;
+    // `rename` 用：--to <新名>（新名可能在全局解析阶段就被消费，所以放这里）
+    let mut to_arg: Option<String> = None;
+    let mut write_files = false;
 
     let mut i = 0;
     while i < argv.len() {
@@ -146,6 +150,17 @@ fn run() -> i32 {
                     }
                 }
             }
+            "--to" => {
+                i += 1;
+                match argv.get(i) {
+                    Some(v) => to_arg = Some(v.clone()),
+                    None => {
+                        eprintln!("--to 后面要跟新名字");
+                        return 2;
+                    }
+                }
+            }
+            "--write" => write_files = true,
             "--more" => MORE.store(true, Ordering::Relaxed),
             "--recommended" => recommended_only = true,
             "--template" | "-t" => {
@@ -346,6 +361,16 @@ fn run() -> i32 {
         // **依赖对账**：清单 vs 锁文件（2026-10-19）
         "deps" => cmd_deps::cmd_deps(&root, json),
         "positions" => cmd_positions::cmd_positions(&root, json),
+    "rename" => {
+        let name = rest.first().map(|s| s.as_str()).unwrap_or("");
+        let to = to_arg.clone().unwrap_or_default();
+        if name.is_empty() || to.is_empty() {
+            eprintln!("用法：jingwei rename <符号名或id> --to <新名> [--write]");
+            2
+        } else {
+            cmd_rename::cmd_rename(&root, name, &to, write_files, json)
+        }
+    }
         "projects" | "list" => cmd_projects::cmd_projects(&root, depth_arg, show_all, json),
         "snap" | "snapshot" => cmd_snap(&root, json, diff_only),
         "run" | "start" => cmd_run(&root, run_override, rest),

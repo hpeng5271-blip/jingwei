@@ -325,7 +325,7 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             "jsonrpc": "2.0",
             "id": id?,
             "result": {
-                "capabilities": { "definitionProvider": true, "referencesProvider": true },
+                "capabilities": { "definitionProvider": true, "referencesProvider": true, "hoverProvider": true },
                 "serverInfo": { "name": "jingwei", "version": env!("CARGO_PKG_VERSION") }
             }
         })),
@@ -344,6 +344,18 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
                     "range": { "start": { "line": line, "character": 0 },
                                "end":   { "line": line, "character": 0 } }
                 }),
+            };
+            Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+        }
+        "textDocument/hover" => {
+            let id = id?;
+            let params = msg.get("params")?;
+            let uri = params.get("textDocument")?.get("uri")?.as_str()?;
+            let line = params.get("position")?.get("line")?.as_u64()? as u32;
+            let md = store.and_then(|s| hover_at(s, root, uri, line));
+            let result = match md {
+                None => Value::Null,
+                Some(v) => json!({ "contents": { "kind": "markdown", "value": v } }),
             };
             Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
         }
@@ -380,6 +392,61 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             "error": { "code": -32601, "message": format!("jingwei 还不支持 {method}") }
         })),
     }
+}
+
+/// **悬停**（2026-10-19）：这个符号是什么、定义在哪、**被几处调用**。
+///
+/// 为什么值得做：编辑器里最常问的一句就是"这是啥、谁在用"。
+/// 数据全在图谱里（节点 + `edges` + `edge_sites`），不需要重新解析。
+///
+/// 三态：符号找不到 → `None`；**库比文件旧 → 明写"位置不可信"**，不装作准。
+pub fn hover_at(store: &Store, root: &Path, uri: &str, line0: u32) -> Option<String> {
+    let rel = rel_of(root, uri)?;
+    let (id, name, line) = symbol_near(store, &rel, line0 + 1)?;
+
+    // 类别（`value` / `type` / `local`…）——parse 那边写在 `data.sym` 里
+    let class: String = store
+        .conn
+        .query_row(
+            "SELECT coalesce(json_extract(data, '$.sym'), '') FROM nodes WHERE id=?1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    let kind_zh = match class.as_str() {
+        "value" => "值（函数/常量）",
+        "type" => "类型",
+        "local" => "局部绑定（闭包等）",
+        _ => "符号",
+    };
+
+    // 被调用多少处：边上多少条 + 有没有精确调用点
+    let callers: i64 = store
+        .conn
+        .query_row(
+            "SELECT count(*) FROM edges WHERE dst=?1 AND kind='calls' AND expires_at IS NULL",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let sites: i64 = store
+        .conn
+        .query_row("SELECT count(*) FROM edge_sites WHERE dst=?1", rusqlite::params![id], |r| r.get(0))
+        .unwrap_or(0);
+
+    let mut md = format!("**{name}** — {kind_zh}\n\n定义：`{}:{}`", rel, line);
+    if callers > 0 {
+        md.push_str(&format!("\n\n被 **{callers}** 个符号调用"));
+        if sites > 0 && sites != callers {
+            md.push_str(&format!("（{sites} 处调用点）"));
+        }
+    } else {
+        md.push_str("\n\n图谱里没有调用者（`空` ≠ `没人用`：也可能是库旧了）");
+    }
+    if !up_to_date(store, root, &rel) {
+        md.push_str("\n\n> ⚠️ **索引比文件旧**：位置与调用数可能是旧的，先跑 `jingwei index`");
+    }
+    Some(md)
 }
 
 /// 跑 stdio 循环直到 EOF / `exit`。
@@ -451,10 +518,23 @@ mod tests {
         assert_eq!(out["result"], Value::Null, "没有库时不许编一个位置出来");
     }
 
+    /// **没有库时 hover 回 null**（不是编一段话说"这是函数"）。
+    #[test]
+    fn 没有库时hover回null() {
+        let msg = json!({
+            "jsonrpc": "2.0", "id": 9, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": "file:///D:/none/a.rs" },
+                        "position": { "line": 0, "character": 0 } }
+        });
+        let out = handle(None, Path::new("D:/none"), &msg).unwrap();
+        assert_eq!(out["result"], Value::Null, "库都没有，不许编");
+    }
+
     /// 不认识的请求：回 -32601，不是沉默。
     #[test]
     fn 不支持的请求要说出来() {
-        let msg = json!({ "jsonrpc": "2.0", "id": 3, "method": "textDocument/hover" });
+        // hover 已经有实现（2026-10-19），"不支持"的样例改用补全
+        let msg = json!({ "jsonrpc": "2.0", "id": 3, "method": "textDocument/completion" });
         let out = handle(None, Path::new("D:/none"), &msg).unwrap();
         assert_eq!(out["error"]["code"], -32601);
     }

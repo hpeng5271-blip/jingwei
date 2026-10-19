@@ -65,3 +65,23 @@ fn 没人引用就是空表() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **hover**：悬停要说清三件事——是什么、定义在哪、被几处调用。
+#[test]
+fn hover_说清是什么和在哪() {
+    let root = fixture("hover");
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let uri = lsp::path_to_uri(&root.join("src/a.rs"));
+    let md = lsp::hover_at(&s, &root, &uri, 0).expect("helper 该有 hover");
+    assert!(md.contains("helper"), "要写出名字：{md}");
+    assert!(md.contains("定义："), "要写出定义位置：{md}");
+    assert!(md.contains("调用"), "要说被调用情况：{md}");
+
+    // **查不了就是查不了**：没索引过的文件不该假装知道
+    let ghost = lsp::path_to_uri(&root.join("src/ghost.rs"));
+    assert!(lsp::hover_at(&s, &root, &ghost, 0).is_none(), "没索引过的文件要回 None");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

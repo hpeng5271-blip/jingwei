@@ -86,3 +86,31 @@ fn 小写变量不收成常量() {
     assert_eq!(bad, 0, "小写变量没进符号表，不该出现这条边");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+
+/// **引用点要能被 rename 看见**（2026-10-20 实测的 bug）：
+/// 以前站点一律按 `calls` 写，rename/LSP 的 JOIN（按 kind 匹配）取不到，
+/// 跨文件常量"看得见引用、改不到"。用 plan_rename 当判据最直接。
+#[test]
+fn 跨文件常量能被重命名到() {
+    let root = fixture("rename");
+    std::fs::write(root.join("pkg/cfg.py"), "DEBUG = True\n").unwrap();
+    std::fs::write(root.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(
+        root.join("main.py"),
+        "from pkg import cfg\n\n\ndef run():\n    return cfg.DEBUG\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+    let plan = s
+        .plan_rename(&root, "symbol:pkg/cfg.py#DEBUG", "VERBOSE")
+        .expect("规划失败");
+    let files: Vec<&str> = plan.edits.iter().map(|e| e.file.as_str()).collect();
+    assert!(files.contains(&"main.py"), "main.py 那行必须能改；实际 {files:?}");
+    assert!(
+        files.contains(&"pkg/cfg.py"),
+        "定义行也要能改；实际 {files:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

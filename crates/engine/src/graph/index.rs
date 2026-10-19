@@ -634,6 +634,9 @@ pub fn index_source(
     // 调用点（含同文件直接调用）：**不管有没有待解析引用都要写**（债表 0.25）。
     // resolved sites 只有行、没有字节 → 字节记 0（表示"不知道精确列"，重命名会退回行内扫描）
     let mut sites: Vec<(String, String, u32, u32)> = Vec::new();
+    // **引用点单独记**（kind='references'）：以前一律按 calls 写，导致
+    // rename/LSP 的 JOIN 按 kind 匹配时一条都取不到（2026-10-20 实测：跨文件常量改不到）。
+    let mut ref_sites: Vec<(String, String, u32)> = Vec::new();
     if !pending_refs.is_empty() || !pending_attr.is_empty() {
         let empty = crate::graph::resolve::SymbolTable::new();
         let mut extra: Vec<Edge> = Vec::new();
@@ -661,7 +664,7 @@ pub fn index_source(
                 let simple: Vec<(String, String)> =
                     pairs.iter().map(|(a, b, _)| (a.clone(), b.clone())).collect();
                 crate::graph::link::references_into(&mut extra, &simple, now)?;
-                sites.extend(pairs.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
+                ref_sites.extend(pairs.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l)));
             }
         }
         // **依赖边**（2026-10-19）：文件 → 它 import 的根模块。
@@ -776,6 +779,25 @@ pub fn index_source(
             )
             .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
     }
+
+      // **引用点**单独写（kind=references）：rename / LSP 的 JOIN 按 kind 匹配，
+      // 写成 calls 会一条都取不到（2026-10-20 实测：跨文件常量改不到）。
+      for (src, dst, line) in &ref_sites {
+          let Some(file) = src
+              .strip_prefix("symbol:")
+              .and_then(|r| r.split('#').next())
+              .map(|s| s.to_string())
+          else {
+              continue;
+          };
+          store
+              .conn
+              .execute(
+                  "INSERT INTO edge_sites(src,dst,kind,file,line,byte) VALUES(?1,?2,'references',?3,?4,0)",
+                  rusqlite::params![src, dst, file, *line as i64],
+              )
+              .map_err(|e| anyhow::anyhow!("写引用点失败：{e}"))?;
+      }
 
     // **把"理解覆盖度"存进库**（2026-10-18）：界面上的角色图例要能说
     // "这些角色有多可信"。数据跟着库走——谁打开、什么时候打开，都是同一个事实。

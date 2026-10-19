@@ -110,6 +110,10 @@ pub mod graph {
     /// 写边（calls / references / registers），从 index 里拆出来（债表 0.24）。
     pub mod link;
     pub mod index;
+    /// 索引分阶段计时（性能观察；拆出来是为了不占 index.rs 的行数）。
+    pub mod index_timing;
+    /// 解析结果指纹（从 index.rs 拆出）。
+    pub mod result_sha;
     pub mod parse;
     /// Python 的语法树遍历。**第二门语言**（2026-10-16）。
     /// 与 `parse` 分开是因为"什么算符号"两门语言根本不是一回事——见那个文件的头。

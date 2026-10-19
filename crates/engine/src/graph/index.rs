@@ -441,9 +441,7 @@ pub fn index_source(
     // **这次真的重解析过的文件**：调用点表按文件替换，不能整表清空——
     // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
     let mut processed: Vec<String> = Vec::new();
-    // 分阶段计时（JINGWEI_INDEX_TIMING=1）：解析 vs 落库，别猜。
-    let mut index_parse_ns: u128 = 0;
-    let mut index_write_ns: u128 = 0;
+    let mut timing = crate::graph::index_timing::IndexTiming::default();
     for (rel, abs) in files {
         let Ok(meta) = std::fs::metadata(&abs) else {
             rep.unreadable += 1;
@@ -506,9 +504,9 @@ pub fn index_source(
         } else {
             crate::parse::parse_rust(&rel, &file.text, now)
         };
-        index_parse_ns += t_parse.elapsed().as_nanos();
+        timing.add_parse(t_parse);
         // **先算解析结果指纹**（之后 `parsed` 的字段会被逐个借走/移走）
-        let result_sha = parsed_result_sha(&parsed);
+        let result_sha = crate::graph::result_sha::parsed_result_sha(&parsed);
         // 截断分支要用行号，但后面 `parsed.symbols` 会被移走 → 先留一份
         let symbol_lines: Vec<(String, u32)> = parsed
             .symbols
@@ -643,7 +641,7 @@ pub fn index_source(
             now,
             !parsed.complete,
         )?;
-        index_write_ns += t_write.elapsed().as_nanos();
+        timing.add_write(t_write);
         rep.nodes_written += w.nodes;
         crate::graph::query::set_result_sha(store, &rel, &result_sha, now)?;
         rep.edges_written += w.edges;
@@ -670,14 +668,7 @@ pub fn index_source(
         }
     }
 
-    if std::env::var_os("JINGWEI_INDEX_TIMING").is_some() {
-        eprintln!(
-            "  index 计时：解析 {:.2}s · 落库 {:.2}s（{} 文件）",
-            index_parse_ns as f64 / 1e9,
-            index_write_ns as f64 / 1e9,
-            processed.len()
-        );
-    }
+    timing.print(processed.len());
 
     // ── 阶段 2：全局解析 ────────────────────────────────────────────
     //
@@ -987,23 +978,3 @@ mod version_tests {
     }
 }
 
-/// 解析结果的指纹：**只包含会进图的东西**（符号 id / 调用 / 引用 / 导入），排序后哈希。
-///
-/// 为什么不含行号：行号会随注释移动，而图的结构不变——含进来就永远截断不了。
-fn parsed_result_sha(p: &crate::graph::parse::ParseOutcome) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for s in &p.symbols {
-        parts.push(format!("S|{}|{}", s.id, s.name));
-    }
-    for (a, b) in &p.calls {
-        parts.push(format!("C|{a}|{b}"));
-    }
-    for r in &p.references {
-        parts.push(format!("R|{}|{}", r.name, r.scope.first().cloned().unwrap_or_default()));
-    }
-    for i in &p.imports {
-        parts.push(format!("I|{}|{}", i.local, i.path));
-    }
-    parts.sort();
-    crate::facts::stable_hash(parts.iter().map(|s| s.as_str()))
-}

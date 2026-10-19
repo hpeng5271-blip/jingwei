@@ -880,3 +880,21 @@ Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Meas
 | pro（决策） | **20 次 / ¥3 / 每次输出 ≤2K tokens** |
 | flash（执行） | **12 轮 / 6 次门禁 / 4 条决策记录 / 总花费 ¥10** |
 **实测（2026-10-19）**：digest 674 tokens；一次"下一步做什么"咨询产出 473 字符、¥0.008。
+### S35 · 工作流 v2：一张表看全（2026-10-19，pro 定稿）
+
+**这张表是总览；下面每一行都能落到命令或文件。与 S29–S34 冲突时，以本表为准。**
+
+| 环节 | 谁 | 输入上限 | 输出 | 判据 / 闸门 |
+|---|---|---|---|---|
+| 开工检查 | flash | `AGENTS.md` ≤260 行 | 本轮目标一句话 | `node tools/llm/limits.mjs check` 退出码 0 |
+| 决策 | pro | digest ≤2K + slice ≤8K | `docs/decisions/D-*.md` | 无记录不动手（跨模块/不可逆才需要） |
+| 执行 | flash | 只读卡片指定片段 | 代码 + **先红的输出** | 改之前判据必须红（先红后绿） |
+| 验收 | flash | 全量 | 门禁结尾表 + `git status` | 全绿才可提交 |
+| 学习 | pro | 无（外部检索） | `docs/reference/借鉴-设计细节.md` 一条 | 必须带出处 + "我们怎么落" |
+| 监督 | pro | 信封 ≤1K | 抽查结论（有/无证据） | 每 5 轮一次；无证据声称 = 违规 |
+| 失败熔断 | flash→pro | 连续 2 次失败 | 停 / 升级 | 第 2 次即停，写"卡在哪"进债表 |
+| 收尾入库 | flash | 一句引用 | 债表 / 进展报告 / 提交 | 会话不复制正文 |
+
+**日限**（`tools/llm/limits.mjs`）：pro 60 次 / ¥15；flash 12 轮 / 6 次门禁 / 4 条决策 / ¥10。
+**上下文纪律**：给 pro 的只走 `digest.mjs`（674 tokens 实测）+ `slice.mjs`（超 8K 报错）；
+主会话只读片段；上行只回信封。

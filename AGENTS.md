@@ -5,7 +5,7 @@
 > | 想知道 | 读哪份 |
 > |---|---|
 > | 该按什么想 | `框架.md`（§九 = 2026-10-18/19 长出来的四条方法） |
-> | 怎么动手（判据 + 流程 + 省流） | `SOP.md`（S29–S32 是新的） |
+> | 怎么动手（判据 + 流程 + 省流） | `SOP.md`（S35 是总表；S29–S34 是细则） |
 > | 现在什么状态 / 欠什么 | **本文件** + `docs/reference/债表.md` |
 >
 > **每轮开工先问**：这一轮引入「我之外」的信息了吗？没有 = 整理，不是验证。
@@ -34,6 +34,8 @@
 cd D:\projects\jingwei
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
+
+**流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
 **8 道**：单测+集成（<!-- fact:tests_total -->446<!-- /fact --> 条：engine <!-- fact:engine_unit -->364<!-- /fact --> /
 集成 <!-- fact:integration -->63<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
@@ -116,7 +118,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 3. **命令必须有超时**：跑门禁/界面测试一律 `WaitForExit(N 秒)`，超时判卡死并杀。
 4. **跑界面前后做进程审查**：先 `Get-Process jingwei-gui | Stop-Process -Force`，结束后复查残留 = 0。
 5. **设备健康**：重活（全量编译 / 扫全盘）前后 `node tools/health.mjs --once`；编译用 `CARGO_BUILD_JOBS=4`。细节见 `SOP.md` S30。
-6. **硬决策才用 pro**：不可逆/连续失败 2 次/人点名 → 子智能体跑 `deepseek-v4-pro`，上下文走 `tools/llm/digest.mjs`+`slice.mjs`（≤2K+8K），一次约 ¥0.01；日限 20 次/¥3（`record.mjs` 记账）。**决策归 pro、执行归 flash；先写 `docs/decisions/` 再动手；`limits.mjs check` 超限即停。**
+6. **硬决策才用 pro**：不可逆/连续失败 2 次/人点名 → 子智能体跑 `deepseek-v4-pro`，上下文走 `tools/llm/digest.mjs`+`slice.mjs`（≤2K+8K），一次约 ¥0.01；日限 60 次/¥15（`record.mjs` 记账）。**决策归 pro、执行归 flash；先写 `docs/decisions/` 再动手；`limits.mjs check` 超限即停。**
 
 ## 8. 工具速查
 

@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 | 事 | 落点 | 证据 |
 |---|---|---|
-| **LSP 找引用**（精确到**调用点**） | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：`index_source` → 3 条，位置是 `cmd_graph.rs:491` / `export_graph.rs:61`（都是**真调用行**，不是定义行）；2 条单测（含"第 2 行才算对"） |
+| **LSP：定义 / 引用（精确到调用点）/ hover** | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：引用 3 条落在 `cmd_graph.rs:491`、`export_graph.rs:61`（真调用行）；hover 输出"是什么 / 在哪 / 被 2 个符号调用"；单测 6 条 |
 | **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |
 | **位置回读**（用原文当裁判核图谱行号） | `graph/verify.rs` + `jingwei positions` | 经纬自己：**1760 对 / 0 错 / 13 位置不准**（修闭包行号前是 **300 错**）；正例+反例测试 |

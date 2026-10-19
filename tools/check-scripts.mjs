@@ -30,8 +30,9 @@ export function checkToolScripts(root = '.') {
         try {
           execFileSync('powershell', ['-NoProfile', '-Command', script], { stdio: 'pipe' });
         } catch (e) {
-          const first = String(e.stderr || e.stdout || e.message).split('\n')[0];
-          problems.push(`${path.relative(root, p)} 解析失败：${first}`);
+          const raw = String(e.stderr || e.stdout || e.message || '').trim();
+          const first = raw.split('\n').find((l) => l.trim()) || '（解析器没给消息）';
+          problems.push(`${path.relative(root, p)} 解析失败：${first.trim()}`);
         }
       } else if (p.endsWith('.mjs')) {
         checked += 1;

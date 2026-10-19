@@ -35,8 +35,8 @@ cd D:\projects\jingwei
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 ```
 
-**8 道**：单测+集成（<!-- fact:tests_total -->427<!-- /fact --> 条：engine <!-- fact:engine_unit -->353<!-- /fact --> /
-集成 <!-- fact:integration -->55<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->428<!-- /fact --> 条：engine <!-- fact:engine_unit -->353<!-- /fact --> /
+集成 <!-- fact:integration -->56<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
@@ -67,6 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | **扫盘真能用**：多根、整盘、边扫边出、可中断、有终态 | `jingwei discover` + `src-tauri/src/scan.rs` + `ui/scan.js` | **整机 C:+D: 深度 6 → 423 项目 / 5929 目录 / 6.1s**；`--why` 报跳过原因；界面门禁 5 条绿 |
 | **首页按类型×体量分组**（可折叠） | `ui/scan.js::groupFound` + `.grp-head` | 界面门禁：`heads ≥ 2` 且终态说"扫完" |
 | **tauri 索引崩溃修复**（trait 默认方法） | `graph/parse.rs` | 整个 tauri **329 文件 / 5,916 符号 / 3.2s**；单测 347 绿 |
+| **早期截断**（内容变了但解析结果没变 → 图不重写） | `graph/index.rs` + `store::file_results` | 实测：只加一行注释 → `skipped_same_result=1`、图逐字节相同；再跑 **处理 0**；测试 3 条等价性全绿 |
 | **项目指纹 + 同源检测**（Merkle + Jaccard≥0.8） | `understand/fingerprint.rs` + `discover --similar` | 实机 133 项目：**2 组完全相同**、**5 对同源**（含 `jingwei\src-tauri` ↔ `pylaunch-rs\src-tauri` **88%**）；5 条单测 |
 
 ## 4. 分工（别越界）

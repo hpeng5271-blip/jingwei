@@ -570,6 +570,12 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             rep.files, rep.symbols, rep.calls, ms
         );
     }
+    if rep.skipped_same_result > 0 {
+        println!(
+            "    {} 个文件内容变了但解析结果没变——图没重写（早期截断）",
+            rep.skipped_same_result
+        );
+    }
     println!("    {}", c(DIM, "理解了多少："));
     println!(
         "      连上 {} 条 · {} 拿不准（不猜）· {} 外部（不归我们管）",

@@ -117,3 +117,26 @@ fn 增量结果必须等于全量重算() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **早期截断**（2026-10-19）：内容变了、但解析结果没变（只改注释）→
+/// 图必须一模一样，并且这次要走"跳过写库"那条路（`skipped_same_result`）。
+#[test]
+fn 只改注释时图不变且走早期截断() {
+    let root = fixture("comment");
+    let mut s = open(&root, ".jingwei");
+
+    index::index_source(&root, &mut s).expect("首次索引失败");
+    let before = snapshot(&s);
+
+    // 只加一行注释：内容哈希变了，但符号/调用/引用/导入全不变
+    let f = root.join("src/a.rs");
+    let mut text = std::fs::read_to_string(&f).expect("读失败");
+    text.insert_str(0, "// 只是注释，图不该动\n");
+    std::fs::write(&f, text).expect("写失败");
+
+    let r = index::index_source(&root, &mut s).expect("第二次索引失败");
+    assert_eq!(r.skipped_same_result, 1, "只改注释应走早期截断（实际 {}）", r.skipped_same_result);
+    assert_eq!(snapshot(&s), before, "早期截断后图必须逐字节相同");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

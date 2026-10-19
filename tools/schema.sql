@@ -71,7 +71,15 @@ CREATE TABLE IF NOT EXISTS edges (
   PRIMARY KEY (src, dst, kind)
 ) WITHOUT ROWID;
 
--- ── 三张支持表 ─────────────────────────────────────────────────────
+-- ── 三张支持表 ─────────────────────────────────────────────
+-- **解析结果指纹**（2026-10-19）：内容变了、但解析出来的东西没变时，
+-- 就不用重写节点/关系（ commentaries 改动不该让图重排）。
+-- 单独一张表而不是给 files 加列：老库直接 CREATE IF NOT EXISTS 就能用，不需要 ALTER 迁移。
+CREATE TABLE IF NOT EXISTS file_results (
+  path       TEXT PRIMARY KEY,
+  result_sha TEXT NOT NULL,     -- 解析结果（符号+调用+引用+导入，排序后）的哈希
+  at         INTEGER NOT NULL
+);
 -- files：增量检测与校验的落脚点
 CREATE TABLE IF NOT EXISTS files (
   path       TEXT PRIMARY KEY,      -- 相对路径，统一 /

@@ -48,6 +48,8 @@ pub struct IndexReport {
     pub skipped_unchanged: usize,
     /// **二级检测**说"没变"（改了修改时间，但内容哈希一样——比如 `touch` 了一下）。
     pub skipped_same_content: usize,
+    /// 内容变了、但**解析结果没变**（改注释/格式）——图不用重写
+    pub skipped_same_result: usize,
     /// 磁盘上已经没有了、从图谱里撤掉的文件。
     pub removed: usize,
     pub nodes_written: usize,
@@ -494,6 +496,8 @@ pub fn index_source(
         } else {
             crate::parse::parse_rust(&rel, &file.text, now)
         };
+        // **先算解析结果指纹**（之后 `parsed` 的字段会被逐个借走/移走）
+        let result_sha = parsed_result_sha(&parsed);
         if !parsed.complete {
             rep.incomplete += 1;
         }
@@ -573,12 +577,34 @@ pub fn index_source(
         }
         nodes.push(file_node);
 
+        // 截断分支还要用 content_sha，先留一份（state 会把 sha 移走）
+        let sha_for_state = sha.clone();
         let state = crate::graph::store::FileState {
             size,
             mtime_ns: mt,
             content_sha: Some(sha),
             nodes_count: Some(symbols as i64),
         };
+        // **早期截断**（2026-10-19）：内容变了但解析结果没变（改注释/格式）→ 图不重写。
+        if crate::graph::query::result_sha(store, &rel)?.as_deref() == Some(result_sha.as_str()) {
+            rep.skipped_same_result += 1;
+            // **截断时也要更新文件状态**（2026-10-19，实测抓到的）：
+            // 不更新的话，下次进来 size/mtime 仍然"变了"，又要读文件+解析一遍——
+            // 早期截断就变成了"每次都白解析"。
+            store
+                .conn
+                .execute(
+                    "INSERT INTO files(path,size,mtime_ns,content_sha,parsed_at,incomplete,nodes_count) \
+                     VALUES(?1,?2,?3,?4,?5,0,?6) \
+                     ON CONFLICT(path) DO UPDATE SET size=excluded.size, mtime_ns=excluded.mtime_ns, \
+                       content_sha=excluded.content_sha, parsed_at=excluded.parsed_at, nodes_count=excluded.nodes_count",
+                    rusqlite::params![rel, size, mt, sha_for_state, now, symbols as i64],
+                )
+                .map_err(|e| anyhow::anyhow!("截断时写文件状态失败：{e}"))?;
+            crate::graph::query::set_result_sha(store, &rel, &result_sha, now)?;
+            continue;
+        }
+
         let w = store.apply_file_update(
             &rel,
             &state,
@@ -589,6 +615,7 @@ pub fn index_source(
             !parsed.complete,
         )?;
         rep.nodes_written += w.nodes;
+        crate::graph::query::set_result_sha(store, &rel, &result_sha, now)?;
         rep.edges_written += w.edges;
         rep.edges_expired += w.expired;
     }
@@ -797,4 +824,25 @@ mod version_tests {
         assert!(!extractor_changed(Some(EXTRACTOR_VERSION)), "版本一致 = 可以复用");
         assert!(extractor_changed(Some("parse@1")), "老版本 = 必须重解析");
     }
+}
+
+/// 解析结果的指纹：**只包含会进图的东西**（符号 id / 调用 / 引用 / 导入），排序后哈希。
+///
+/// 为什么不含行号：行号会随注释移动，而图的结构不变——含进来就永远截断不了。
+fn parsed_result_sha(p: &crate::graph::parse::ParseOutcome) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for s in &p.symbols {
+        parts.push(format!("S|{}|{}", s.id, s.name));
+    }
+    for (a, b) in &p.calls {
+        parts.push(format!("C|{a}|{b}"));
+    }
+    for r in &p.references {
+        parts.push(format!("R|{}|{}", r.name, r.scope.first().cloned().unwrap_or_default()));
+    }
+    for i in &p.imports {
+        parts.push(format!("I|{}|{}", i.local, i.path));
+    }
+    parts.sort();
+    crate::facts::stable_hash(parts.iter().map(|s| s.as_str()))
 }

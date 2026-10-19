@@ -116,6 +116,32 @@ pub fn symbol_rows(store: &Store) -> Result<Vec<(String, String, String, String)
     }
 
 
+/// 这个文件上次的**解析结果指纹**（没有就是 None）。
+///
+/// 用途：内容变了（改注释/格式）但解析结果一模一样时，**整条写库路径可以跳过**。
+pub fn result_sha(store: &Store, path: &str) -> Result<Option<String>> {
+    let mut st = store
+        .conn
+        .prepare("SELECT result_sha FROM file_results WHERE path=?1")
+        .context("准备读结果指纹失败")?;
+    let mut rows = st.query(rusqlite::params![path]).context("读结果指纹失败")?;
+    Ok(rows.next().context("读结果指纹行失败")?.map(|r| r.get(0).unwrap_or_default()))
+}
+
+/// 记下这次解析结果的指纹（与文件状态同一个事务里写更安全，这里先分开）。
+pub fn set_result_sha(store: &Store, path: &str, sha: &str, at: i64) -> Result<()> {
+    store
+        .conn
+        .execute(
+            "INSERT INTO file_results(path,result_sha,at) VALUES(?1,?2,?3) \
+             ON CONFLICT(path) DO UPDATE SET result_sha=excluded.result_sha, at=excluded.at",
+            rusqlite::params![path, sha, at],
+        )
+        .context("写结果指纹失败")?;
+    Ok(())
+}
+
+
 pub fn recent_runs(store: &Store, limit: usize) -> Result<Vec<RunSummary>> {
     let nodes = store.list_kind(NodeKind::Run, limit)?;
     let mut out = Vec::with_capacity(nodes.len());

@@ -1,4 +1,4 @@
-﻿# SOP · 工作流程（给 Agent 用的）
+# SOP · 工作流程（给 Agent 用的）
 
 > **这份是操作手册，不是介绍。** 主语是"我怎么想、我怎么动手"。
 > 每一次开工前读一遍；写新东西之前问一遍。**它不是文档，是判据。**
@@ -895,6 +895,7 @@ Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Meas
 | 失败熔断 | flash→pro | 连续 2 次失败 | 停 / 升级 | 第 2 次即停，写"卡在哪"进债表 |
 | 收尾入库 | flash | 一句引用 | 债表 / 进展报告 | 会话不复制正文 |
 | **提交入库** | flash | 每块完成 | `commit` + 单行 msg | `git status` 干净；**红过的输出随 commit 一起进**（工作不留在会话里） |
+| 收口自核 | flash | 自己仓库 | `node tools/selfcheck-positions.mjs` 输出 | **checked > 0 且 bad = 0**（核到了东西、没有真错） |
 
 **日限**（`tools/llm/limits.mjs`）：pro 60 次 / ¥15；flash 12 轮 / 6 次门禁 / 4 条决策 / ¥10。
 **上下文纪律**：给 pro 的只走 `digest.mjs`（674 tokens 实测）+ `slice.mjs`（超 8K 报错）；

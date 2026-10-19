@@ -185,6 +185,117 @@ pub fn build_with(
     idx
 }
 
+/// **并行扫**（2026-10-19）：整盘冷缓存时 146 秒太长，而瓶颈是**元数据 I/O**，
+/// 不是 CPU——所以按目录并行是对的，不是"为了快而乱并发"。
+///
+/// 纪律（三条，缺一条就会出错）：
+/// 1. **判据和串行版完全一样**：`skip_reason` / `row_for` 同一个函数，别在并发里另写一份；
+/// 2. **结果与串行逐项相等**（有测试钉着：`并行扫与串行扫结果一致`）；
+/// 3. `stop` 一置位就**尽快**收手（每处理完一个目录看一次）。
+///
+/// 回调的计数是"当前快照"，可能略滞后——进度条不需要精确到个位。
+pub fn build_parallel(
+    root: &Path,
+    depth: usize,
+    threads: usize,
+    stop: &std::sync::atomic::AtomicBool,
+    on_dir: impl FnMut(usize, usize, &Path) + Send,
+) -> DirsIndex {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    let mut idx = DirsIndex {
+        root: root.to_path_buf(),
+        ..Default::default()
+    };
+    if !root.is_dir() {
+        return idx;
+    }
+    let max = depth.max(1);
+    let threads = threads.max(1);
+    let queue: Mutex<Vec<(std::path::PathBuf, usize)>> = Mutex::new(vec![(root.to_path_buf(), 0)]);
+    let pending = AtomicUsize::new(1);
+    let visited = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
+    let on_dir = Mutex::new(on_dir);
+
+    // 每个线程**本地攒**，最后一次性合并：
+    // 第一版每进一个目录就抢一次全局锁，实测比串行还慢（11s → 52s）——锁争用把收益吃光了。
+    let collected: Mutex<Vec<(std::path::PathBuf, DirRow)>> = Mutex::new(Vec::new());
+
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                let mut local: Vec<(std::path::PathBuf, DirRow)> = Vec::with_capacity(256);
+                loop {
+                    if stop.load(Ordering::Relaxed) || pending.load(Ordering::Acquire) == 0 {
+                        break;
+                    }
+                    // **成批取**：一批 16 个，等于把锁的频率降两个数量级
+                    let batch: Vec<(std::path::PathBuf, usize)> = {
+                        let mut q = queue.lock().unwrap();
+                        let len = q.len();
+                        let n = len.min(16);
+                        q.drain(len - n..).collect()
+                    };
+                    if batch.is_empty() {
+                        // 队列空但别人手上还有活：让出 CPU（自旋会把机器烧热）
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                        continue;
+                    }
+                    for (dir, level) in batch {
+                        if stop.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let (row, readable) = row_for(&dir);
+                        local.push((dir.clone(), row));
+                        let v = visited.fetch_add(1, Ordering::Relaxed) + 1;
+                        (on_dir.lock().unwrap())(v, skipped.load(Ordering::Relaxed), &dir);
+                        if readable && level < max {
+                            if let Ok(rd) = std::fs::read_dir(&dir) {
+                                let mut children: Vec<(std::path::PathBuf, usize)> = Vec::new();
+                                for e in rd.flatten() {
+                                    if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                                        continue;
+                                    }
+                                    let child = e.path();
+                                    if let Some(reason) = skip_reason(&child, root) {
+                                        local.push((
+                                            child.clone(),
+                                            DirRow {
+                                                mtime: mtime_secs(&child),
+                                                skipped: Some(reason),
+                                                ..Default::default()
+                                            },
+                                        ));
+                                        skipped.fetch_add(1, Ordering::Relaxed);
+                                        continue;
+                                    }
+                                    children.push((child, level + 1));
+                                }
+                                if !children.is_empty() {
+                                    pending.fetch_add(children.len(), Ordering::Release);
+                                    queue.lock().unwrap().extend(children);
+                                }
+                            }
+                        }
+                        pending.fetch_sub(1, Ordering::Release);
+                    }
+                }
+                collected.lock().unwrap().extend(local);
+            });
+        }
+    });
+
+    for (path, row) in collected.into_inner().unwrap() {
+        idx.rows.insert(path, row);
+    }
+
+    idx.visited = visited.load(Ordering::Relaxed);
+    idx.skipped = skipped.load(Ordering::Relaxed);
+    idx
+}
+
 fn walk_with(
     root: &Path,
     dir: &Path,

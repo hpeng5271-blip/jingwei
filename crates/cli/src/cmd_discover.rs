@@ -74,7 +74,8 @@ pub fn cmd_discover(roots: Vec<PathBuf>, depth: usize, json: bool, want_similar:
             eprintln!("跳过（目录不存在）：{}", root.display());
             continue;
         }
-        let idx = dirs_index::build_with(root, depth.max(1), &stop, |v, s, cur| {
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+        let idx = dirs_index::build_parallel(root, depth.max(1), threads, &stop, |v, s, cur| {
             seen = v;
             skipped = s;
             if v >= last_print + 400 {

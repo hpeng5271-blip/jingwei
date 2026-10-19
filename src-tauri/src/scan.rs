@@ -85,7 +85,8 @@ pub fn scan_start(roots: Vec<String>, depth: usize) -> Value {
             if !root.is_dir() {
                 continue;
             }
-            let idx = dirs_index::build_with(root, depth, &stop, |v, s, cur| {
+            let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+            let idx = dirs_index::build_parallel(root, depth, threads, &stop, |v, s, cur| {
                 if let Ok(mut st) = scan_slot().lock() {
                     st.visited = v;
                     st.skipped = s;

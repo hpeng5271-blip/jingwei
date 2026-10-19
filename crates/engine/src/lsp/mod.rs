@@ -154,6 +154,61 @@ pub fn call_targets(store: &Store, src: &str) -> Vec<(String, String, u32)> {
     out
 }
 
+/// **谁用到这个符号**（2026-10-19）：沿 `calls` / `references` 边**反向**找。
+///
+/// 返回 `(文件, 行号, 名字)`；`include_decl` 时把定义自己也算进去（LSP 的 `includeDeclaration`）。
+///
+/// 三态：查不到就返回空表（**空 ≠ 没被使用**——图谱没索引到这里也是空，
+/// 所以调用方要把"空"和"库过期"分开说，见 `up_to_date`）。
+pub fn references_at(
+    store: &Store,
+    root: &Path,
+    uri: &str,
+    line0: u32,
+    include_decl: bool,
+) -> Vec<(String, u32)> {
+    let Some(rel) = rel_of(root, uri) else {
+        return Vec::new();
+    };
+    // 光标所在这一行最近的符号（含它自己）
+    let Some((id, _name, _line)) = symbol_near(store, &rel, line0 + 1) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, u32)> = Vec::new();
+    if include_decl {
+        // 定义自己的位置（用来在编辑器里一起高亮）
+        if let Ok(mut st) = store.conn.prepare(
+            "SELECT file_path, line FROM nodes WHERE id=?1 AND file_path IS NOT NULL AND line IS NOT NULL",
+        ) {
+            if let Ok(mut rows) = st.query(rusqlite::params![id]) {
+                if let Ok(Some(r)) = rows.next() {
+                    let f: String = r.get(0).unwrap_or_default();
+                    let l: i64 = r.get(1).unwrap_or(0);
+                    out.push((f, l as u32));
+                }
+            }
+        }
+    }
+    // **反向走边**：谁指向我
+    if let Ok(mut st) = store.conn.prepare(
+        "SELECT n.file_path, n.line FROM edges e JOIN nodes n ON n.id = e.src \
+         WHERE e.dst=?1 AND e.kind IN ('calls','references') AND e.expires_at IS NULL \
+           AND n.file_path IS NOT NULL AND n.line IS NOT NULL \
+         ORDER BY n.file_path, n.line",
+    ) {
+        if let Ok(mut rows) = st.query(rusqlite::params![id]) {
+            while let Ok(Some(r)) = rows.next() {
+                let f: String = r.get(0).unwrap_or_default();
+                let l: i64 = r.get(1).unwrap_or(0);
+                out.push((f, l as u32));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// 图谱里这个文件的 `size/mtime_ns` 与磁盘**一致**吗？
 ///
 /// 为什么要问：**LSP 的位置来自索引，不是来自这一次打开的文件**。
@@ -250,7 +305,7 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             "jsonrpc": "2.0",
             "id": id?,
             "result": {
-                "capabilities": { "definitionProvider": true },
+                "capabilities": { "definitionProvider": true, "referencesProvider": true },
                 "serverInfo": { "name": "jingwei", "version": env!("CARGO_PKG_VERSION") }
             }
         })),
@@ -272,6 +327,32 @@ pub fn handle(store: Option<&Store>, root: &Path, msg: &Value) -> Option<Value> 
             };
             Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
         }
+        "textDocument/references" => {
+            let id = id?;
+            let params = msg.get("params")?;
+            let uri = params.get("textDocument")?.get("uri")?.as_str()?;
+            let line = params.get("position")?.get("line")?.as_u64()? as u32;
+            let include = params
+                .get("context")
+                .and_then(|c| c.get("includeDeclaration"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let locs = store
+                .map(|s| references_at(s, root, uri, line, include))
+                .unwrap_or_default();
+            let result: Vec<Value> = locs
+                .into_iter()
+                .map(|(file, line)| {
+                    json!({
+                        "uri": path_to_uri(&root.join(&file)),
+                        "range": { "start": { "line": line.saturating_sub(1), "character": 0 },
+                                   "end":   { "line": line.saturating_sub(1), "character": 0 } }
+                    })
+                })
+                .collect();
+            Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+        }
+
         // 其它请求：如实说不支持，不装死（编辑器会显示成"没有这个能力"）
         _ => id.map(|id| json!({
             "jsonrpc": "2.0",

@@ -11,7 +11,13 @@ use std::path::Path;
 
 pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) -> i32 {
     let db = root.join(".jingwei").join("graph.db");
-    let store = match jingwei_engine::graph::store::Store::open(&db) {
+    // **只读打开**（2026-10-20 修，与 positions 同一类）：`Store::open` 会建库，
+    // 没索引过的项目敲一次 rename 就在人家目录里留一个空 `.jingwei/`。
+    if !db.exists() {
+        eprintln!("查不了：还没索引（先跑一次 jingwei index）——没有图谱就不知道该改哪几处");
+        return 2;
+    }
+    let store = match jingwei_engine::graph::query::open_for_query(root) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("打不开图谱（先跑一次 jingwei index）：{e}");

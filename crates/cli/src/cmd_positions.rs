@@ -7,13 +7,24 @@ use std::path::Path;
 
 pub fn cmd_positions(root: &Path, json: bool) -> i32 {
     let db = root.join(".jingwei").join("graph.db");
-    let store = match jingwei_engine::graph::store::Store::open(&db) {
+    // **只读打开**（2026-10-20 修）：以前用 `Store::open`，没索引过的项目会被**建出一个空库**，
+    // 然后打印「✓ 对得上 0 / × 对不上 0」并 exit=0——而"对不上必须是 0"正是验收判据，
+    // 于是**没索引的项目凭空通过**。查不了就是查不了，不许算通过。
+    if !db.exists() {
+        println!("查不了：还没索引（先 jingwei index）——位置回读没有可核的对象");
+        return 1;
+    }
+    let store = match jingwei_engine::graph::query::open_for_query(root) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("打不开图谱（先跑一次 jingwei index）：{e}");
             return 2;
         }
     };
+    if store.symbol_count().unwrap_or(0) == 0 {
+        println!("查不了：图谱里 0 个符号（还没索引完？）——位置回读没有可核的对象");
+        return 1;
+    }
     let rep = jingwei_engine::graph::verify::check_positions(root, &store);
     let deps = jingwei_engine::graph::verify::dep_edges_of(&store);
     if json {

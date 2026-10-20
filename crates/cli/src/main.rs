@@ -15,6 +15,7 @@ mod cmd_deps;
 mod cmd_discover;
 mod cmd_explain;
 mod cmd_handover;
+mod cmd_knowledge;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -376,6 +377,8 @@ fn run() -> i32 {
         // **依赖对账**：清单 vs 锁文件（2026-10-19）
         "deps" => cmd_deps::cmd_deps(&root, json),
         "positions" => cmd_positions::cmd_positions(&root, json),
+        // **知识条目严筛**（2026-10-20，pro 任务卡 A）：双头漏斗最细的那道颈
+        "knowledge" => cmd_knowledge::cmd_knowledge(&root, &rest, json),
     "watch" => {
         let roots: Vec<String> = rest
             .iter()

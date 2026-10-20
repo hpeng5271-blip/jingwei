@@ -445,3 +445,33 @@ fn 跳过的目录要列名字() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **没索引的项目，`positions` 不许"凭空通过"**（2026-10-20 修的真 bug）。
+///
+/// 起因：`positions` 以前用 `Store::open` 打开图谱——它会**建库**，于是没索引过的项目
+/// 打印「✓ 对得上 0 / × 对不上 0」并 exit=0。而"对不上必须是 0"正是 MANIFEST 的验收判据，
+/// 等于**没索引的项目凭空通过**，还在人家目录里留一个空 `.jingwei/`。
+///
+/// 这条测试钉住三件事：退出码非 0、说"查不了"、**没有副作用**（不许建库）。
+#[test]
+fn 没索引时_positions_说查不了而不是零错() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("positions-noindex");
+    let p = d.to_str().unwrap().to_string();
+
+    let o = run(&["positions", "--root", &p]);
+    assert_ne!(
+        code(&o),
+        0,
+        "没索引时退出 0 会被脚本当成「对不上 0 = 通过」：{}",
+        stdout(&o)
+    );
+    let s = stdout(&o);
+    assert!(s.contains("查不了"), "要明说查不了，实际：{s}");
+    assert!(
+        !d.join(".jingwei").exists(),
+        "读路径不许在项目目录里建库（副作用）"
+    );
+
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -185,6 +185,45 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
     }
 
     match sub {
+        // **图谱里到底有什么**（2026-10-20 加）：节点/边/站点按 kind 计数。
+        // 起因：查一个跨文件属性建边失败时，没有一条命令能一眼看出"这类边到底有没有"。
+        "stats" | "stat" | "counts" => {
+            let v = match store.dump(2_000_000) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("读图谱失败：{e}");
+                    return 2;
+                }
+            };
+            let mut nodes: std::collections::BTreeMap<String, i64> = Default::default();
+            for n in v["nodes"].as_array().into_iter().flatten() {
+                if let Some(k) = n["kind"].as_str() {
+                    *nodes.entry(k.to_string()).or_default() += 1;
+                }
+            }
+            let mut edges: std::collections::BTreeMap<String, i64> = Default::default();
+            for e in v["edges"].as_array().into_iter().flatten() {
+                if let Some(k) = e["kind"].as_str() {
+                    *edges.entry(k.to_string()).or_default() += 1;
+                }
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({ "nodes": nodes, "edges": edges })).unwrap_or_default());
+            } else {
+                println!();
+                println!("  节点：");
+                for (k, n) in &nodes {
+                    println!("    {k:<12} {n}");
+                }
+                println!("  边：");
+                for (k, n) in &edges {
+                    println!("    {k:<12} {n}");
+                }
+                println!();
+            }
+            0
+        }
+
         // 某一次的明细
         "runs" | "run" | "log" => {
             let Some(id) = run_id else {

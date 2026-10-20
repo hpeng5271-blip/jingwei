@@ -463,15 +463,35 @@ impl Store {
             )
             .with_context(|| format!("写 claim 失败：{}", r.id))?;
             for s in &r.symbols {
+                // **原名解析**（2026-10-20 实测暴露）：条目里可以写裸名字（`cmd_handover`），
+                // 而 `nodes.id` 永远带 `symbol:` 前缀——直接存原名，边就永远连不上，
+                // 于是"挂了符号"实际没挂（静默）。这里把**唯一**的名字解析成 id；
+                // 重名或查不到就原样留着，让 `stale` 如实报"查不了"。
+                let dst = if s.starts_with("symbol:") {
+                    s.clone()
+                } else {
+                    let mut st = tx
+                        .prepare("SELECT id FROM nodes WHERE kind='symbol' AND name=?1 LIMIT 2")
+                        .context("准备名字解析失败")?;
+                    let ids: Vec<String> = st
+                        .query_map(rusqlite::params![s], |x| x.get::<_, String>(0))
+                        .map(|rows| rows.filter_map(|x| x.ok()).collect())
+                        .unwrap_or_default();
+                    if ids.len() == 1 {
+                        ids[0].clone()
+                    } else {
+                        s.clone()
+                    }
+                };
                 // **原样存**（哪怕图谱里没有这个符号）：这样"条目引用了一个已改名的符号"
                 // 这件事留得下来，`stale` 才有东西可报；真伪由查询侧 JOIN nodes 判。
                 tx.execute(
                     "INSERT OR IGNORE INTO claim_edges(claim,dst) VALUES(?1,?2)",
-                    rusqlite::params![r.id, s],
+                    rusqlite::params![r.id, dst],
                 )?;
                 let hit: i64 = tx.query_row(
                     "SELECT count(*) FROM nodes WHERE id=?1 AND kind='symbol'",
-                    rusqlite::params![s],
+                    rusqlite::params![dst],
                     |x| x.get(0),
                 )?;
                 if hit > 0 {
@@ -527,6 +547,76 @@ impl Store {
         )?;
         let rows = st.query_map(rusqlite::params![raw], |r| r.get::<_, String>(0))?;
         Ok(rows.filter_map(|x| x.ok()).collect())
+    }
+
+    /// 把条目里写的符号串解析成符号 id：`symbol:` 前缀原样用；裸名字**唯一**时解析成 id；
+    /// 重名或查不到就原样返回（让 `stale` 如实报"查不了"）。
+    ///
+    /// 与 [`Store::sync_claims`] 里那段解析**同一规则**——`stale`/对账都靠它，不许两套。
+    pub fn resolve_symbol_ref(&self, raw: &str) -> String {
+        if raw.starts_with("symbol:") {
+            return raw.to_string();
+        }
+        let Ok(mut st) = self
+            .conn
+            .prepare("SELECT id FROM nodes WHERE kind='symbol' AND name=?1 LIMIT 2")
+        else {
+            return raw.to_string();
+        };
+        let ids: Vec<String> = st
+            .query_map(rusqlite::params![raw], |x| x.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        if ids.len() == 1 {
+            ids[0].clone()
+        } else {
+            raw.to_string()
+        }
+    }
+
+    /// 全库的待重编清单：`claim_edges` 里指向的符号在图谱里不存在。
+    /// **单一事实源**：`stale` 只读这里，不再回头 grep Markdown（否则又成两份判断）。
+    pub fn stale_claims(&self) -> Result<Vec<(String, String, String)>> {
+        let mut st = self.conn.prepare(
+            "SELECT c.id, e.dst, c.source FROM claim_edges e \
+             JOIN claims c ON c.id=e.claim \
+             LEFT JOIN nodes n ON n.id=e.dst AND n.kind='symbol' \
+             WHERE n.id IS NULL ORDER BY c.id, e.dst",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        Ok(rows.filter_map(|x| x.ok()).collect())
+    }
+
+    /// 库里当前的主张快照（用于和 Markdown 投影对账）。
+    pub fn claims_snapshot(&self) -> Result<Vec<ClaimRow>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT id, claim, level, source, topic FROM claims ORDER BY id")?;
+        let rows = st.query_map([], |r| {
+            Ok(ClaimRow {
+                id: r.get(0)?,
+                claim: r.get(1)?,
+                level: r.get(2)?,
+                source: r.get(3)?,
+                topic: r.get(4)?,
+                symbols: Vec::new(),
+            })
+        })?;
+        let mut out: Vec<ClaimRow> = rows.filter_map(|x| x.ok()).collect();
+        for r in &mut out {
+            let mut st2 = self
+                .conn
+                .prepare("SELECT dst FROM claim_edges WHERE claim=?1 ORDER BY dst")?;
+            let dsts = st2.query_map(rusqlite::params![r.id], |x| x.get::<_, String>(0))?;
+            r.symbols = dsts.filter_map(|x| x.ok()).collect();
+        }
+        Ok(out)
     }
 
     #[allow(clippy::too_many_arguments)]

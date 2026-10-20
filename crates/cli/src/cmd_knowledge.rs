@@ -336,35 +336,56 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
     r
 }
 
-/// 一条"该重编了"的条目：引用的符号在图谱里已经查不到（改名/删了）。
-#[derive(Debug, Clone)]
-pub struct Stale {
-    pub entry: String,
-    pub symbol: String,
-    pub source: String,
-}
-
-/// 列出待重编的条目。返回 `None` = **没有图谱，判不了**（不是"没有待重编"）。
-pub fn stale_symbols(root: &Path, store: Option<&Store>) -> Option<Vec<Stale>> {
-    let st = store?;
-    let mut out = Vec::new();
-    for e in load_entries(root) {
-        if why_rejected(root, &e).is_some() {
-            continue; // 过不了严筛的先由 check 报，这里不重复
-        }
-        for s in &e.symbols {
-            if !symbol_ok(st, s) {
-                out.push(Stale {
-                    entry: e.file.clone(),
-                    symbol: s.clone(),
-                    source: e.fields.get("source").cloned().unwrap_or_default(),
-                });
-            }
-        }
+/// 投影对账：Markdown 是真源，`claims` 表是投影。两边不一致 → 返回一句人话。
+///
+/// **为什么要有它**（pro 任务卡 H）：`stale`/`symbol` 现在都走库，库一旦落后于 Markdown，
+/// 判断就静默错了。所以 `check` 负责把"库与文件漂移"变成可见的红。
+/// 比的是 id + 四字段 + **符号条数**：改名/加符号都会让条数变化。
+pub fn projection_drift(root: &Path, store: &Store) -> Option<String> {
+    use std::collections::BTreeMap;
+    // 文件侧的符号也要按**同一规则**解析（裸名字 → 唯一 id），否则会因写法不同误报漂移。
+    let want: BTreeMap<String, (String, String, String, String, Vec<String>)> = claim_rows(root)
+        .into_iter()
+        .map(|r| {
+            let mut syms: Vec<String> = r
+                .symbols
+                .iter()
+                .map(|s| store.resolve_symbol_ref(s))
+                .collect();
+            syms.sort();
+            (r.id, (r.claim, r.level, r.source, r.topic, syms))
+        })
+        .collect();
+    let have: BTreeMap<String, (String, String, String, String, Vec<String>)> = store
+        .claims_snapshot()
+        .ok()?
+        .into_iter()
+        .map(|r| (r.id, (r.claim, r.level, r.source, r.topic, r.symbols)))
+        .collect();
+    if want == have {
+        return None;
     }
-    // 回收没做的后果是腐化：列清单时按条目名稳定排序，便于逐条改挂。
-    out.sort_by(|a, b| a.entry.cmp(&b.entry).then_with(|| a.symbol.cmp(&b.symbol)));
-    Some(out)
+    let only_file: Vec<&String> = want.keys().filter(|k| !have.contains_key(*k)).collect();
+    let only_db: Vec<&String> = have.keys().filter(|k| !want.contains_key(*k)).collect();
+    let changed: Vec<&String> = want
+        .iter()
+        .filter(|(k, v)| have.get(*k).map(|h| h != *v).unwrap_or(false))
+        .map(|(k, _)| k)
+        .collect();
+    let mut parts = Vec::new();
+    if !only_file.is_empty() {
+        parts.push(format!("只在文件里：{}", only_file.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" / ")));
+    }
+    if !only_db.is_empty() {
+        parts.push(format!("只在库里：{}", only_db.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" / ")));
+    }
+    if !changed.is_empty() {
+        parts.push(format!("内容不一致：{}", changed.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" / ")));
+    }
+    Some(format!(
+        "图谱主张投影与 Markdown 漂移（{}）——跑 jingwei knowledge sync",
+        parts.join("；")
+    ))
 }
 
 /// 把某条目里一个查不到的符号改挂到新符号（**精确匹配**，不许模糊）。
@@ -453,24 +474,29 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         return add_from_inbox(root, rest.get(1).map(|s| s.as_str()), json);
     }
     if rest.first().map(|s| s.as_str()) == Some("stale") {
-        let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
-        let Some(list) = stale_symbols(root, store.as_ref()) else {
+        // **走库**（pro 任务卡 H）：过期判断与反查同源，不再读 Markdown。
+        // 库落后于 Markdown 的风险由 `knowledge check` 的投影对账兜底（那边会红）。
+        let Ok(store) = Store::open(&root.join(".jingwei").join("graph.db")) else {
             println!("查不了：没有图谱（先 jingwei index）——待重编判不出来");
             return 0;
         };
+        let list = store.stale_claims().unwrap_or_default();
         if json {
             let v: Vec<_> = list
                 .iter()
-                .map(|s| serde_json::json!({"entry": s.entry, "symbol": s.symbol, "source": s.source}))
+                .map(|(c, s, src)| serde_json::json!({"entry": c, "symbol": s, "source": src}))
                 .collect();
             println!("{}", serde_json::json!({"stale": v, "count": list.len()}));
         } else if list.is_empty() {
             println!("待重编 0 条（条目引用的符号都能在图谱里查到）");
         } else {
-            println!("待重编 {} 条（条目引用的符号图谱里查不到——改名/删了？）：", list.len());
-            for s in &list {
-                println!("  ! {} → {}", s.entry, s.symbol);
-                println!("     ← {}", s.source);
+            println!(
+                "待重编 {} 条（条目引用的符号图谱里查不到——改名/删了？）：",
+                list.len()
+            );
+            for (c, s, src) in &list {
+                println!("  ! {c} → {s}");
+                println!("     ← {src}");
             }
             println!("改挂：jingwei knowledge fix <条目> --symbol <新符号|symbol:id>");
         }
@@ -521,15 +547,11 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
     let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
     let mut r = evaluate(root, store.as_ref());
 
-    // **主张层是不是跟条目一致**（pro 任务卡 G 的验收）：图谱里那张 `claims` 表是投影，
-    // 条目改了不同步，`symbol` 就会拿旧主张回答——那是静默的错，必须红。
+    // **投影对账**（pro 任务卡 G/H）：`claims` 表是 Markdown 的投影。
+    // `symbol`/`stale` 现在都走库，库一旦落后于文件，判断就静默错了——所以这里逐条对账并红。
     if let Some(st) = store.as_ref() {
-        let db = st.claims_count().unwrap_or(-1);
-        if db >= 0 && db != r.passed as i64 {
-            r.problems.push(format!(
-                "图谱里的主张 {} 条 ≠ 过筛条目 {} 条——投影过期了，跑 jingwei knowledge sync",
-                db, r.passed
-            ));
+        if let Some(drift) = projection_drift(root, st) {
+            r.problems.push(drift);
         }
     }
 

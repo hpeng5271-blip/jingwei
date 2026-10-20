@@ -79,7 +79,17 @@ pub fn parse_entry(file: &str, text: &str) -> Entry {
             continue;
         };
         let k = k.trim().to_ascii_lowercase();
-        let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
+        // **只剥"整值被引号包住"的那一层**，不做 `trim_matches('"')`：
+        // 后者会把值**内部**的引号也吃掉——实测过：claim 写成 `……显示成"没有"` 时，
+        // 结尾那个引号被剥掉，条目文字与原文对不上（而 claim 逐字是候选的硬规矩）。
+        let v = v.trim();
+        let v = if v.len() > 1
+            && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
+        {
+            v[1..v.len() - 1].trim().to_string()
+        } else {
+            v.to_string()
+        };
         if k == "symbol" || k == "symbols" {
             for s in v.split(',') {
                 let s = s.trim();
@@ -729,6 +739,28 @@ mod tests {
         assert_eq!(e.fields.get("claim").map(|s| s.as_str()), Some("双源才敢说是"));
         assert_eq!(e.fields.get("level").map(|s| s.as_str()), Some("一手"));
         assert_eq!(e.symbols, vec!["symbol:a.rs#f", "g", "h"]);
+    }
+
+    #[test]
+    fn 引号只剥包住整值的那一层() {
+        // 内部引号必须保留（2026-10-20 实测：claim 结尾的引号被 trim_matches 吃掉，
+        // 条目文字与原文对不上，而 claim 逐字是候选的硬规矩）
+        let inner = parse_entry(
+            "a.md",
+            "---\nclaim: 显示成\"没有\"就行\nsource: https://x\nlevel: 一手\ncheck: c\n---\n",
+        );
+        assert_eq!(
+            inner.fields.get("claim").map(|s| s.as_str()),
+            Some("显示成\"没有\"就行")
+        );
+        let wrapped = parse_entry(
+            "b.md",
+            "---\nclaim: \"整值被引号包住\"\nsource: https://x\nlevel: 一手\ncheck: c\n---\n",
+        );
+        assert_eq!(
+            wrapped.fields.get("claim").map(|s| s.as_str()),
+            Some("整值被引号包住")
+        );
     }
 
     #[test]

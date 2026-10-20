@@ -20,6 +20,7 @@ mod cmd_learn;
 mod cmd_symbol;
 mod cmd_harvest;
 mod cmd_kverify;
+mod cmd_next;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -415,6 +416,8 @@ fn run() -> i32 {
         "learn" => cmd_learn::cmd_learn(&root, &rest, json),
         // **学习进度**（2026-10-20，pro 任务卡 F）：同一个出口，进度落在本地状态里
         "progress" => cmd_learn::cmd_progress(&root, &rest, json),
+        // **一屏"现在该做什么"**（2026-10-21）：把学/收/编/挂四处状态汇总成入口（纯读，不改任何状态）
+        "next" => cmd_next::cmd_next(&root, json),
         // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
         "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
         // **采集半边**（2026-10-20，pro 任务卡 D）：从散文里抽逐字候选 → _inbox 待确认
@@ -608,6 +611,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "progress",
         &[],
         "**学到哪了**：已学 N/总 M、逐条 ○/●（进度存本地，不进仓库、不进任何门禁）",
+    ),
+    (
+        "next",
+        &[],
+        "**一屏「现在该做什么」**：学（第一步没学的）/ 收（待重编）/ 编（待确认候选）/ 挂（文本态）",
     ),
     (
         "symbol",

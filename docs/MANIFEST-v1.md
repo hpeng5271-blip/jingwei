@@ -45,10 +45,13 @@ jingwei explain <名字>  # 这个符号是什么、在哪、谁在调
 ## 5. 下一步（每件 ≤1 小时）
 
 1. 本页写进 MANIFEST（已做）——验收：每条带一句判据。
-2. 门禁收口到 4 道——验收：4 道全绿、交付门禁过。
-3. `使用说明.md` 重写成"3 步上手"——验收：照文档跑 3 条命令能到 handover 页。
+2. 门禁收口到 4 道（**2026-10-20 已做**）——验收：4 道全绿（55s）、交付门禁过（`JINGWEI_DELIVER=1`）。
+3. `使用说明.md` 重写成"3 步上手"（**2026-10-20 已做**）——验收：在 flask 上照抄 3 条命令到 handover 页。
 
 ## 6. 版本与产物
 
-- 版本 `0.3.0`（三处一致）；产物 `dist/jingwei-0.3.0-win-x64.zip`。
-- 打包冒烟：`node tools/smoke-pack.mjs --gui`（v1 挂起 UI 后可去掉 `--gui`）。
+- 版本 `0.3.0`（`Cargo.toml` / `package.json` / `src-tauri/tauri.conf.json` 三处一致）。
+- 产物（2026-10-20 用户改的口径）：`dist\<yyyy-MM-dd>\`，里面**只有** `jingwei-gui.exe` + `使用说明.md`；
+  **产物名不带版本号**，日期就是标记（`jingwei --version` 仍如实打印 0.3.0）。
+- 打包：`powershell -File pack.ps1`；交付门禁 `node tools/check-pack.mjs`（认目录形态）。
+- 冒烟：包里的 `jingwei-gui.exe` 起 4 秒仍在（2026-10-20 实测）。`smoke-pack.mjs` 是给"包里有 CLI 版"的旧形态用的，包里没有 CLI 版时它不适用。

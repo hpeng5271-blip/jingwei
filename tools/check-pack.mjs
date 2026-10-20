@@ -48,24 +48,11 @@ const FORBIDDEN = [
 
 /** 顶层必须有这些（名字里带中文，所以按"以什么结尾"匹配）。 */
 const REQUIRED = [
-  { test: (n) => /^[^/]+\.exe$/.test(n) && n.includes('jingwei-gui'), why: '桌面外壳' },
-  { test: (n) => n === 'jingwei.exe', why: '命令行版' },
-  { test: (n) => n === 'run.cmd', why: '双击入口' },
+  { test: (n) => /^[^/]+\.exe$/.test(n) && n.includes('jingwei-gui'), why: '桌面程序' },
   { test: (n) => n.endsWith('.md') && n.includes('使用说明'), why: '说明书' },
-  { test: (n) => n.endsWith('.md') && n.includes('演示脚本'), why: '演示走法' },
-  { test: (n) => n.endsWith('.txt') && n.includes('先看这个'), why: '第一次打开看什么' },
-  // `演示项目` 在包里**没有独立条目**——`Compress-Archive` 只写文件条目，
-  // 不写目录条目（实测：48 个条目里没有 `演示项目` 或 `演示项目/`）。
-  // 所以判据是"**有它下面的文件**"，而不是"有这么个目录条目"。
-  //
-  // 这一条原来写的是 `/^[^/]+\/$/.test(n) && n.includes('演示项目')`，靠调用处的
-  // `want.test(r.name + '/')` 兜底才对**不含斜杠**的名字恒真——也就是说它检查的
-  // 其实不是"演示项目目录在不在"，而是"有名字里带『演示项目』的条目"。
-  // 规范化分隔符之后这个假过法自己露了馅，改成如实的那条。2026-10-16。
-  {
-    test: (n) => n.startsWith('演示项目/') && n.length > '演示项目/'.length,
-    why: '演示项目（要能看到它下面的文件）',
-  },
+  // **2026-10-20 用户改的交付口径**：包只装「GUI 程序 + 说明书」两样，
+  // 命令行版、run.cmd、演示走法、演示项目都不再进包（省体积、少一处会过期的副本）。
+  // 这条口径变了就要改这里——门禁守的是"现在说好的那件事"，不是历史。
 ];
 
 /** 源码里最新的 .rs 的修改时间——用来判断"包是不是落后于代码"。 */
@@ -84,19 +71,55 @@ function newestSourceMtime() {
   return newest;
 }
 
-function newestZip() {
+/**
+ * 最新的"包"：优先看 `dist/*.zip`，没有就看 `dist/<YYYY-MM-DD>/` 目录。
+ *
+ * 2026-10-20 用户改的口径：产物**不带版本号**，只按日期放一个文件夹
+ * （`dist/2026-10-20/` 里只有 GUI 程序 + 说明书）。门禁跟着这个形状走：
+ * 目录也是包，判据一模一样（该有的在、不该有的没有、exe 不比源码旧）。
+ */
+function newestPack() {
   const dir = join(ROOT, 'dist');
   if (!existsSync(dir)) return null;
-  const zips = readdirSync(dir).filter((n) => n.endsWith('.zip')).map((n) => join(dir, n));
-  if (!zips.length) return null;
-  return zips.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  const zips = readdirSync(dir)
+    .filter((n) => n.endsWith('.zip') && !n.startsWith('_'))
+    .map((n) => join(dir, n));
+  const dated = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(e.name))
+    .map((e) => join(dir, e.name));
+  const all = [...zips, ...dated];
+  if (!all.length) return null;
+  return all.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 }
 
-export function checkPack(zipPath) {
+/** 目录形态的包：把文件列成"相对路径 → {len, mtimeMs}"，与 zip 那套同一个形状。 */
+function walkPack(root) {
+  const out = [];
+  const walk = (dir, prefix) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full, rel);
+      else {
+        const st = statSync(full);
+        out.push({ name: rel, len: st.size, mtimeMs: st.mtimeMs });
+      }
+    }
+  };
+  walk(root, '');
+  return out;
+}
+
+export function checkPack(packPath) {
   const problems = [];
-  const zip = zipPath || newestZip();
+  const zip = packPath || newestPack();
   if (!zip) {
-    return { problems: ['dist/ 下没有任何 .zip——还没打过包（powershell -File pack.ps1）'], entries: 0, zip: null };
+    return { problems: ['dist/ 下没有任何包——还没打过包'], entries: 0, zip: null };
+  }
+  const isDir = statSync(zip).isDirectory();
+  if (isDir) {
+    const rows = walkPack(zip);
+    return checkRows(rows, zip, problems);
   }
 
   // 用 PowerShell 列条目：**不引任何依赖**（这个仓库连打包器都没有）。
@@ -134,7 +157,12 @@ export function checkPack(zipPath) {
     const norm = name.replace(/\\/g, '/');
     return { name: norm, len: Number(len), mtimeMs: Date.parse(iso) || 0 };
   });
-  if (!rows.length) return { problems: ['压缩包里一个条目都没有——包坏了'], entries: 0, zip };
+  return checkRows(rows, zip, problems);
+}
+
+/** 判据本体：①该有的 ②不该有的 ③包是不是落后于代码。zip 与目录两种形态共用。 */
+function checkRows(rows, pack, problems) {
+  if (!rows.length) return { problems: ['包里一个条目都没有——包坏了'], entries: 0, zip: pack };
 
   // ① 该有的
   for (const want of REQUIRED) {
@@ -194,13 +222,13 @@ export function checkPack(zipPath) {
       }
   }
 
-  return { problems, entries: rows.length, zip };
+  return { problems, entries: rows.length, zip: pack };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('check-pack.mjs')) {
   const ifPresent = process.argv.includes('--if-present');
   const explicit = process.argv.slice(2).find((a) => !a.startsWith('--'));
-  const target = explicit || newestZip();
+  const target = explicit || newestPack();
 
   // `--if-present`：没打过包就**如实跳过**，不当失败。
   // 为什么：干净克隆不该因为"还没打包"而红——那不是缺陷，是没做那件事。

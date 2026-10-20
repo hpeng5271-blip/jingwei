@@ -367,3 +367,30 @@ pub fn site_counts(store: &Store) -> Result<std::collections::BTreeMap<String, i
     let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
     Ok(rows.flatten().collect())
 }
+
+
+/// **交接待办**要的几个总数（都只读图谱）。
+pub fn basic_counts(store: &Store) -> Result<(i64, i64, i64, i64)> {
+    let one = |sql: &str| -> Result<i64> {
+        Ok(store.conn.query_row(sql, [], |r| r.get(0))?)
+    };
+    Ok((
+        one("SELECT count(*) FROM nodes WHERE kind='file'")?,
+        one("SELECT count(*) FROM nodes WHERE kind='symbol'")?,
+        one("SELECT count(*) FROM edges WHERE kind='calls' AND expires_at IS NULL")?,
+        one("SELECT count(*) FROM edges WHERE kind='references' AND expires_at IS NULL")?,
+    ))
+}
+
+/// **被调用最多的文件**（入口候选）：按 calls 边指向的符号所在文件聚合。
+pub fn top_incoming_files(store: &Store, limit: usize) -> Result<Vec<(String, i64)>> {
+    let mut st = store.conn.prepare(
+        "SELECT n.file_path, count(*) c FROM edges e JOIN nodes n ON n.id=e.dst
+         WHERE e.kind='calls' AND e.expires_at IS NULL AND n.file_path IS NOT NULL
+         GROUP BY n.file_path ORDER BY c DESC, n.file_path LIMIT ?1",
+    )?;
+    let rows = st.query_map(rusqlite::params![limit as i64], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    Ok(rows.flatten().collect())
+}

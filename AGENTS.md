@@ -45,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->473<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
-集成 <!-- fact:integration -->75<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->474<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
+集成 <!-- fact:integration -->76<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
@@ -141,6 +141,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 界面      node tools\uitest-window.mjs
 扫盘      jingwei discover --depth 3 D:\projects D:\research   （或界面「全盘扫描」）
 索引      jingwei index
+交接      jingwei handover   （接手人一页纸：能不能跑/规模/热点/下一步）
 解释      jingwei explain <名字|symbol:id>   （定义在哪、被调/被引用几处）
 真源      node tools/collect_facts.mjs --check
 打包      powershell -File pack.ps1   → dist\jingwei-<版本>-win-x64.zip

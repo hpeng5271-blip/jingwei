@@ -14,6 +14,7 @@ mod cmd_doctor;
 mod cmd_deps;
 mod cmd_discover;
 mod cmd_explain;
+mod cmd_handover;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -384,6 +385,7 @@ fn run() -> i32 {
         let journal = journal_arg.clone();
         cmd_watch::cmd_watch(&root, &roots, journal.as_deref())
     }
+    "handover" => cmd_handover::cmd_handover(&root, json),
     "explain" | "why" => {
         let Some(who) = rest.first() else {
             eprintln!("用法：jingwei explain <名字|symbol:id>");

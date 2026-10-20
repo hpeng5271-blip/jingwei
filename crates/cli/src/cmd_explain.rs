@@ -78,6 +78,11 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
         println!("  {f}:{l}");
     }
     println!("被引用：{} 处", ex.refs);
+    if ex.calls == 0 && ex.refs == 0 {
+        println!("判定依据：查不了（这个符号在库里没有任何边；可能没解析到，也可能真没人用）");
+    } else {
+        println!("判定依据：图谱的 calls {} / references {} 条边（可用 jingwei graph stats 复核）", ex.calls, ex.refs);
+    }
     for (f, l) in ex.references.iter().take(5) {
         println!("  {f}:{l}");
     }

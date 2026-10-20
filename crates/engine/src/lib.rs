@@ -68,6 +68,7 @@ pub mod detect {
 /// L3 · 项目理解：从事实里得出结论。（同样是层名避让模块名）
 pub mod understand {
     pub mod container;
+    pub mod decisions;
     pub mod contract;
     pub mod diag;
     /// **目录级索引**：把"采集"与"判定"拆开（见 `框架.md` §4.9）。

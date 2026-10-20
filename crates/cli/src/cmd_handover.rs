@@ -18,6 +18,7 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
 
     let store = query::open_for_query(root).ok();
     let counts = store.as_ref().and_then(|s| query::basic_counts(s).ok());
+    let decs = jingwei_engine::understand::decisions::recent(root, 3);
     let tops = store
         .as_ref()
         .and_then(|s| query::top_incoming_files(s, 5).ok())
@@ -31,6 +32,7 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
                 "blockers": gj["blockers"], "nextStep": gj["nextStep"],
                 "counts": counts.map(|(f, s, c, r)| serde_json::json!({"files": f, "symbols": s, "calls": c, "references": r})),
                 "entrances": tops.iter().map(|(f, n)| serde_json::json!({"file": f, "incomingCalls": n})).collect::<Vec<_>>(),
+                "decisions": decs.iter().map(|d| serde_json::json!({"id": d.id, "title": d.title, "why": d.why})).collect::<Vec<_>>(),
             }))
             .unwrap_or_default()
         );
@@ -64,6 +66,17 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
     }
     println!("  ⑤ 下一步：{}", gj["nextStep"].as_str().unwrap_or("查不了"));
     println!("  ⑥ 欠什么：查不了（这个项目里没有欠账记录；欠账表只在经纬自己的仓库里）");
+    if decs.is_empty() {
+        println!("  ⑦ 关键决策与理由：查不了（docs/decisions/ 里没有记录）");
+    } else {
+        println!("  ⑦ 关键决策与理由（know-why）：");
+        for d in &decs {
+            match &d.why {
+                Some(w) => println!("      {} {} —— {}", d.id, d.title, w),
+                None => println!("      {} {} —— 查不了（记录里没写理由）", d.id, d.title),
+            }
+        }
+    }
     println!();
     0
 }

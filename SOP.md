@@ -895,7 +895,7 @@ Select-String -Path ui\events.js  -Pattern "btnScanDrives|btnFindSimilar" | Meas
 | 学习 | pro | 无（外部检索） | `docs/reference/借鉴-设计细节.md` 一条 | 必须带出处 + "我们怎么落" |
 | 监督 | pro | 信封 ≤1K | 抽查结论（有/无证据） | 每 5 轮一次；无证据声称 = 违规 |
 | 失败熔断 | flash→pro | 连续 2 次失败 | 停 / 升级 | 第 2 次即停，写"卡在哪"进债表 |
-| 收尾入库 | flash | 一句引用 | 债表 / 进展报告 | 会话不复制正文 |
+| 收尾入库 | flash | 一句引用 | 债表 / 进展报告 / 决策记录 | 会话不复制正文；**know-why 必须进决策记录**；改码同步改文档（知识库贴着代码放） |
 | 交付自检 | flash | 出包后 | `node tools/smoke-pack.mjs` 输出 | **解压真跑**：index 出规模行、positions 对不上 = 0 |
 | **提交入库** | flash | 每块完成 | `commit` + 单行 msg | `git status` 干净；**红过的输出随 commit 一起进**（工作不留在会话里） |
 | 收口自核 | flash | 自己仓库 | `node tools/selfcheck-positions.mjs` 输出 | **checked > 0 且 bad = 0**（核到了东西、没有真错） |

@@ -297,3 +297,62 @@ pub fn diagnostics_count(store: &Store, run_id: &str) -> Result<usize> {
 pub fn open_for_query(root: &Path) -> Result<Store> {
     Store::open_readonly(&crate::graph_db_path(root))
 }
+
+
+/// **一个符号到底是什么**（2026-10-20）：定义在哪、被谁调用、被谁引用。
+///
+/// 为什么放引擎侧：CLI 拿不到 `Store.conn`（故意的），而这条查询只读图谱，
+/// 属于"理解层"的读路径。
+pub struct Explain {
+    pub id: String,
+    pub name: String,
+    pub file: Option<String>,
+    pub line: Option<i64>,
+    pub callers: Vec<(String, i64)>,   // (文件, 行)
+    pub references: Vec<(String, i64)>,
+    pub calls: i64,
+    pub refs: i64,
+}
+
+pub fn explain_symbol(store: &Store, id: &str) -> Result<Option<Explain>> {
+    let row = store
+        .conn
+        .query_row(
+            "SELECT name, file_path, line FROM nodes WHERE id=?1 AND kind='symbol'",
+            rusqlite::params![id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        )
+        .ok();
+    let Some((name, file, line)) = row else {
+        return Ok(None);
+    };
+    let callers = sites_for(store, id, "calls")?;
+    let references = sites_for(store, id, "references")?;
+    let calls = count_edges(store, id, "calls")?;
+    let refs = count_edges(store, id, "references")?;
+    Ok(Some(Explain { id: id.to_string(), name, file, line, callers, references, calls, refs }))
+}
+
+fn sites_for(store: &Store, id: &str, kind: &str) -> Result<Vec<(String, i64)>> {
+    let mut st = store.conn.prepare(
+        "SELECT s.file, s.line FROM edge_sites s                          JOIN edges e ON e.src=s.src AND e.dst=s.dst AND e.kind=s.kind                          WHERE s.dst=?1 AND s.kind=?2 AND e.expires_at IS NULL                          ORDER BY s.file, s.line LIMIT 50",
+    )?;
+    let rows = st.query_map(rusqlite::params![id, kind], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    Ok(rows.flatten().collect())
+}
+
+fn count_edges(store: &Store, id: &str, kind: &str) -> Result<i64> {
+    Ok(store.conn.query_row(
+        "SELECT count(*) FROM edges WHERE dst=?1 AND kind=?2 AND expires_at IS NULL",
+        rusqlite::params![id, kind],
+        |r| r.get(0),
+    )?)
+}

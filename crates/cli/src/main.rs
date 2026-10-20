@@ -13,6 +13,7 @@ mod cmd_clean;
 mod cmd_doctor;
 mod cmd_deps;
 mod cmd_discover;
+mod cmd_explain;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -382,6 +383,13 @@ fn run() -> i32 {
             .collect();
         let journal = journal_arg.clone();
         cmd_watch::cmd_watch(&root, &roots, journal.as_deref())
+    }
+    "explain" | "why" => {
+        let Some(who) = rest.first() else {
+            eprintln!("用法：jingwei explain <名字|symbol:id>");
+            return 2;
+        };
+        cmd_explain::cmd_explain(&root, who, json)
     }
     "rename" => {
         let name = rest.first().map(|s| s.as_str()).unwrap_or("");

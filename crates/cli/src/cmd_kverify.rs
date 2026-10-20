@@ -270,9 +270,10 @@ fn write_snapshot(root: &Path, r: &Report, dirty: bool) {
     });
     let p = snapshot_path();
     if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        // 写不进去也不影响判定：这只是一份"最近一次跑过"的证据，不是结论本身。
+        _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&p, serde_json::to_string_pretty(&v).unwrap_or_default());
+    _ = std::fs::write(&p, serde_json::to_string_pretty(&v).unwrap_or_default());
 }
 
 pub fn cmd_knowledge_verify(root: &Path, json: bool, allow_dirty: bool) -> i32 {

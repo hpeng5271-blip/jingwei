@@ -394,3 +394,14 @@ pub fn top_incoming_files(store: &Store, limit: usize) -> Result<Vec<(String, i6
     })?;
     Ok(rows.flatten().collect())
 }
+
+
+/// **文件生命周期分布**（2026-10-20）：handover 的"现在什么状态"要多这一行。
+/// 读的是 `files.file_life`（墓碑也算：删掉的文件不该从视野里消失）。
+pub fn file_life_counts(store: &Store) -> Result<std::collections::BTreeMap<String, i64>> {
+    let mut st = store
+        .conn
+        .prepare("SELECT file_life, count(*) FROM files GROUP BY file_life")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    Ok(rows.flatten().collect())
+}

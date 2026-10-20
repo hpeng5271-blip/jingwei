@@ -18,6 +18,7 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
 
     let store = query::open_for_query(root).ok();
     let counts = store.as_ref().and_then(|s| query::basic_counts(s).ok());
+    let lives = store.as_ref().and_then(|s| query::file_life_counts(s).ok()).unwrap_or_default();
     let decs = jingwei_engine::understand::decisions::recent(root, 3);
     let tops = store
         .as_ref()
@@ -32,6 +33,7 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
                 "blockers": gj["blockers"], "nextStep": gj["nextStep"],
                 "counts": counts.map(|(f, s, c, r)| serde_json::json!({"files": f, "symbols": s, "calls": c, "references": r})),
                 "entrances": tops.iter().map(|(f, n)| serde_json::json!({"file": f, "incomingCalls": n})).collect::<Vec<_>>(),
+                "fileLife": lives,
                 "decisions": decs.iter().map(|d| serde_json::json!({"id": d.id, "title": d.title, "why": d.why})).collect::<Vec<_>>(),
             }))
             .unwrap_or_default()
@@ -51,6 +53,13 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
                 b["why"].as_str().unwrap_or("")
             );
         }
+    }
+    if !lives.is_empty() {
+        let get = |k: &str| lives.get(k).copied().unwrap_or(0);
+        println!(
+            "      文件状态：改 {} / 未变 {} / 删 {} / 未见 {}",
+            get("modified"), get("unchanged"), get("deleted"), get("unseen")
+        );
     }
     match counts {
         Some((f, s, c, r)) => println!("  ③ 规模：{f} 文件 / {s} 符号 / {c} 调用边 / {r} 引用边"),

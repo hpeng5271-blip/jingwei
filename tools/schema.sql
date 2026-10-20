@@ -103,7 +103,11 @@ CREATE TABLE IF NOT EXISTS files (
   -- 重算一遍，内容哈希对得上、节点数也对得上，才叫"图谱没坏"。
   -- 只比文件、不比图谱的话，检查器会漏掉"文件没变但图谱错了"这一类。
   -- NULL = 还没解析过（不是 0——"不知道"和"零个节点"是两回事）。
-  nodes_count INTEGER
+  nodes_count INTEGER,
+    -- 文件生命周期（2026-10-20）：unseen/unchanged/modified/deleted。
+    -- 转移只能走 Rust 的 graph::file_life::transition（单点）；这里 CHECK 是兜底。
+    file_life  TEXT NOT NULL DEFAULT 'unseen'
+               CHECK (file_life IN ('unseen','unchanged','modified','deleted'))
 );
 
 -- index_runs：索引证据。扫了什么、跳过什么、为什么——"这个结论哪来的"要能回答
@@ -168,4 +172,4 @@ CREATE VIEW IF NOT EXISTS live_edges AS
 
 -- ── 版本戳 ─────────────────────────────────────────────────────────
 -- schema_version 是唯一的版本真相源（《数据层设计》§9）。迁移脚本读它决定跑哪几步。
-INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '3');
+INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '4');

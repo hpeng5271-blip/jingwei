@@ -431,7 +431,11 @@ pub fn index_source(
     for p in prepared {
         if let Some(s) = p.skip {
             match s {
-                crate::graph::parse_pool::Skip::Unchanged => rep.skipped_unchanged += 1,
+                crate::graph::parse_pool::Skip::Unchanged => {
+                rep.skipped_unchanged += 1;
+                // 生命周期要从 modified 落回 unchanged（2026-10-20）
+                store.note_scanned_same(&p.rel)?;
+            }
                 crate::graph::parse_pool::Skip::Big => rep.skipped_big += 1,
                 crate::graph::parse_pool::Skip::SameContent => rep.skipped_same_content += 1,
                 crate::graph::parse_pool::Skip::Unreadable => rep.unreadable += 1,

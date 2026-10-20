@@ -12,11 +12,11 @@
 pub const SCHEMA_SQL: &str = include_str!("../../../../tools/schema.sql");
 
 /// 当前 schema 版本。与 `schema.sql` 末尾写进 `meta` 的那个值必须一致，有测试守着。
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 use anyhow::{Context, Result};
 use jingwei_model::{Edge, EdgeKind, Node, NodeKind, Source};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 /// 一次写入的结果。**数字是给界面看的**，不是给自己看的：
@@ -84,13 +84,6 @@ impl Store {
         Ok(Store { conn })
     }
 
-    pub fn schema_version(&self) -> Result<i64> {
-        let v: String = self
-            .conn
-            .query_row("SELECT v FROM meta WHERE k='schema_version'", [], |r| r.get(0))
-            .context("读 schema_version 失败")?;
-        v.parse().context("schema_version 不是整数")
-    }
 
     /// 一个事务里写一批节点与边。**幂等**：同一批写两遍，库里还是那一份。
     ///
@@ -401,24 +394,7 @@ impl Store {
         Ok(out)
     }
 
-    /// 丢掉一个已经不存在的文件：**它的节点连同边一起删**。
-    ///
-    /// 与"关系失效只标记不删"不矛盾——那条说的是**关系**（曾经存在过是信息），
-    /// 而这里删的是**节点**：一个磁盘上已经没有的符号，留在图谱里就是假的。
-    pub fn drop_file(&mut self, rel: &str) -> Result<usize> {
-        let tx = self.conn.transaction().context("开事务失败")?;
-        // 先删节点（边由外键级联），再删状态行。
-        let n = tx
-            .execute(
-                "DELETE FROM nodes WHERE file_path=?1 OR id=?2",
-                params![rel, format!("file:{rel}")],
-            )
-            .context("删文件节点失败")?;
-        tx.execute("DELETE FROM files WHERE path=?1", params![rel])
-            .context("删文件状态失败")?;
-        tx.commit().context("提交失败")?;
-        Ok(n)
-    }
+
 
     /// 读一个文件上次被索引时的状态。`None` = 从来没索引过。
     pub fn file_state(&self, rel: &str) -> Result<Option<FileState>> {
@@ -565,13 +541,37 @@ impl Store {
         }
 
         // 4. 记状态
+        // **先算生命周期**（2026-10-20）：所有状态写入只走 file_life::transition 这一处。
+        // 非法转移（例如"删掉之后内容没变"）在这里就报错，不许兜底。
+        let prev: Option<(Option<String>, String)> = tx
+            .query_row("SELECT content_sha, file_life FROM files WHERE path=?1", params![rel], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()
+            .context("读旧文件状态失败")?;
+        let life_now = {
+            use crate::graph::file_life::{transition, FileEvent, FileLife};
+            let (from, ev) = match &prev {
+                None => (FileLife::Unseen, FileEvent::ScanChanged),
+                Some((sha, s)) => {
+                    let from = FileLife::parse(s).unwrap_or(FileLife::Modified);
+                    let ev = if sha.as_deref() == state.content_sha.as_deref() {
+                        FileEvent::ScanSame
+                    } else {
+                        FileEvent::ScanChanged
+                    };
+                    (from, ev)
+                }
+            };
+            transition(from, ev).map_err(|e| anyhow::anyhow!("{e}（文件 {rel}）"))?
+        };
         tx.execute(
-            "INSERT INTO files(path,size,mtime_ns,content_sha,parsed_at,incomplete,nodes_count)
-             VALUES(?1,?2,?3,?4,?5,?6,?7)
+            "INSERT INTO files(path,size,mtime_ns,content_sha,parsed_at,incomplete,nodes_count,file_life)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
              ON CONFLICT(path) DO UPDATE SET
                size=excluded.size, mtime_ns=excluded.mtime_ns, content_sha=excluded.content_sha,
                parsed_at=excluded.parsed_at, incomplete=excluded.incomplete,
-               nodes_count=excluded.nodes_count",
+               nodes_count=excluded.nodes_count, file_life=excluded.file_life",
             params![
                 rel,
                 state.size,
@@ -579,7 +579,8 @@ impl Store {
                 state.content_sha,
                 now,
                 i64::from(incomplete),
-                state.nodes_count
+                state.nodes_count,
+                life_now.as_str()
             ],
         )
         .context("记文件状态失败")?;

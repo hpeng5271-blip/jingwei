@@ -580,8 +580,15 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         };
     }
     if rest.first().map(|s| s.as_str()) != Some("check") {
-        eprintln!("用法：jingwei knowledge check                    （严筛 + 核对候选，输出漏斗表）");
-        eprintln!("      jingwei knowledge add <_inbox 里的文件名>   （人确认后把候选移进条目）");
+        // **子命令要能自己被发现**（pro 卡：入口可见）：以前这里只列 check/add，
+        // sync / stale / fix / verify 只能靠读源码或说明书才知道。
+        eprintln!("用法：jingwei knowledge <子命令>");
+        eprintln!("  check                     严筛条目 + 核对候选，输出漏斗表（含待重编提示）");
+        eprintln!("  add <_inbox 里的文件名>    人确认：补好 check 后把候选移进条目");
+        eprintln!("  sync                      把条目投影进图谱（claims + claim_edges）");
+        eprintln!("  stale                     列出「引用的符号图谱里查不到」的条目，N>0 时 exit=1");
+        eprintln!("  fix <条目> --symbol <新符号|symbol:id>  精确改挂过期条目");
+        eprintln!("  verify [--allow-dirty]     让 check-run 真的跑（P/F/U；只手动，不进任何门禁）");
         return 2;
     }
     // 读路径一律**只读**开图（`open_graph` 不建库）：没索引过就说查不了，不制造副作用。

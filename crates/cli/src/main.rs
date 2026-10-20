@@ -595,7 +595,7 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     (
         "knowledge",
         &[],
-        "**知识条目严筛**（docs/knowledge/*.md）：缺来源 / 等级就红，符号查不到算「查不了」",
+        "**知识层**：check 严筛 / add 人确认 / sync 进图 / stale+fix 回收 / verify 跑判据",
     ),
     (
         "learn",

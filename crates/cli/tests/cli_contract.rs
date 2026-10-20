@@ -475,3 +475,44 @@ fn 没索引时_positions_说查不了而不是零错() {
 
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **没索引的项目里，所有读命令都不许建库**（2026-10-21）。
+///
+/// 这一条是"读路径建库"那类 bug 的批量守卫：`Store::open` 会建库，一旦哪条读命令
+/// 又用回去，就会在用户目录里留 `.jingwei/`，并把"查不了"压成"错了/全绿"。
+/// 逐个命令跑一遍，只断言两件事：**跑得完**、**目录里没有 `.jingwei`**。
+#[test]
+fn 没索引时所有读命令都不建库() {
+    let Some(_) = bin() else { return };
+    let cmds: Vec<Vec<&str>> = vec![
+        vec!["positions"],
+        vec!["symbol", "nope"],
+        vec!["explain", "nope"],
+        vec!["learn", "--symbol", "nope"],
+        vec!["knowledge", "check"],
+        vec!["knowledge", "stale"],
+        vec!["knowledge", "verify"],
+        vec!["handover"],
+    ];
+    for c in cmds {
+        let d = empty_dir("no-db");
+        let p = d.to_str().unwrap().to_string();
+        let mut args: Vec<&str> = c.clone();
+        args.push("--root");
+        args.push(&p);
+        let o = run(&args);
+        assert!(
+            !d.join(".jingwei").exists(),
+            "`jingwei {}` 在没索引的项目里建了库（读命令不许有副作用）",
+            c.join(" ")
+        );
+        // 退出码只要求"能跑完"（不是被 panic/未捕获错误打断）
+        assert!(
+            code(&o) >= 0,
+            "`jingwei {}` 异常退出：{}",
+            c.join(" "),
+            stdout(&o)
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

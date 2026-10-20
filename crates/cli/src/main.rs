@@ -19,6 +19,7 @@ mod cmd_knowledge;
 mod cmd_learn;
 mod cmd_symbol;
 mod cmd_harvest;
+mod cmd_kverify;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -148,6 +149,8 @@ fn run() -> i32 {
             "--permanent" => permanent = true,
             "--diff" => diff_only = true,
             "--deep" => deep = true,
+            // **knowledge verify 用**：允许在脏工作区跑（会检测命令有没有动工作区）
+            "--allow-dirty" => rest.push("--allow-dirty".to_string()),
             "--all" => show_all = true,
             "--depth" => {
                 i += 1;

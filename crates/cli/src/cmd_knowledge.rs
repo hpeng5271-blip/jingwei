@@ -490,6 +490,11 @@ pub fn open_graph(root: &Path) -> Option<Store> {
 }
 
 pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
+    if rest.first().map(|s| s.as_str()) == Some("verify") {
+        // **让判据真的跑起来**（pro 任务卡 I）：只手动跑，不进任何门禁。
+        let allow_dirty = rest.iter().any(|a| a == "--allow-dirty");
+        return crate::cmd_kverify::cmd_knowledge_verify(root, json, allow_dirty);
+    }
     if rest.first().map(|s| s.as_str()) == Some("sync") {
         return match sync_claims(root) {
             Some((n, linked)) => {

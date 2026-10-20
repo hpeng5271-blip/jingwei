@@ -21,6 +21,24 @@ symbol: symbol:crates/engine/src/graph/store.rs#Store::apply_file_update
   **二手** = 只有标题/分章/摘录；**查不了** = 拿不到，或拿不到就不当判据。
 - `symbol` 可写多行，也可写 `symbols: a, b`；**不带 `symbol:` 前缀的按名字查**（同名多义也算查到）。
   路径要从**仓库根**算。
+- `check-run: <命令>`（可选）让判据**真的跑**：`jingwei knowledge verify` 逐条执行，期望 exit 0；
+  要期望非 0 就加 `check-exit: N`。命令只许是**构建/测试类**（`cargo ` / `node ` / `python ` /
+  `powershell -File tools\…` 白名单），带时中文参数也行（直接 spawn，不经 shell）。
+  **没写 `check-run` 的条目算「不可执行」，不算错**——可执行判据是增量，不是强制。
+
+## 让判据真的跑：`jingwei knowledge verify`
+
+```powershell
+jingwei knowledge verify              # 工作区必须干净；脏了就拒绝跑
+jingwei knowledge verify --allow-dirty  # 开发时用；跑完会检查命令有没有改动工作区
+```
+
+- 输出三档：**通过 P / 没过 F / 不可执行 U**；F>0 → exit=1，U 不红。
+- 两类判据：①`check-run` 的退出码 ②`check` 里**按约定形式**引用的测试名（反引号里的下划线标识符、
+  `--test <名>`）必须真的存在——后者是存在性判定，拿不到测试名单时算 U，不冤枉条目。
+- **别用 `target\debug\jingwei.exe` 跑**：cargo 要重编并替换这个 exe，Windows 拒绝删正在运行的文件
+  （exit 101，看起来像判据没过）。用装好的 `jingwei`。
+- 它**不进任何门禁**：自动跑命令会 flaky、会慢，verify 只手动跑。
 
 ## 回收半边：待重编清单 + 一键改挂
 

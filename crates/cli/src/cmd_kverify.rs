@@ -235,12 +235,54 @@ pub fn run(root: &Path, allow_dirty: bool) -> (Report, bool) {
     (r, true)
 }
 
+/// 快照路径：`%LOCALAPPDATA%\jingwei\verify-last.json`。
+///
+/// 为什么落本地而不是仓库：这是**机器状态**（跑没跑、跑出什么），不是项目事实；
+/// 进 git 会让每次手动跑都产生脏提交。但报告要引用**可复现的数字**，所以必须留一份快照。
+pub fn snapshot_path() -> std::path::PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    base.join("jingwei").join("verify-last.json")
+}
+
+fn git_head(root: &Path) -> String {
+    Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// 写快照：`{ts, head, dirty, pass, fail, unrun}`。写不了也不影响判定（只是少一份证据）。
+fn write_snapshot(root: &Path, r: &Report, dirty: bool) {
+    let v = serde_json::json!({
+        "ts": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64).unwrap_or(0),
+        "head": git_head(root),
+        "dirty": dirty,
+        "pass": r.pass,
+        "fail": r.fail,
+        "unrun": r.unrun,
+    });
+    let p = snapshot_path();
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&p, serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
 pub fn cmd_knowledge_verify(root: &Path, json: bool, allow_dirty: bool) -> i32 {
     let (r, ran) = run(root, allow_dirty);
     if !ran {
         println!("查不了：工作区不干净（`git status` 有改动）——先提交再跑；开发时要跑可加 --allow-dirty（会检测命令有没有动工作区）");
         return 2;
     }
+    // **落盘**（pro 收口条件）：报告里的 6/0/10 必须能被接手者核对，而不是口头值。
+    write_snapshot(root, &r, !workspace_clean(root));
     if json {
         println!(
             "{}",
@@ -266,6 +308,7 @@ pub fn cmd_knowledge_verify(root: &Path, json: bool, allow_dirty: bool) -> i32 {
         if r.pass.is_empty() && r.fail.is_empty() {
             println!("  · 还没有条目写 check-run（可执行判据是增量，不写不算错）");
         }
+        println!("  （快照已写：{}）", snapshot_path().display());
     }
     if r.fail.is_empty() {
         0

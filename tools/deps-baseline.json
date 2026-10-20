@@ -1,0 +1,9 @@
+﻿{
+  "note": "直接依赖基线（会进产物的：dependencies + target.*.dependencies）。只降不升；要升就改这里并在提交信息写理由。由 tools/check-deps.mjs 守，挂工程门禁。",
+  "crates": {
+    "crates/model/Cargo.toml": 2,
+    "crates/engine/Cargo.toml": 10,
+    "crates/cli/Cargo.toml": 3,
+    "src-tauri/Cargo.toml": 5
+  }
+}

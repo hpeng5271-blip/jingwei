@@ -14,6 +14,7 @@
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 
 export const LIMITS = {
   maxFiles: 400,
@@ -31,6 +32,31 @@ const FORBIDDEN = [
 ];
 
 const ENV_ALLOW = /^tools\/demos\//;
+
+export function checkDeps(root = '.') {
+  const basePath = path.join(root, 'tools/deps-baseline.json');
+  if (!fs.existsSync(basePath)) return { rows: [], problems: ['缺 tools/deps-baseline.json（依赖基线）'] };
+  const base = JSON.parse(fs.readFileSync(basePath, 'utf8').replace(/^\uFEFF/, ''));
+  const problems = [];
+  const rows = [];
+  for (const [rel, allowed] of Object.entries(base.crates)) {
+    const file = path.join(root, rel);
+    if (!fs.existsSync(file)) { problems.push('基线里的 crate 不见了：' + rel); continue; }
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    let inDeps = false;
+    const names = [];
+    for (const raw of lines) {
+      const s = raw.trim();
+      if (s.startsWith('[') && s.endsWith(']')) { inDeps = /\.dependencies\]$/.test(s) || s === '[dependencies]'; continue; }
+      if (!inDeps || !s || s.startsWith('#')) continue;
+      const m = s.match(/^([A-Za-z0-9_-]+)\s*=/);
+      if (m) names.push(m[1]);
+    }
+    rows.push({ rel, n: names.length, allowed });
+    if (names.length > allowed) problems.push(rel + ' 直接依赖 ' + names.length + ' 个 > 基线 ' + allowed + '（当前依赖：' + names.join(', ') + '）——要加就改 tools/deps-baseline.json 并写理由');
+  }
+  return { rows, problems };
+}
 
 export function checkRepo(root = '.') {
   const problems = [];
@@ -69,6 +95,12 @@ export function checkRepo(root = '.') {
   }
   if (totalMB > LIMITS.maxTotalMB) {
     problems.push(`跟踪内容 ${totalMB.toFixed(1)} MB 超过上限 ${LIMITS.maxTotalMB} MB`);
+  }
+
+  const deps = checkDeps(root);
+  for (const p of deps.problems) problems.push(p);
+  if (deps.rows.length && !deps.problems.length) {
+    console.log('  · 依赖：' + deps.rows.length + ' 个 crate 的直接依赖都没涨过基线');
   }
 
   return {

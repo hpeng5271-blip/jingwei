@@ -514,6 +514,7 @@ checkPageList();
 }
 { const r = checkRepo("."); for (const p of r.problems) problems.push(p); if (r.files) console.log(r.line); }
 
+
 if (problems.length) {
   console.log('门禁未通过：');
   for (const p of problems) console.log('  × ' + p);

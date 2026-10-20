@@ -51,6 +51,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
 
+**数字判据**（2026-10-20 加）：性能/规模数字必须带**复现命令**与**对照基线**（`tools/regress.mjs` / `bench/`）；跑分没有对照，不得写进结论。
+
 **验收三样**（缺一不算）：① 门禁结尾表 ② `git status` ③ **新判据在改之前确实红过的输出**。
 
 ## 2. 四条不许破的线（抓手 + 守它的测试）

@@ -1,0 +1,76 @@
+{
+  "note": "技能登记表（2026-10-20）。skills/ 是源，这里是治理信息：来源、改编点、怎么验、谁负责、何时复核、何时退役。新增/改编必须先登记再合并（tools/skills-doctor.mjs 守）。",
+  "reviewPolicy": "每 180 天复核一次；连续 2 次复核没用到 → 退役。",
+  "skills": [
+    {
+      "name": "jingwei-gate",
+      "status": "active",
+      "source": { "kind": "original", "from": "经纬事故账本（红着提交 / 手抄数字 / 改数字过门禁）" },
+      "adaptation": "把门禁表读法、红不提交、数字真源压成 40 行以内。",
+      "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/gates.ps1",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "jingwei-graph",
+      "status": "active",
+      "source": { "kind": "original", "from": "经纬 CLI（index / positions / explain / handover）" },
+      "adaptation": "固定成一条证据链，并写明 unknown 不许写成没有。",
+      "verify": "jingwei index && jingwei positions",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "jingwei-triage",
+      "status": "active",
+      "source": { "kind": "original", "from": "三态铁律 + 失败两次停下报卡点" },
+      "adaptation": "给出三态写法与卡点落盘位置。",
+      "verify": "node tools/skills-check.mjs",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "jingwei-research",
+      "status": "active",
+      "source": { "kind": "adapted", "from": "原子能《为什么说英语才是最好的计算机语言》的来源分级实践 + 本项目 ASR 流水线", "url": "https://www.bilibili.com/video/BV17N4y1p7rB" },
+      "adaptation": "把「一手来源 / 推断 / 查不了」做成引用纪律，并绑定 tools/research/asr-atomen.mjs。",
+      "verify": "node tools/research/atomen-digest.mjs",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "jingwei-docs",
+      "status": "active",
+      "source": { "kind": "original", "from": "check_facts / MANIFEST / pack.ps1 的既有规矩" },
+      "adaptation": "只留「数字真源 + 结构约束 + 交付动作」。",
+      "verify": "node tools/check_facts.mjs --check",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "review-diff",
+      "status": "active",
+      "source": { "kind": "adapted", "from": "VS Code Copilot 自定义技能 code-review 的结构", "url": "https://code.visualstudio.com/docs/copilot/customization/agent-skills" },
+      "adaptation": "改成「只报能复现的问题 + 五条必查清单」，并禁止改文件。",
+      "verify": "node tools/skills-check.mjs",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    },
+    {
+      "name": "commit-evidence",
+      "status": "active",
+      "source": { "kind": "adapted", "from": "VS Code Copilot 自定义技能 commit 的结构 + 本项目验收三样", "url": "https://code.visualstudio.com/docs/copilot/customization/agent-skills" },
+      "adaptation": "提交信息模板改成「为什么 + 证据」，并写明红着不提交。",
+      "verify": "node tools/skills-check.mjs",
+      "owner": "flash",
+      "added": "2026-10-20",
+      "reviewed": "2026-10-20"
+    }
+  ]
+}

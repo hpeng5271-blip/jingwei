@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { checkSkills } from './skills-check.mjs';
+import { checkRegistry } from './skills-doctor.mjs';
 
 export function checkToolScripts(root = '.') {
   const dir = path.join(root, 'tools');

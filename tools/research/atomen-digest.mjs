@@ -21,32 +21,18 @@ const rows = [];
 for (const f of files) {
   const raw = fs.readFileSync(path.join(DIR, f), 'utf8');
   const title = (raw.match(/^# (.+)$/m) || [, f])[1];
-  const body = raw
-    .replace(/^# .+$/m, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\s+/g, '');
-  const sentences = body.split(/(?<=[。！？!?])/).filter((s) => s.length >= 12 && s.length <= 160);
-  const picked = [];
-  for (const s of sentences) {
-    if (picked.length >= 10) break;
-    if (KEEP.some((k) => s.includes(k)) && SOURCES.some((k) => s.includes(k))) picked.push(s);
-  }
-  if (picked.length) rows.push({ f, title, bvid: f.replace('.txt', ''), picked });
+  const body = raw.replace(/^# .+$/m, '').replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, '');
+  const sentences = body.split(/(?<=[。！？!?])/).filter((s) => s.length >= 12 && s.length <= 200);
+  const sources = sentences.filter((s) => SOURCES.some((k) => s.includes(k))).slice(0, 8);
+  const methods = sentences.filter((s) => METHODS.some((k) => s.includes(k))).slice(0, 6);
+  if (sources.length || methods.length) rows.push({ f, title, bvid: f.replace('.txt', ''), sources, methods });
 }
 
-let md = `# 原子能 · 学习来源与学习方法摘录（2026-10-20）
-
-> 自动抽自 \`docs/research/transcripts/\`（本地 whisper-small 转写，**有错字**）。
-> 规则：句子里同时出现"来源类词"（国外/社区/Reddit/论文/会议/文档/源码/英语…）与"学习类词"。
-> 所以这是**索引**，不是结论；引用前要回视频核对。
-
-共 ${rows.length} 条视频有相关句子。
-
-`;
+let md = `# 原子能 · 学习来源与学习方法摘录（2026-10-20）\n\n> 自动抽自 \`docs/research/transcripts/\`（本地 whisper-small 转写，**有错字**）。\n> A 段 = 提到"来源"的句子（国外/社区/Reddit/论文/会议/文档/源码/英语/论坛/书…）；\n> B 段 = 提到"学习动作"的句子。**这是索引，不是结论**；引用前回视频核对。\n\n共 ${rows.length} 条视频有相关句子。\n\n`;
 for (const r of rows) {
   md += `## ${r.title}\n\n来源：https://www.bilibili.com/video/${r.bvid}\n\n`;
-  for (const s of r.picked) md += `- ${s}\n`;
-  md += '\n';
+  if (r.sources.length) md += `### A 来源\n` + r.sources.map((s) => `- ${s}\n`).join('') + '\n';
+  if (r.methods.length) md += `### B 方法\n` + r.methods.map((s) => `- ${s}\n`).join('') + '\n';
 }
 fs.writeFileSync(OUT, md, 'utf8');
-console.log(`  抽出 ${rows.length} 条视频、${rows.reduce((n, r) => n + r.picked.length, 0)} 句 → ${path.relative(ROOT, OUT)}`);
+console.log(`  抽出 ${rows.length} 条视频、${rows.reduce((n, r) => n + r.sources.length + r.methods.length, 0)} 句 → ${path.relative(ROOT, OUT)}`);

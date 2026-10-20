@@ -5,13 +5,13 @@
     "engine_ignored": 1,
     "integration": 81,
     "model": 11,
-    "tests_total": 506,
+    "tests_total": 508,
     "shell_tests": 79,
     "gates": 4,
     "graph_files": 151,
-    "graph_symbols": 2114,
-    "graph_nodes": 2275,
-    "graph_edges": 3796,
+    "graph_symbols": 2118,
+    "graph_nodes": 2279,
+    "graph_edges": 3802,
     "motives_landed": 19,
     "motives_pending": 6
   }

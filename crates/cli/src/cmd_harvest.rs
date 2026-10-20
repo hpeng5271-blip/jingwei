@@ -108,7 +108,7 @@ pub fn candidate_name(src: &Path, line: u32) -> String {
 ///
 /// 规矩与文档采集一致：`claim` 用**提交标题原样**（逐字，不改写）、`source: git:<短 sha>`、
 /// `check: 待验`（人补了才准 `add`）、写进 `_inbox/` **不计入采集**；同一 sha 抽过就跳过。
-fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
+fn harvest_git(root: &Path, n: usize, json: bool, rest_why: bool) -> i32 {
     // `\x1e` 分隔提交、`\x1f` 分隔字段（标题里可能有空格/中文，不能用空格分列）
     let out = std::process::Command::new("git")
         .args([
@@ -148,6 +148,7 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
     let mut written = 0;
     let mut skipped = 0;
     let mut total = 0;
+    let why_mode = rest_why;
     // 已有主张（条目 + 待确认区）：用来按**主张文本**去重
     let known_claims: Vec<String> = {
         let mut v = Vec::new();
@@ -222,6 +223,43 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
             written += 1;
             created.push(name.trim_end_matches(".md").to_string());
         }
+
+        // **`--why`：从提交正文的「## 为什么」里抽逐字候选**（2026-10-21）。
+        // 标题往往只是"做了什么"，"为什么"才是会衰减的那句话，所以它该单独成为一条主张。
+        if why_mode {
+            let why_marker = format!("git:{sha}#why");
+            if seen.contains(&why_marker) {
+                continue;
+            }
+            for line in why_bullets(body) {
+                if known_claims.iter().any(|c| c == &line) || created.iter().any(|_| false) {
+                    continue;
+                }
+                let slug: String = line
+                    .chars()
+                    .take(16)
+                    .map(|c| {
+                        if c.is_whitespace() || "\\/:*?\"<>|".contains(c) {
+                            '-'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                let slug = slug.trim_matches(|c: char| c == '-' || c == '.');
+                let name = format!("git-{sha}-why-{slug}.md");
+                if inbox.join(&name).exists() {
+                    continue;
+                }
+                let content = format!(
+                    "---\nclaim: {line}\nsource: git:{sha}#why\nlevel: 一手\ncheck: 待验\ncandidate: true\n---\n\n来自提交 `{sha}` 的「## 为什么」一节（原文逐字，未改写）。提交标题：{subject}\n"
+                );
+                if std::fs::write(inbox.join(&name), content).is_ok() {
+                    written += 1;
+                    created.push(name.trim_end_matches(".md").to_string());
+                }
+            }
+        }
     }
     if json {
         println!(
@@ -244,15 +282,62 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
     0
 }
 
+/// 从提交正文的「## 为什么」一节里取**整句**候选。
+///
+/// 为什么要按句而不是按行：提交正文是**折行**的（实测：按行抽出来半句
+/// "人还得 `ls _inbox` 才知道叫什么。"），半句不是主张。
+/// 做法：把这一节的行折成一段（换行→空格，不改字），再按 `。；！？` 断句，取 12–200 字的整句。
+/// 仍然是原文的**连续子串**（只有换行被折成空格），不总结、不改写。
+fn why_bullets(body: &str) -> Vec<String> {
+    let mut section = String::new();
+    let mut in_why = false;
+    for raw in body.lines() {
+        let line = raw.trim();
+        if let Some(h) = line.strip_prefix("##") {
+            in_why = h.trim_start_matches('#').trim().starts_with("为什么");
+            continue;
+        }
+        if !in_why || line.is_empty() {
+            continue;
+        }
+        let item = line.strip_prefix("- ").unwrap_or(line).trim();
+        if !section.is_empty() && !section.ends_with(['，', '、', '：', '；', '。', '！', '？']) {
+            // 折行处补空格；上一字是中文标点时不补（否则会出"， 人"这种双空格）
+            section.push(' ');
+        }
+        section.push_str(item);
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for ch in section.chars() {
+        cur.push(ch);
+        if matches!(ch, '。' | '；' | '！' | '？') {
+            let n = cur.trim().chars().count();
+            if (12..=200).contains(&n) {
+                out.push(cur.trim().to_string());
+            }
+            cur.clear();
+        }
+    }
+    // 末尾没有句号的残段：够长也收（不丢信息），太短就丢
+    let rest = cur.trim();
+    let n = rest.chars().count();
+    if (12..=200).contains(&n) {
+        out.push(rest.to_string());
+    }
+    out
+}
+
 pub fn cmd_harvest(root: &Path, rest: &[String], json: bool) -> i32 {
     // `--git [N]`：从提交记录里发现新知识（第 N 默认为 8）。
+    // `--why`：连正文的「## 为什么」列表项一起抽（标题常只是"做了什么"）。
     if let Some(pos) = rest.iter().position(|a| a == "--from-git") {
         let n = rest
             .get(pos + 1)
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(8)
             .clamp(1, 50);
-        return harvest_git(root, n, json);
+        return harvest_git(root, n, json, rest.iter().any(|a| a == "--why"));
     }
     let Some(arg) = rest.iter().find(|a| !a.starts_with("--")) else {
         eprintln!("用法：jingwei harvest <docs/research 下的文件>   （抽候选条目到 docs/knowledge/_inbox/）");
@@ -348,3 +433,24 @@ mod tests {
     }
 }
 
+
+
+
+#[cfg(test)]
+mod why_tests {
+    use super::why_bullets;
+
+    #[test]
+    fn 为什么一节按整句抽_不抽半句也不串到别节() {
+        let body = "## 为什么\n上一版只按 sha 去重：同一句话如果先以文档\n形式进过库，提交里再抽一次就会重复。\n\n## 做法\n- 做法这一节的内容不该被抽出来当主张\n";
+        let c = why_bullets(body);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert!(c[0].contains("同一句话如果先以文档 形式进过库"), "{}", c[0]);
+        assert!(!c.iter().any(|x| x.contains("做法这一节")), "{c:?}");
+    }
+
+    #[test]
+    fn 没有为什么一节就一条都不抽() {
+        assert!(why_bullets("## 证据\n- 随便一条够长的证据行，也不该被当成为什么\n").is_empty());
+    }
+}

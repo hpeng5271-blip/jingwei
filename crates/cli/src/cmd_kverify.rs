@@ -307,7 +307,13 @@ pub fn cmd_knowledge_verify(root: &Path, json: bool, allow_dirty: bool) -> i32 {
             println!("  · {u}");
         }
         if r.pass.is_empty() && r.fail.is_empty() {
-            println!("  · 还没有条目写 check-run（可执行判据是增量，不写不算错）");
+            // **全 U 要告警**（pro 卡）：这不是"全绿"，是"一条判据都没跑"。
+            // 安静地输出 `通过 0 / 没过 0` 最容易被当成没事——那是本项目最恨的假绿。
+            println!(
+                "  ⚠ 一条判据都没执行（{} 条全是不带 check-run 的条目）——这不等于「没问题」，是「还没验」",
+                r.unrun.len()
+            );
+            println!("  · 给条目加 `check-run: <命令>`（期望 exit 0）或 `check-exit: N`，参见 docs/knowledge/README.md");
         }
         println!("  （快照已写：{}）", snapshot_path().display());
     }

@@ -86,27 +86,45 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
     for (f, l) in ex.references.iter().take(5) {
         println!("  {f}:{l}");
     }
-    // **复用**（2026-10-20）：`explain` 是最常用的入口，知识层却要人另外想起来敲 `symbol`。
-    // 这里只报"有几条"，不重复打印内容——内容仍在 `jingwei symbol <id>`，免得两处各说一套。
-    if let Some(n) = knowledge_count(root, &ex.id) {
-        match n {
-            0 => {}
-            _ => println!("知识层：{n} 条主张解释过它 → jingwei symbol {}", ex.id),
+    // **复用**（2026-10-20；2026-10-21 改成给短名）：`explain` 是最常用的入口，知识层却要人
+    // 另外想起来敲 `symbol`。这里直接报"哪几条"——但**必须走图边**（`claims_for_symbol`），
+    // 不读 Markdown：两处各读一份迟早漂，而 verify/stale 都以库为准。
+    let names = knowledge_names(&store, &ex.id);
+    if !names.is_empty() {
+        let total = names.len();
+        let shown: Vec<&str> = names.iter().take(3).map(|s| s.as_str()).collect();
+        if total > 3 {
+            println!("知识层：{total} 条主张 —— {} 等 {total} 条", shown.join(" · "));
+        } else {
+            println!("知识层：{total} 条主张 —— {}", shown.join(" · "));
         }
     }
     0
 }
 
-/// 知识条目里挂在这个符号上的条数。`None` = 知识层不可用（不算错，只是不显示）。
-fn knowledge_count(root: &Path, symbol_id: &str) -> Option<usize> {
-    let entries = crate::cmd_knowledge::load_entries(root);
-    if entries.is_empty() {
-        return None;
+/// 短名：去 `.md`、去前导 `YYYY-MM-DD-`，剩下的就是"topic-序号-标题"那种能一眼睛看懂的形态。
+fn short_name(id: &str) -> String {
+    let s = id.strip_suffix(".md").unwrap_or(id);
+    let b = s.as_bytes();
+    let dated = s.len() > 11
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'-'
+        && s[..4].chars().all(|c| c.is_ascii_digit());
+    if dated {
+        s[11..].to_string()
+    } else {
+        s.to_string()
     }
-    Some(
-        entries
-            .iter()
-            .filter(|e| crate::cmd_symbol::refers_to(e, symbol_id))
-            .count(),
-    )
+}
+
+/// 这个符号被哪些主张解释过（**走图边**），按等级排（一手在前），返回短名。
+fn knowledge_names(store: &Store, symbol_id: &str) -> Vec<String> {
+    let mut claims = store.claims_for_symbol(symbol_id).unwrap_or_default();
+    claims.sort_by(|a, b| {
+        crate::cmd_symbol::level_rank(&a.level)
+            .cmp(&crate::cmd_symbol::level_rank(&b.level))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    claims.into_iter().map(|c| short_name(&c.id)).collect()
 }

@@ -68,13 +68,14 @@ jingwei knowledge sync     # 把 docs/knowledge/*.md 投影成图谱里的 claim
 
 ```powershell
 jingwei learn 原子能                                  # 6 步，○/● 标进度
-jingwei learn 原子能 --mark 原子能-01-先问为什么      # 打勾（只能标 learn 真输出过的步骤）
+jingwei learn 原子能 --mark 3                 # 打勾：可以给序号（第 3 步），也可以给条目名
 jingwei progress 原子能                              # 同一视图：已学 N/总 M
 ```
 
 - 进度存 `%LOCALAPPDATA%\jingwei\learn-progress.json`：它是**个人的学习状态**，不是项目事实，
   所以不进 git、不进任何门禁（否则每次学习都产生脏提交与冲突）。
-- `--mark` 的 id 必须是 learn 真输出过的步骤名，别的 id 直接拒绝（防止乱标成"伪进度"）。
+- `--mark` 接受**序号**（`--mark 3` = 列表里第 3 步）或条目名；两者都只认 learn 真输出过的步骤，
+  越界/不存在直接拒绝（防止乱标成"伪进度"）。
 
 ## 不算条目的文件
 

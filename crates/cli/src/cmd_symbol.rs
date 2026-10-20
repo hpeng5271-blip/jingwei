@@ -11,16 +11,20 @@
 
 use std::path::Path;
 
-use crate::cmd_knowledge::{Entry, LEVELS};
+use crate::cmd_knowledge::LEVELS;
 
 /// 等级排序：一手 → 转写 → 二手 → 查不了（同等级按条目名稳定排序）。
-fn level_rank(level: &str) -> usize {
+pub(crate) fn level_rank(level: &str) -> usize {
     LEVELS.iter().position(|l| *l == level).unwrap_or(LEVELS.len())
 }
 
 /// 条目是否引用这个符号。`key` 可以是 `symbol:...` 的完整 id，也可以是一个名字。
 /// **整串相等**才算，绝不做包含匹配。
-pub fn refers_to(e: &Entry, key: &str) -> bool {
+///
+/// 2026-10-21 起 `explain` 也改走图边（`claims_for_symbol`），所以这里只留**测试**用——
+/// 商业路径用它就会变成"又读一份 Markdown"，与库漂移。
+#[cfg(test)]
+pub fn refers_to(e: &crate::cmd_knowledge::Entry, key: &str) -> bool {
     e.symbols.iter().any(|s| s == key)
 }
 
@@ -120,6 +124,7 @@ pub fn cmd_symbol(root: &Path, rest: &[String], json: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd_knowledge::Entry;
     use std::collections::BTreeMap;
 
     fn e(name: &str, level: &str, symbols: &[&str]) -> Entry {

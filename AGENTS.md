@@ -139,6 +139,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 界面      node tools\uitest-window.mjs
 扫盘      jingwei discover --depth 3 D:\projects D:\research   （或界面「全盘扫描」）
 索引      jingwei index
+解释      jingwei explain <名字|symbol:id>   （定义在哪、被调/被引用几处）
 真源      node tools/collect_facts.mjs --check
 打包      powershell -File pack.ps1   → dist\jingwei-<版本>-win-x64.zip
 包冒烟    node tools\smoke-pack.mjs [--gui]   （解压真包 → index + positions；--gui 再加"GUI 起来 3 秒没退"）

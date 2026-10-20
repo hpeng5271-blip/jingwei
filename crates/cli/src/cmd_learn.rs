@@ -180,16 +180,27 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
         }
     };
 
-    // `--mark <步骤id>`：只能标 learn **真的输出过**的步骤，别的 id 一律拒绝（防止伪进度）。
+    // `--mark <步骤>`：可以给**序号**（`--mark 3`，就是 learn 输出里那个 3.）或条目名。
+    // 无论哪种，只能标 learn **真的输出过**的步骤，别的 id 一律拒绝（防止伪进度）。
     if let Some(pos) = rest.iter().position(|a| a == "--mark") {
-        let Some(step) = rest.get(pos + 1) else {
-            eprintln!("--mark 后面要跟步骤 id（就是 learn 列表里每条对应的条目名）");
+        let Some(raw) = rest.get(pos + 1) else {
+            eprintln!("--mark 后面要跟步骤序号（如 3）或条目名");
             return 2;
         };
-        if !plan.iter().any(|s| &s.entry == step) {
+        // 序号：省得手抄长文件名（pro 卡：`--mark 3` 也认）
+        let step: String = match raw.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= plan.len() => plan[n - 1].entry.clone(),
+            Ok(n) => {
+                eprintln!("没有第 {n} 步（这个主题共 {} 步）", plan.len());
+                return 1;
+            }
+            Err(_) => raw.clone(),
+        };
+        if !plan.iter().any(|s| s.entry == step) {
             eprintln!("`{step}` 不在主题 `{topic}` 的步骤里——只能标 learn 真的输出过的步骤");
-            let ids: Vec<&str> = plan.iter().map(|s| s.entry.as_str()).collect();
-            eprintln!("可用：{}", ids.join(" / "));
+            for (i, s) in plan.iter().enumerate() {
+                eprintln!("  {}. {}", i + 1, s.entry);
+            }
             return 1;
         }
         let path = progress_path();

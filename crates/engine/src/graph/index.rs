@@ -410,6 +410,8 @@ pub fn index_source(
         std::collections::BTreeMap::new();
 
     let mut direct_sites: Vec<(String, String, u32, u32)> = Vec::new();
+    // 同文件属性引用的位置（kind=references）：重命名/LSP 要落到那一列。
+    let mut direct_ref_sites: Vec<(String, String, u32, u32)> = Vec::new();
     // **这次真的重解析过的文件**：调用点表按文件替换，不能整表清空——
     // 一次"全部跳过"的重索引会把别人的 sites 抹掉（2026-10-19 实测踩到：flask sites 变 0）。
     let mut processed: Vec<String> = Vec::new();
@@ -514,6 +516,7 @@ pub fn index_source(
         let registers = parsed.registers.clone();
         // 属性访问（债表 0）：Symbol→Symbol 的 references 边。
         let refs_local = parsed.refs_local.clone();
+        let ref_sites_local = parsed.ref_sites_local.clone();
 
         let mut nodes: Vec<Node> = Vec::with_capacity(symbols + 1);
         let mut edges: Vec<Edge> = Vec::with_capacity(symbols + 1 + calls.len());
@@ -542,6 +545,7 @@ pub fn index_source(
         }
         // 三类关系各写各的（债表 0.24：从 index 里拆到 graph/link.rs）。
         rep.calls += crate::graph::link::calls_into(&mut edges, &calls, now)?;
+        direct_ref_sites.extend(ref_sites_local.iter().cloned());
         crate::graph::link::references_into(&mut edges, &refs_local, now)?;
         crate::graph::link::registers_into(&mut edges, &registers, now)?;
         nodes.push(file_node);
@@ -779,6 +783,23 @@ pub fn index_source(
             )
             .map_err(|e| anyhow::anyhow!("写调用点失败：{e}"))?;
     }
+
+      for (src, dst, line, byte) in &direct_ref_sites {
+          let Some(file) = src
+              .strip_prefix("symbol:")
+              .and_then(|r| r.split('#').next())
+              .map(|s| s.to_string())
+          else {
+              continue;
+          };
+          store
+              .conn
+              .execute(
+                  "INSERT INTO edge_sites(src,dst,kind,file,line,byte) VALUES(?1,?2,'references',?3,?4,?5)",
+                  rusqlite::params![src, dst, file, *line as i64, *byte as i64],
+              )
+              .map_err(|e| anyhow::anyhow!("写引用点失败：{e}"))?;
+      }
 
       // **引用点**单独写（kind=references）：rename / LSP 的 JOIN 按 kind 匹配，
       // 写成 calls 会一条都取不到（2026-10-20 实测：跨文件常量改不到）。

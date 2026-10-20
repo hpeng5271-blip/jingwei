@@ -104,10 +104,14 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
     );
 
     let mut registers: Vec<(String, String)> = Vec::new();
-    let mut refs_local: Vec<(String, String)> = Vec::new();
+    let mut ref_sites_local: Vec<(String, String, u32, u32)> = Vec::new();
     let mut attr_refs: Vec<RefFact> = Vec::new();
     let aliases: std::collections::BTreeSet<String> = imports.iter().map(|i| i.local.clone()).collect();
-    collect_attr_refs(root, src, rel, &by_path, &aliases, &mut refs_local, &mut attr_refs);
+    collect_attr_refs(root, src, rel, &by_path, &aliases, &mut ref_sites_local, &mut attr_refs);
+    let refs_local: Vec<(String, String)> = ref_sites_local
+        .iter()
+        .map(|(a, b, _, _)| (a.clone(), b.clone()))
+        .collect();
     collect_registers(root, src, rel, &by_name, &mut registers);
 
     symbols.sort_by(|a, b| a.id.cmp(&b.id));
@@ -124,6 +128,7 @@ pub fn parse_python(rel: &str, src: &str, now: i64) -> ParseOutcome {
         imports,
         registers,
         attr_refs,
+        ref_sites_local,
         refs_local,
         complete,
     }
@@ -165,7 +170,7 @@ fn collect_attr_refs(
     rel: &str,
     by_path: &std::collections::BTreeMap<String, String>,
     aliases: &std::collections::BTreeSet<String>,
-    out: &mut Vec<(String, String)>,
+    out: &mut Vec<(String, String, u32, u32)>,
     refs: &mut Vec<RefFact>,
 ) {
     let mut scope: Vec<String> = Vec::new();
@@ -180,7 +185,7 @@ fn walk_attr(
     by_path: &std::collections::BTreeMap<String, String>,
     aliases: &std::collections::BTreeSet<String>,
     scope: &mut Vec<String>,
-    out: &mut Vec<(String, String)>,
+    out: &mut Vec<(String, String, u32, u32)>,
     refs: &mut Vec<RefFact>,
 ) {
     let mut cursor = n.walk();
@@ -218,7 +223,16 @@ fn walk_attr(
                             .map(|s| s.trim().to_string());
                         if let (Some(recv), Some(attr)) = (recv, attr) {
                             if let Some(id) = by_path.get(&format!("{recv}::{attr}")) {
-                                out.push((caller.clone(), id.clone()));
+                                let pos = child
+                                    .child_by_field_name("attribute")
+                                    .map(|a| a.start_position())
+                                    .unwrap_or_else(|| child.start_position());
+                                out.push((
+                                    caller.clone(),
+                                    id.clone(),
+                                    (pos.row + 1) as u32,
+                                    pos.column as u32,
+                                ));
                             } else if aliases.contains(&recv) {
                                 // **跨文件模块属性**（债 0.28 / D-04）：只记事实，解析在 resolve。
                                 refs.push(RefFact {

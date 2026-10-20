@@ -114,3 +114,25 @@ fn 跨文件常量能被重命名到() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+
+/// **同文件的类属性引用也要有位置**（2026-10-20）：`Cfg.DEBUG` 在另一个函数里被读，
+/// 以前只改定义、不改用法（sites 缺失）；现在 plan_rename 必须给出两处。
+#[test]
+fn 类属性也能整条链改() {
+    let root = fixture("cls");
+    std::fs::write(
+        root.join("app.py"),
+        "class Cfg:\n    DEBUG = True\n\n\ndef run():\n    return Cfg.DEBUG\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+    let plan = s
+        .plan_rename(&root, "symbol:app.py#Cfg::DEBUG", "VERBOSE")
+        .expect("规划失败");
+    let lines: Vec<u32> = plan.edits.iter().map(|e| e.line).collect();
+    assert_eq!(plan.edits.len(), 2, "定义 + 用法，实际 {lines:?}");
+    assert!(lines.contains(&6), "用法那一行（第 6 行）必须在，实际 {lines:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}

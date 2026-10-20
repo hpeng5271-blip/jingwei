@@ -55,6 +55,9 @@ pub struct ParseOutcome {
     /// 与 `references` 分开存：那个是**调用**的候选，解析成功要建 `calls` 边；
     /// 这个解析成功建的是 `references` 边。混在一起会把"读常量"画成"调用"（踩过）。
     pub attr_refs: Vec<RefFact>,
+    /// **同文件属性引用的位置**（债 0.26 的邻居）：`Cfg.DEBUG` 这种"只用不调"。
+    /// 与 `refs_local` 一一对应，多带行列——重命名/LSP 要靠它落到那一列。
+    pub ref_sites_local: Vec<(String, String, u32, u32)>,
     pub refs_local: Vec<(String, String)>,
 
     /// 本文件的 `use` 语句——索引期就能确定的"名字 → 路径"映射。
@@ -197,8 +200,9 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         references: refs,
         imports,
         registers: Vec::new(),
-          attr_refs: Vec::new(),
-          refs_local: Vec::new(),
+        attr_refs: Vec::new(),
+        ref_sites_local: Vec::new(),
+        refs_local: Vec::new(),
         complete,
     }
 }

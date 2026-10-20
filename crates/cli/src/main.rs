@@ -600,7 +600,7 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     (
         "learn",
         &[],
-        "**学习路径**：按条目的 prereq 排出「先学什么、凭什么」——顺序不是文件名",
+        "**学习路径**：按条目的 prereq 排出「先学什么、凭什么」——顺序不是文件名；`--symbol` 从代码出发",
     ),
     (
         "progress",

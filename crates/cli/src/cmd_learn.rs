@@ -153,7 +153,98 @@ pub fn save_progress(path: &Path, done: &BTreeSet<String>) -> std::io::Result<()
 }
 
 /// `jingwei learn <主题> [--mark <步骤>]`：打勾 + 打路径。
+/// `jingwei learn --symbol <符号>`：**从代码出发**——围绕这个符号，按等级列出解释过它的主张。
+///
+/// 这是"以项目为来源"的正门：读代码时先看这块被哪些主张解释过，而不是先背方法论。
+/// 走图边（`claims_for_symbol`），不读 Markdown——与 `explain`/`symbol` 同一份事实。
+fn learn_by_symbol(root: &Path, query: &str, json: bool) -> i32 {
+    let Some(store) = crate::cmd_knowledge::open_graph(root) else {
+        println!("查不了：没有图谱（先 jingwei index）");
+        return 1;
+    };
+    let key = if query.starts_with("symbol:") {
+        if store.node(query).map(|n| n.is_some()).unwrap_or(false) {
+            query.to_string()
+        } else {
+            println!("查不了：`{query}` 不在图谱里（可能改名/删了）");
+            return 1;
+        }
+    } else {
+        match store.symbol_ids_by_name(query) {
+            Ok(ids) if ids.len() == 1 => ids[0].clone(),
+            Ok(ids) if ids.is_empty() => {
+                println!("查不了：图谱里没有叫 `{query}` 的符号（先 index，或名字拼错了）");
+                return 1;
+            }
+            Ok(ids) => {
+                println!("有 {} 个符号叫 `{query}`，用 id 指定：", ids.len());
+                for id in ids {
+                    println!("  {id}");
+                }
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("查符号失败：{e}");
+                return 1;
+            }
+        }
+    };
+
+    let mut claims = store.claims_for_symbol(&key).unwrap_or_default();
+    claims.sort_by(|a, b| {
+        crate::cmd_symbol::level_rank(&a.level)
+            .cmp(&crate::cmd_symbol::level_rank(&b.level))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    if claims.is_empty() {
+        // 查不了不是失败：这块代码还没有人（或还没采集）写过主张。
+        println!("查不了：这块代码还没有主张解释过它（先 harvest / knowledge add）");
+        return 0;
+    }
+    if json {
+        let v: Vec<_> = claims
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "entry": c.id,
+                    "claim": c.claim,
+                    "level": c.level,
+                    "source": c.source,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::json!({"symbol": key, "claims": v}));
+        return 0;
+    }
+    println!(
+        "围绕符号：{key} —— {} 条主张（按等级：一手 → 转写 → 二手 → 查不了）",
+        claims.len()
+    );
+    for (i, c) in claims.iter().enumerate() {
+        println!(
+            "  {i}. [{lv}] {claim}（条目：{name}）",
+            i = i + 1,
+            lv = c.level,
+            claim = c.claim,
+            name = crate::cmd_explain::short_name(&c.id)
+        );
+        println!("     ← {}", c.source);
+    }
+    println!("（想看这些主张的前置顺序：jingwei learn <topic>；打勾：--mark <序号>）");
+    0
+}
+
 pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
+    // `--symbol <符号>`：从代码出发的入口，优先于"主题"解析。
+    if let Some(pos) = rest.iter().position(|a| a == "--symbol") {
+        match rest.get(pos + 1) {
+            Some(q) => return learn_by_symbol(root, q, json),
+            None => {
+                eprintln!("--symbol 后面要跟符号名或 symbol:id");
+                return 2;
+            }
+        }
+    }
     let Some(topic) = rest.iter().find(|a| !a.starts_with("--")) else {
         eprintln!("用法：jingwei learn <主题> [--mark <步骤id>]   （按 docs/knowledge 条目的 prereq 排顺序）");
         return 2;

@@ -68,6 +68,7 @@ jingwei knowledge sync     # 把 docs/knowledge/*.md 投影成图谱里的 claim
 
 ```powershell
 jingwei learn 原子能                                  # 6 步，○/● 标进度
+jingwei learn --symbol <符号|symbol:id>               # 从代码出发：这块代码被哪几条主张解释过
 jingwei learn 原子能 --mark 3                 # 打勾：可以给序号（第 3 步），也可以给条目名
 jingwei progress 原子能                              # 同一视图：已学 N/总 M
 ```

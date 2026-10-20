@@ -103,7 +103,7 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
 }
 
 /// 短名：去 `.md`、去前导 `YYYY-MM-DD-`，剩下的就是"topic-序号-标题"那种能一眼睛看懂的形态。
-fn short_name(id: &str) -> String {
+pub(crate) fn short_name(id: &str) -> String {
     let s = id.strip_suffix(".md").unwrap_or(id);
     let b = s.as_bytes();
     let dated = s.len() > 11

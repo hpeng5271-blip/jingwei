@@ -207,8 +207,9 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                     *edges.entry(k.to_string()).or_default() += 1;
                 }
             }
+            let sites = crate::cmd_graph::sites(&store);
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({ "nodes": nodes, "edges": edges })).unwrap_or_default());
+                println!("{}", serde_json::to_string_pretty(&json!({ "nodes": nodes, "edges": edges, "sites": sites })).unwrap_or_default());
             } else {
                 println!();
                 println!("  节点：");
@@ -217,6 +218,10 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                 }
                 println!("  边：");
                 for (k, n) in &edges {
+                    println!("    {k:<12} {n}");
+                }
+                println!("  站点（edge_sites）：");
+                for (k, n) in &sites {
                     println!("    {k:<12} {n}");
                 }
                 println!();
@@ -662,4 +667,9 @@ fn truncate(s: &str, max: usize) -> String {
     }
     let head: String = s.chars().take(max.saturating_sub(1)).collect();
     format!("{head}…")
+}
+
+
+fn sites(store: &Store) -> std::collections::BTreeMap<String, i64> {
+    jingwei_engine::graph::query::site_counts(store).unwrap_or_default()
 }

@@ -356,3 +356,15 @@ fn count_edges(store: &Store, id: &str, kind: &str) -> Result<i64> {
         |r| r.get(0),
     )?)
 }
+
+
+/// **调用点/引用点按 kind 计数**（2026-10-20）：查"边有、站点没有"这类问题时，
+/// 一眼就能看出站点表里到底有什么。
+
+pub fn site_counts(store: &Store) -> Result<std::collections::BTreeMap<String, i64>> {
+    let mut st = store
+        .conn
+        .prepare("SELECT kind, count(*) FROM edge_sites GROUP BY kind ORDER BY kind")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    Ok(rows.flatten().collect())
+}

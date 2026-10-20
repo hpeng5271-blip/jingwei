@@ -1,0 +1,178 @@
+//! `jingwei harvest <文件>`：**双头漏斗的第一头**——从散文里抽「候选条目」进待确认区（2026-10-20，pro 任务卡 D）。
+//!
+//! 规矩（pro 定的两条防空壳）：
+//! 1. **逐字摘录**：候选的 `claim` 必须是源文件那一行的**原文子串**，`source` 写成 `路径:行号`，
+//!    事后任何一次 `knowledge check` 都会回去 grep 那一行——对不上就红（来源失效 / 被改写）。
+//! 2. **候选不进库**：写到 `docs/knowledge/_inbox/`，**不计入**漏斗的"采集"；
+//!    只有人跑 `jingwei knowledge add <id>` 并补上 `check`，才移进 `docs/knowledge/`。
+//!
+//! 抽取只认"已经被人整理过的行"（`- ` 列表项 / `|` 表格行），不做全文 NLP——
+//! 自动总结会产出"看着对、原文没有"的句子，那正是这个项目最不许出现的东西。
+
+use std::path::{Path, PathBuf};
+
+/// 一条候选。
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub line: u32,
+    pub text: String,
+}
+
+/// 判断等级：按来源文件的类型推，**推不出来就写 二手**（宁低勿高）。
+pub fn infer_level(path: &str) -> &'static str {
+    let p = path.replace('\\', "/").to_lowercase();
+    if p.contains("transcripts/") || p.contains("转写") {
+        "转写"
+    } else if p.contains("一手来源") {
+        "一手"
+    } else {
+        "二手"
+    }
+}
+
+/// 从正文里抽候选：只认 `- ` 列表项与 `|` 表格行，长度 12–200，且不是分隔行/表头。
+pub fn extract(text: &str, max: usize) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        if out.len() >= max {
+            break;
+        }
+        let line = raw.trim();
+        if line.starts_with('|') {
+            // 表格：跳过 `|---|` 与表头（表头没有句号/逗号，且常含"来源""借什么"这类列名）
+            if line.contains("---") || line.contains("要求 |") || line.contains("| 来源 |") {
+                continue;
+            }
+            let cells: Vec<&str> = line.trim_matches('|').split('|').map(|s| s.trim()).collect();
+            if cells.len() < 2 {
+                continue;
+            }
+            // 取第一列（主张/要点），第二列当补充不参与 claim
+            let first = cells[0].trim_matches('*').trim();
+            if first.chars().count() < 12 || first.chars().count() > 200 {
+                continue;
+            }
+            out.push(Candidate {
+                line: (i + 1) as u32,
+                text: first.to_string(),
+            });
+            continue;
+        }
+        let Some(body) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) else {
+            continue;
+        };
+        let body = body.trim();
+        let n = body.chars().count();
+        if !(12..=200).contains(&n) {
+            continue;
+        }
+        out.push(Candidate {
+            line: (i + 1) as u32,
+            text: body.to_string(),
+        });
+    }
+    out
+}
+
+/// 候选的文件名：`_inbox/<源文件名去扩展>-L<行号>.md`（同一个源可以抽多次，按行号区分）。
+///
+/// **名字不能以 `_` 开头**：`docs/knowledge/` 顶层的 `_*` 与 `README.md` 被约定成"草稿/说明"，
+/// 不参与严筛；候选要是带了 `_` 前缀，`knowledge add` 把它移进库之后会被当成草稿**静默跳过**——
+/// 入库成功、漏斗数字不动，正是最难发现的那种错（2026-10-20 实测踩到）。
+pub fn candidate_name(src: &Path, line: u32) -> String {
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "src".into());
+    let clean: String = stem
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let clean = clean.trim_start_matches(['_', '-']).to_string();
+    let clean = if clean.is_empty() { "src".to_string() } else { clean };
+    format!("{clean}-L{line}.md")
+}
+
+pub fn cmd_harvest(root: &Path, rest: &[String], json: bool) -> i32 {
+    let Some(arg) = rest.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法：jingwei harvest <docs/research 下的文件>   （抽候选条目到 docs/knowledge/_inbox/）");
+        return 2;
+    };
+    let src = PathBuf::from(arg);
+    let abs = if src.is_absolute() { src.clone() } else { root.join(&src) };
+    let Ok(text) = std::fs::read_to_string(&abs) else {
+        eprintln!("读不了 {arg}");
+        return 2;
+    };
+    let rel = abs
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| arg.clone());
+
+    let cands = extract(&text, 40);
+    if cands.is_empty() {
+        println!("没有可抽的候选（只认 `- ` 列表项与表格行，长度 12–200）");
+        return 0;
+    }
+
+    let inbox = root.join("docs").join("knowledge").join("_inbox");
+    if let Err(e) = std::fs::create_dir_all(&inbox) {
+        eprintln!("建不了 {}：{e}", inbox.display());
+        return 2;
+    }
+    let level = infer_level(&rel);
+    let mut written = 0;
+    for c in &cands {
+        let name = candidate_name(&abs, c.line);
+        let body = format!(
+            "---\nclaim: {}\nsource: {}:{}\nlevel: {}\ncheck: 待验\ncandidate: true\n---\n\n原文（{}:{}）：\n{}\n",
+            c.text, rel, c.line, level, rel, c.line, c.text
+        );
+        if std::fs::write(inbox.join(&name), body).is_ok() {
+            written += 1;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"source": rel, "candidates": written, "level": level, "inbox": "docs/knowledge/_inbox"})
+        );
+    } else {
+        println!("本次候选 {written} 条 → docs/knowledge/_inbox/（等级推定：{level}）");
+        println!("确认方式：补好 check 字段后跑 `jingwei knowledge add <条目文件名>`");
+    }
+    0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 只抽列表与表格行_且长度受限() {
+        let text = "开头不是列表\n- 短\n- 这一条够长了，应该被抽出来当候选条目。\n| 要点 | 说明 |\n|---|---|\n| 这也是够长的表格主张，应该被抽出来 | 补充 |\n";
+        let c = extract(text, 10);
+        let texts: Vec<&str> = c.iter().map(|x| x.text.as_str()).collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts[0].contains("应该被抽出来当候选条目"));
+        assert!(texts[1].contains("够长的表格主张"));
+        assert_eq!(c[0].line, 3);
+        assert_eq!(c[1].line, 6);
+    }
+
+    #[test]
+    fn 候选名不能以_开头() {
+        // `_tmp-harvest.md` 是草稿前缀；候选名要去掉它，否则入库后被当成草稿静默跳过
+        let n = candidate_name(std::path::Path::new("docs/research/_tmp-harvest.md"), 3);
+        assert_eq!(n, "tmp-harvest-L3.md");
+        assert!(!n.starts_with('_'));
+    }
+
+    #[test]
+    fn 等级按来源类型推定() {
+        assert_eq!(infer_level("docs/research/transcripts/BV1x.txt"), "转写");
+        assert_eq!(infer_level("docs/research/一手来源.md"), "一手");
+        assert_eq!(infer_level("docs/research/原子能-转写要点.md"), "转写");
+        assert_eq!(infer_level("docs/research/观点地图.md"), "二手");
+    }
+}

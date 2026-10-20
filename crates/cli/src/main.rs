@@ -18,6 +18,7 @@ mod cmd_handover;
 mod cmd_knowledge;
 mod cmd_learn;
 mod cmd_symbol;
+mod cmd_harvest;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -385,6 +386,8 @@ fn run() -> i32 {
         "learn" => cmd_learn::cmd_learn(&root, &rest, json),
         // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
         "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
+        // **采集半边**（2026-10-20，pro 任务卡 D）：从散文里抽逐字候选 → _inbox 待确认
+        "harvest" => cmd_harvest::cmd_harvest(&root, &rest, json),
     "watch" => {
         let roots: Vec<String> = rest
             .iter()
@@ -574,6 +577,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "symbol",
         &[],
         "**反查**：这个符号被哪几条知识条目解释过（条目引用了查不到的符号 → 标「重编」）",
+    ),
+    (
+        "harvest",
+        &[],
+        "**采集半边**：从散文里抽「逐字候选」到 docs/knowledge/_inbox/，人确认后才入条目",
     ),
     (
         "index",

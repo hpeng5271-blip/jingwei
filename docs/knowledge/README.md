@@ -27,6 +27,18 @@ symbol: symbol:crates/engine/src/graph/store.rs#Store::apply_file_update
 - `README.md`（本页）与 `_` 开头的文件：说明与草稿，不参与漏斗计数。
   临时验证用 `_` 前缀，验完删掉。
 
+## 采集半边：候选 → 人确认 → 入账
+
+```powershell
+jingwei harvest docs/research/原子能-转写要点.md   # 抽逐字候选到 _inbox/
+jingwei knowledge add 原子能-转写要点-L43.md       # 人确认（先补 check 字段）后入账
+```
+
+- 候选在 `_inbox/`，**不计入"采集"**——漏斗数字只算真条目。
+- 候选的 `claim` 必须是源文件那一行的**原文子串**，`source` 写成 `文件:行号`；
+  `knowledge check` 每次都回去核对：源文件删了那行 / claim 被改写 → **红**（来源失效 / 与原文不一致）。
+- `add` 前必须把 `check` 从 `待验` 改成真判据，否则拒绝入库（不许把没有判据的东西放进库）。
+
 ## 漏斗表怎么读
 
 ```

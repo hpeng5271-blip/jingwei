@@ -5,6 +5,7 @@ prereq: 原子能-04-代码是工具
 source: docs/research/原子能-转写要点.md:82
 level: 转写
 check: 在 jingwei handover 的输出里指出哪一节承载 know-why，并说明这一节缺失时会发生什么
+symbol: symbol:crates/cli/src/cmd_handover.rs#cmd_handover
 ---
 
 原文（docs/research/原子能-转写要点.md:82）：

@@ -234,6 +234,18 @@ fn learn_by_symbol(root: &Path, query: &str, json: bool) -> i32 {
     0
 }
 
+/// 符号 id 的短形态：`symbol:crates/cli/src/main.rs#cmd_positions` → `cmd_positions（crates/cli/src/main.rs）`。
+/// 不是 `symbol:` 形态就原样返回（裸名字本来就是短的）。
+fn short_symbol(id: &str) -> String {
+    let Some(rest) = id.strip_prefix("symbol:") else {
+        return id.to_string();
+    };
+    match rest.split_once('#') {
+        Some((path, name)) => format!("{name}（{path}）"),
+        None => rest.to_string(),
+    }
+}
+
 pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
     // `--symbol <符号>`：从代码出发的入口，优先于"主题"解析。
     if let Some(pos) = rest.iter().position(|a| a == "--symbol") {
@@ -356,7 +368,10 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
                     }
                     println!("{basis}");
                     if !s.symbols.is_empty() {
-                        println!("     挂：{}", s.symbols.join(" / "));
+                        // 只打 `symbol:path#名字` 里的名字 + 文件：全 id 太长，一行放不下也读不出重点
+                        let shown: Vec<String> =
+                            s.symbols.iter().map(|x| short_symbol(x)).collect();
+                        println!("     挂：{}", shown.join(" / "));
                     }
                 }
             }
@@ -560,5 +575,17 @@ mod tests {
         let e = plan(&root, "t").unwrap_err();
         assert!(e.contains("环"), "{e}");
         _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod short_symbol_tests {
+    use super::short_symbol;
+
+    #[test]
+    fn 符号id显示成名字加文件_裸名字原样() {
+        assert_eq!(short_symbol("symbol:crates/a/b.rs#f"), "f（crates/a/b.rs）");
+        assert_eq!(short_symbol("cmd_handover"), "cmd_handover");
+        assert_eq!(short_symbol("symbol:weird"), "weird");
     }
 }

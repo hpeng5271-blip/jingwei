@@ -182,7 +182,148 @@ pub fn plan_rename(root: &Path, conn: &Connection, symbol_id: &str, new_name: &s
             }),
         }
     }
+    // **import 守卫**（2026-10-20）：`import` 行既不是边、也不在 `edge_sites` 里，
+    // 只改定义与调用点会留下「import 还指着旧名」——代码当场坏，而回读仍报通过（实测踩过）。
+    // 判据：能证明是**同一个模块**的 import → 计划一处精确编辑；证明不了 → 整次拒绝，不发半截编辑。
+    let defined_file = def_file.clone().unwrap_or_default();
+    let mut seen: BTreeSet<(String, u32)> = plan.edits.iter().map(|e| (e.file.clone(), e.line)).collect();
+    for (file, line_no) in import_lines(root, conn, &name) {
+        if !seen.insert((file.clone(), line_no)) {
+            continue; // 这一行已经按定义/调用点算过
+        }
+        let lines = cache
+            .entry(file.clone())
+            .or_insert_with(|| read_lines(root, &file));
+        let Some(text) = lines.get((line_no.saturating_sub(1)) as usize).cloned() else {
+            plan.ambiguous.push(Ambiguous {
+                file,
+                line: line_no,
+                reason: "行号越界（文件变短了？）".into(),
+            });
+            continue;
+        };
+        let proven = import_module(&text)
+            .map(|m| module_matches(&defined_file, &m))
+            .unwrap_or(false);
+        if proven {
+            let hits = word_hits(&text, &name);
+            if hits.len() == 1 {
+                plan.edits.push(Edit {
+                    file,
+                    line: line_no,
+                    col: hits[0] as u32 + 1,
+                    byte: 0,
+                    old: name.clone(),
+                    new: new_name.to_string(),
+                });
+            } else {
+                plan.ambiguous.push(Ambiguous {
+                    file,
+                    line: line_no,
+                    reason: format!("import 行有 {} 处 `{name}`，分不清改哪一处", hits.len()),
+                });
+            }
+        } else {
+            plan.ambiguous.push(Ambiguous {
+                file,
+                line: line_no,
+                reason: format!(
+                    "import 行引用了 `{name}`，但证明不了它指的就是这个符号——不发编辑，请手工改这一行"
+                ),
+            });
+        }
+    }
     Ok(plan)
+}
+
+/// 去掉行首的 BOM 与空白。**BOM 不是空白**：`trim_start()` 不认它，
+/// 于是带 BOM 的文件（PowerShell `Set-Content -Encoding UTF8` 写的就有）整行都不像 import——
+/// 我第一次实测就是这么"修好了却还是不生效"的。
+fn strip_lead(t: &str) -> &str {
+    t.trim_start_matches('\u{feff}').trim_start()
+}
+
+/// 一行是不是 import（Python `from/import`、Rust `use`）。只认行首，宁可漏也不猜。
+fn is_import_line(t: &str) -> bool {
+    let s = strip_lead(t);
+    s.starts_with("from ")
+        || s.starts_with("import ")
+        || s.starts_with("use ")
+        || s.starts_with("pub use ")
+}
+
+/// 从 import 行里取**模块部分**（用于证明"是不是同一个模块"）。裸 `import x` 返回 None。
+fn import_module(t: &str) -> Option<String> {
+    let s = strip_lead(t);
+    if let Some(rest) = s.strip_prefix("from ") {
+        let m = rest.split(" import").next()?.trim();
+        return Some(m.to_string());
+    }
+    for head in ["pub use ", "use "] {
+        if let Some(rest) = s.strip_prefix(head) {
+            let body = rest.trim_end_matches(';').trim();
+            let (module, _last) = body.rsplit_once("::")?;
+            return Some(module.to_string());
+        }
+    }
+    None
+}
+
+/// 模块名与定义文件是否同一模块。**只认路径后缀**，对不上就是"证明不了"。
+fn module_matches(def_file: &str, module: &str) -> bool {
+    let f = def_file.replace('\\', "/");
+    let m = module.trim();
+    let rust = m.contains("::");
+    let parts: Vec<&str> = if rust {
+        m.split("::").collect()
+    } else {
+        m.split('.').collect()
+    };
+    let segs: Vec<&str> = parts
+        .into_iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !matches!(*s, "crate" | "self" | "super" | "{" | "}"))
+        .collect();
+    if segs.is_empty() {
+        return false;
+    }
+    let suffix = segs.join("/");
+    if rust {
+        f.ends_with(&format!("{suffix}.rs")) || f.ends_with(&format!("{suffix}/mod.rs"))
+    } else {
+        f.ends_with(&format!("{suffix}.py")) || f.ends_with(&format!("{suffix}/__init__.py"))
+    }
+}
+
+fn read_lines(root: &Path, file: &str) -> Vec<String> {
+    std::fs::read_to_string(root.join(file))
+        .map(|t| t.lines().map(|l| l.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// 全仓库里"看起来像 import 且提到这个名字"的行（图谱里的文件才读）。
+///
+/// 路径从两处来：符号节点的 `file_path`、文件节点的 id（`file:<相对路径>`，`file_path` 是空的）。
+fn import_lines(root: &Path, conn: &Connection, name: &str) -> Vec<(String, u32)> {
+    let mut out = Vec::new();
+    let Ok(mut st) = conn.prepare(
+        "SELECT DISTINCT file_path FROM nodes WHERE kind='symbol' AND file_path IS NOT NULL \
+         UNION SELECT substr(id, 6) FROM nodes WHERE kind='file' AND id LIKE 'file:%'",
+    ) else {
+        return out;
+    };
+    let Ok(rows) = st.query_map([], |r| r.get::<_, String>(0)) else {
+        return out;
+    };
+    let files: Vec<String> = rows.filter_map(|x| x.ok()).collect();
+    for f in files {
+        for (i, t) in read_lines(root, &f).iter().enumerate() {
+            if is_import_line(t) && !word_hits(t, name).is_empty() {
+                out.push((f.clone(), (i + 1) as u32));
+            }
+        }
+    }
+    out
 }
 
 /// 找出 `needle` 作为**完整标识符**出现在 `hay` 里的字节偏移（0 起始）。
@@ -237,6 +378,20 @@ mod tests {
         assert_eq!(word_hits("f(a, f)", "a"), vec![2]);
         assert_eq!(word_hits("ab a ba a", "a"), vec![3, 8]);
         assert!(word_hits("abc", "a").is_empty());
+    }
+
+    #[test]
+    fn 带_bom_的_import_行也认() {
+        // BOM 不是空白：trim_start() 不认它（第一次实测就是这里没生效）
+        assert!(is_import_line("\u{feff}from lib import helper"));
+        assert_eq!(
+            import_module("\u{feff}from lib import helper").as_deref(),
+            Some("lib")
+        );
+        assert!(module_matches("lib.py", "lib"));
+        assert!(module_matches("pkg/mod.py", "pkg.mod"));
+        assert!(module_matches("crates/engine/src/graph/rename.rs", "crate::graph::rename"));
+        assert!(!module_matches("lib.py", "other"));
     }
 
     #[test]

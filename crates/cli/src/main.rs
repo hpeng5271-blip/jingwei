@@ -16,6 +16,7 @@ mod cmd_discover;
 mod cmd_explain;
 mod cmd_handover;
 mod cmd_knowledge;
+mod cmd_learn;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -379,6 +380,8 @@ fn run() -> i32 {
         "positions" => cmd_positions::cmd_positions(&root, json),
         // **知识条目严筛**（2026-10-20，pro 任务卡 A）：双头漏斗最细的那道颈
         "knowledge" => cmd_knowledge::cmd_knowledge(&root, &rest, json),
+        // **学习路径出口**（2026-10-20，pro 任务卡 B）：知识条目按 prereq 排成能照着走的顺序
+        "learn" => cmd_learn::cmd_learn(&root, &rest, json),
     "watch" => {
         let roots: Vec<String> = rest
             .iter()
@@ -558,6 +561,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "knowledge",
         &[],
         "**知识条目严筛**（docs/knowledge/*.md）：缺来源 / 等级就红，符号查不到算「查不了」",
+    ),
+    (
+        "learn",
+        &[],
+        "**学习路径**：按条目的 prereq 排出「先学什么、凭什么」——顺序不是文件名",
     ),
     (
         "index",

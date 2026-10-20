@@ -126,22 +126,17 @@ fn source_ok(root: &Path, v: &str) -> bool {
     true
 }
 
-/// 严筛一遍 `docs/knowledge/`。`store` 为 None = 没有图谱（图谱侧的判定只能"查不了"）。
-pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
-    let mut r = Report {
-        no_graph: store.is_none(),
-        ..Default::default()
-    };
+/// 目录里所有**条目**文件（README 与 `_` 草稿不算，否则一条说明就让漏斗永远红）。
+pub fn entry_files(root: &Path) -> Vec<std::path::PathBuf> {
     let dir = root.join("docs").join("knowledge");
     let Ok(rd) = std::fs::read_dir(&dir) else {
-        return r; // 还没有条目：采集 0
+        return Vec::new();
     };
     let mut files: Vec<std::path::PathBuf> = rd
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().map(|x| x == "md").unwrap_or(false))
         .filter(|p| {
-            // `README.md` 与 `_` 开头的是说明/草稿，不是条目（否则一条 README 就让漏斗永远红）。
             let n = p
                 .file_name()
                 .map(|x| x.to_string_lossy().to_string())
@@ -150,55 +145,66 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
         })
         .collect();
     files.sort();
+    files
+}
 
-    for path in files {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let e = parse_entry(&name, &text);
+/// 读出所有条目（`learn` 与 `check` 共用同一份解析，别各写一套）。
+pub fn load_entries(root: &Path) -> Vec<Entry> {
+    entry_files(root)
+        .into_iter()
+        .map(|p| {
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let text = std::fs::read_to_string(&p).unwrap_or_default();
+            parse_entry(&name, &text)
+        })
+        .collect()
+}
+
+/// 条目名字（去掉 `.md`）——`prereq:` 就是按这个名字引用的。
+pub fn entry_stem(name: &str) -> &str {
+    name.strip_suffix(".md").unwrap_or(name)
+}
+
+/// 一条条目过没过严筛。返回 Err(原因) 时**不许**把它当成"已核实的知识"。
+pub fn why_rejected(root: &Path, e: &Entry) -> Option<String> {
+    let mut missing: Vec<&str> = Vec::new();
+    for k in REQUIRED {
+        match e.fields.get(k) {
+            Some(v) if !v.trim().is_empty() => {}
+            _ => missing.push(k),
+        }
+    }
+    if !missing.is_empty() {
+        return Some(format!("缺 {}（没有这些就不算过筛）", missing.join(" / ")));
+    }
+    if let Some(lv) = e.fields.get("level") {
+        if !LEVELS.contains(&lv.as_str()) {
+            return Some(format!("level = `{lv}`，只能是 一手/转写/二手/查不了"));
+        }
+    }
+    if let Some(src) = e.fields.get("source") {
+        if !source_ok(root, src) {
+            return Some("source 指向的仓库内路径不存在".to_string());
+        }
+    }
+    None
+}
+
+/// 严筛一遍 `docs/knowledge/`。`store` 为 None = 没有图谱（图谱侧的判定只能"查不了"）。
+pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
+    let mut r = Report {
+        no_graph: store.is_none(),
+        ..Default::default()
+    };
+    for e in load_entries(root) {
+        let name = e.file.clone();
         r.total += 1;
 
-        let mut missing: Vec<&str> = Vec::new();
-        for k in REQUIRED {
-            match e.fields.get(k) {
-                Some(v) if !v.trim().is_empty() => {}
-                _ => missing.push(k),
-            }
-        }
-        // 等级必须是四个之一（不许自由发挥，否则三态就是标签）。
-        let mut bad_level = None;
-        if let Some(lv) = e.fields.get("level") {
-            if !lv.is_empty() && !LEVELS.contains(&lv.as_str()) {
-                bad_level = Some(lv.clone());
-            }
-        }
-        // 来源是仓库内路径时，路径必须存在（文档承诺的文件不存在 = 典型事故）。
-        let mut bad_source = false;
-        if let Some(src) = e.fields.get("source") {
-            if !missing.contains(&"source") && !source_ok(root, src) {
-                bad_source = true;
-            }
-        }
-        if !missing.is_empty() {
-            r.problems.push(format!(
-                "{} 缺 {}（没有这些就不算过筛）",
-                e.file,
-                missing.join(" / ")
-            ));
-            continue;
-        }
-        if let Some(lv) = bad_level {
-            r.problems.push(format!(
-                "{} 的 level = `{lv}`，只能是 一手/转写/二手/查不了",
-                e.file
-            ));
-            continue;
-        }
-        if bad_source {
-            r.problems
-                .push(format!("{} 的 source 指向的仓库内路径不存在", e.file));
+        if let Some(why) = why_rejected(root, &e) {
+            r.problems.push(format!("{name} {why}"));
             continue;
         }
         r.passed += 1;
@@ -213,8 +219,7 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
                 e.symbols.len()
             )),
             Some(st) => {
-                let bad: Vec<&String> =
-                    e.symbols.iter().filter(|s| !symbol_ok(st, s)).collect();
+                let bad: Vec<&String> = e.symbols.iter().filter(|s| !symbol_ok(st, s)).collect();
                 if bad.is_empty() {
                     r.linked += 1;
                 } else {

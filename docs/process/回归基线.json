@@ -1,0 +1,25 @@
+{
+  "note": "研究对象回归基线（2026-10-20 实测）。calls 的口径 = edges 表里 calls 边的总数（含跨文件解析），不是 index 那行\"直接解析的调用数\"。改完跑 node tools/regress.mjs 对一遍。",
+  "objects": [
+    {
+      "name": "flask",
+      "path": "D:\\research\\jingwei-objects\\flask",
+      "expect": {
+        "files": 83,
+        "symbols": 1922,
+        "calls": 323,
+        "positions_bad": 0
+      }
+    },
+    {
+      "name": "tauri",
+      "path": "D:\\research\\jingwei-objects\\tauri",
+      "expect": {
+        "files": 329,
+        "symbols": 5916,
+        "calls": 1258,
+        "positions_bad": 0
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@
     "model": 11,
     "tests_total": 480,
     "shell_tests": 79,
-    "gates": 8,
+    "gates": 4,
     "graph_files": 145,
     "graph_symbols": 1996,
     "graph_nodes": 2151,

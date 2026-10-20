@@ -1,16 +1,11 @@
 {
   "title": "经纬 · 门禁",
-  "note": "这一份是门禁清单的唯一真源：改门禁只改这里，不改脚本。脚本保持纯 ASCII —— Windows PowerShell 5.1 会把没有 BOM 的 .ps1 按 ANSI 读，中文注释会当场烂成乱码（这条踩过）。",
+  "note": "这一份是门禁清单的唯一真源：改门禁只改这里，不改脚本。脚本保持纯 ASCII —— Windows PowerShell 5.1 会把没有 BOM 的 .ps1 按 ANSI 读，中文注释会当场烂成乱码（这条踩过）。v1 只留 4 道：单测+集成（文档测试并入同一道）/ clippy / 真源 / 交付；工程门禁、外壳、界面门禁按 MANIFEST-v1 挂起（理由见 docs/MANIFEST-v1.md §3）。",
   "steps": [
     {
-      "name": "单元与集成测试",
-      "cmd": "cargo test --workspace --all-targets",
-      "why": "引擎六层、真实 SQLite、外壳命令、图谱端到端的行为"
-    },
-    {
-      "name": "文档测试",
-      "cmd": "cargo test --workspace --doc",
-      "why": "文档里的示例必须是真的能跑的东西；这一道长期没进任何门禁，坏了一个月没人知道"
+      "name": "单测+集成",
+      "cmd": "cargo test --workspace --all-targets && cargo test --workspace --doc",
+      "why": "引擎六层、真实 SQLite、外壳命令、图谱端到端的行为；文档里的示例也在这里跑（v1 把文档测试并入这一道，不再单开）"
     },
     {
       "name": "静态检查",
@@ -18,29 +13,14 @@
       "why": "零警告，不是少一点"
     },
     {
-      "name": "工程门禁",
-      "cmd": "node tools/gate.mjs",
-      "why": "版本号三处一致、单文件行数只许降不许升、每条动机都有落点、文档数字与 tools/facts.json 一致"
-    },
-    {
-      "name": "外壳测试",
-      "cmd": "node tools/uitest.mjs",
-      "why": "打开 → 编辑器 → 运行 → 问题栏 → 图谱；任何 JS 异常即失败"
+      "name": "真源门禁",
+      "cmd": "node tools/collect_facts.mjs --check",
+      "why": "现场重采一遍，比 tools/facts.json 是不是过期——**这是所有数字校验的地基**。原来它不在门禁链上，于是改了测试不重刷、门禁照样全绿，而文档里 64 处标记是在守旧数字。代价约 30 秒（内含一遍 cargo test），但这是唯一能让「文档数字 = 代码事实」不依赖记忆的办法"
     },
     {
       "name": "交付门禁",
       "cmd": "node tools/check-pack.mjs --if-present",
       "why": "打出来的包里装的是不是该装的：该有的都在、不该有的（.jingwei / __pycache__ / target）没有、exe 不比源码旧。dist/ 里没有包时如实跳过——一次没打过包的干净克隆不该因此失败"
-    },
-    {
-      "name": "界面门禁",
-      "cmd": "node tools/uitest-window.mjs",
-      "why": "真的拉起窗口，让它自己报告 DOM 状态：图谱页该在的都在、都可见、都没被挤出窗口，而且数据真的拉了。外壳测试读的是 textContent——元素隐藏时照样读得到，所以这一类问题它一条都验不了"
-    },
-    {
-      "name": "真源门禁",
-      "cmd": "node tools/collect_facts.mjs --check",
-      "why": "现场重采一遍，比 tools/facts.json 是不是过期——**这是所有数字校验的地基**。原来它不在门禁链上，于是改了测试不重刷、门禁照样全绿，而文档里 64 处标记是在守旧数字。代价约 30 秒（内含一遍 cargo test），但这是唯一能让「文档数字 = 代码事实」不依赖记忆的办法"
     }
   ]
 }

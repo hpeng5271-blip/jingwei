@@ -7,7 +7,8 @@ use jingwei_engine::graph::{index, store::Store};
 
 fn project(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("jw-life-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
+    // 上次跑挂掉可能留下同名目录；删不掉不影响本次（临时目录）
+    _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("src")).unwrap();
     std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
     d
@@ -43,5 +44,5 @@ fn 文件的五个阶段都落在_file_life_上() {
     index::index_source(&root, &mut s).expect("重现后索引失败");
     assert_eq!(s.file_life("src/a.rs").unwrap(), Some(FileLife::Modified));
 
-    let _ = std::fs::remove_dir_all(&root);
+    _ = std::fs::remove_dir_all(&root);
 }

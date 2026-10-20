@@ -136,3 +136,25 @@ fn 类属性也能整条链改() {
     assert!(lines.contains(&6), "用法那一行（第 6 行）必须在，实际 {lines:?}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+
+/// **`self.x` 形态**（债 0.32，2026-10-20 第三次尝试成了）：类方法里读自己的类属性，
+/// 也要能被 rename 到（定义 + 用法）。这次的根因是"caller id 用了空 scope"。
+#[test]
+fn self_属性也能被重命名() {
+    let root = fixture("self");
+    std::fs::write(
+        root.join("app.py"),
+        "class Cfg:\n    DEBUG = True\n\n    def run(self):\n        return self.DEBUG\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+    let plan = s
+        .plan_rename(&root, "symbol:app.py#Cfg::DEBUG", "VERBOSE")
+        .expect("规划失败");
+    let lines: Vec<u32> = plan.edits.iter().map(|e| e.line).collect();
+    assert_eq!(plan.edits.len(), 2, "定义 + self 用法，实际 {lines:?}");
+    assert!(lines.contains(&5), "self.DEBUG 在第 5 行，实际 {lines:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}

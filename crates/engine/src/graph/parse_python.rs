@@ -174,7 +174,8 @@ fn collect_attr_refs(
     refs: &mut Vec<RefFact>,
 ) {
     let mut scope: Vec<String> = Vec::new();
-    walk_attr(n, src, rel, by_path, aliases, &mut scope, out, refs);
+    let mut class: Vec<String> = Vec::new();
+    walk_attr(n, src, rel, by_path, aliases, &mut scope, &mut class, out, refs);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -185,6 +186,7 @@ fn walk_attr(
     by_path: &std::collections::BTreeMap<String, String>,
     aliases: &std::collections::BTreeSet<String>,
     scope: &mut Vec<String>,
+    class: &mut Vec<String>,
     out: &mut Vec<(String, String, u32, u32)>,
     refs: &mut Vec<RefFact>,
 ) {
@@ -199,11 +201,22 @@ fn walk_attr(
                 if name.is_empty() {
                     continue;
                 }
-                let key = symbol_key(rel, &[], None, name);
+                let key = symbol_key(rel, scope, class.last().map(|s| s.as_str()), name);
                 if let Some(body) = child.child_by_field_name("body") {
                     scope.push(format!("symbol:{key}"));
-                    walk_attr(body, src, rel, by_path, aliases, scope, out, refs);
+                    walk_attr(body, src, rel, by_path, aliases, scope, class, out, refs);
                     scope.pop();
+                }
+            }
+            "class_definition" => {
+                let name = child
+                    .child_by_field_name("name")
+                    .and_then(|x| x.utf8_text(src.as_bytes()).ok())
+                    .unwrap_or_default();
+                if let Some(body) = child.child_by_field_name("body") {
+                    class.push(name.to_string());
+                    walk_attr(body, src, rel, by_path, aliases, scope, class, out, refs);
+                    class.pop();
                 }
             }
             "attribute" => {
@@ -222,7 +235,12 @@ fn walk_attr(
                             .and_then(|v| v.utf8_text(src.as_bytes()).ok())
                             .map(|s| s.trim().to_string());
                         if let (Some(recv), Some(attr)) = (recv, attr) {
-                            if let Some(id) = by_path.get(&format!("{recv}::{attr}")) {
+                            let key = if (recv == "self" || recv == "cls") && !class.is_empty() {
+                                format!("{}::{attr}", class.last().unwrap())
+                            } else {
+                                format!("{recv}::{attr}")
+                            };
+                            if let Some(id) = by_path.get(&key) {
                                 let pos = child
                                     .child_by_field_name("attribute")
                                     .map(|a| a.start_position())
@@ -245,9 +263,9 @@ fn walk_attr(
                         }
                     }
                 }
-                walk_attr(child, src, rel, by_path, aliases, scope, out, refs);
+                walk_attr(child, src, rel, by_path, aliases, scope, class, out, refs);
             }
-            _ => walk_attr(child, src, rel, by_path, aliases, scope, out, refs),
+            _ => walk_attr(child, src, rel, by_path, aliases, scope, class, out, refs),
         }
     }
 }

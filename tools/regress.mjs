@@ -28,6 +28,7 @@ for (const o of base.objects) {
   const got = {
     symbols: Number(stats.nodes.symbol || 0),
     calls: Number(stats.edges.calls || 0),
+    references: Number(stats.edges.references || 0),
     files: Number(stats.nodes.file || 0),
     positions_bad: Number(pos.bad || 0),
   };
@@ -39,7 +40,7 @@ for (const o of base.objects) {
     failed += 1;
     console.log(`  ×  ${o.name}：${diffs.join('；')}`);
   } else {
-    console.log(`  ✓  ${o.name}：${got.files} 文件 / ${got.symbols} 符号 / ${got.calls} 调用 / 位置对不上 ${got.positions_bad}`);
+    console.log(`  ✓  ${o.name}：${got.files} 文件 / ${got.symbols} 符号 / ${got.calls} 调用 / ${got.references} 引用 / 位置对不上 ${got.positions_bad}`);
   }
 }
 

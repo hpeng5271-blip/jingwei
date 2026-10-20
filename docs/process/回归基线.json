@@ -8,7 +8,8 @@
         "files": 83,
         "symbols": 1922,
         "calls": 323,
-        "positions_bad": 0
+        "positions_bad": 0,
+        "references": 67
       }
     },
     {
@@ -18,7 +19,8 @@
         "files": 329,
         "symbols": 5916,
         "calls": 1258,
-        "positions_bad": 0
+        "positions_bad": 0,
+        "references": 0
       }
     }
   ]

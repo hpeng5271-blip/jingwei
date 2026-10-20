@@ -45,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->472<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
-集成 <!-- fact:integration -->74<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->473<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
+集成 <!-- fact:integration -->75<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。
@@ -75,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 事 | 落点 | 证据 |
 |---|---|---|
 | **跨文件模块属性**（2026-10-20） | `parse_python` 模块级常量 + `resolve` 模块属性 | `from pkg import cfg` + `cfg.DEBUG` → `references` 边；flask 符号 **1,922**、positions **1922/1922**；`EXTRACTOR_VERSION=parse@11` |
-| **Python 的"使用"层补全**（2026-10-19 夜） | `parse_python` + `graph/link.rs` + `registers` 边 | `__main__` 块内调用 → File→Symbol；装饰器注册 → `registers`（flask **82 条**）；类体常量 → 符号（flask 1,580→**1,920**）；`Cfg.DEBUG` 的 `references` 在夹具上验证（**flask 里 0 条**——它用 `self.x` 形态，见债 0.32）；positions **1920/1920** |
+| **Python 的"使用"层补全**（2026-10-19 夜） | `parse_python` + `graph/link.rs` + `registers` 边 | `__main__` 块内调用 → File→Symbol；装饰器注册 → `registers`（flask **82 条**）；类体常量 → 符号（flask 1,580→**1,920**）；`Cfg.DEBUG` / `self.x` 的 `references`（flask **67 条**，债 0.32 已修）；positions **1920/1920** |
 | **LSP：定义 / 引用（精确到调用点）/ hover / 诊断推送** | `lsp/mod.rs` + `edge_sites` 小表 | 真协议往返：引用落在 `cmd_graph.rs:491`（真调用行）；hover 出"是什么/在哪/被 2 个符号调用"；**didOpen 后主动推诊断**；**rename 返回 WorkspaceEdit**（判不准不发编辑）；单测 7 条 |
 | **Python 的"使用"进图谱**（File → Dependency 的 `depends_on`） | `graph/index.rs` + `python_deps` 测试 | flask：**183 条**依赖边（83 文件）；抽样 3 条回文件核对全对；本地模块与 `self/super` 已排除 |
 | **依赖对账**（清单 vs 锁文件，两边都是外部真值） | `understand/deps_check.rs` + `jingwei deps` | tauri：**10 条声明 / 10 对**；engine crate：9 条 / 8 对 / **1 判不了**（path 依赖——判不了就说判不了）；4 条单测 |

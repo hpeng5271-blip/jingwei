@@ -1,0 +1,150 @@
+# 强力吐槽AI之父获物理学诺奖：我和物理的关系都比他近，我高中主修物理【直播精华#14】
+
+<!-- 来源：https://www.bilibili.com/video/BV14924YyEvW · 本地 whisper-small 转写 · 有错字，引用需回视频核对 -->
+
+Tinton则是离谱啊
+跟物理的关系还没有我密切
+我高中主修的还是物理
+你看他的Degree是收入了历史
+德学、经济学、人工智能
+跟物理没冒险关系的没有
+就看他大学选的这些课
+我估计他高中也不是选修物理的
+HD就是人工智能之后
+他开始工作Prize Psychology
+应用心理学
+Competitional Neuroscience
+这里就是讲生物科学了
+所以人家Ragson就没有跟物理
+有过任何交集
+今年诺奖没什么讨论度
+我觉得最搞笑的是什么呢
+是B站这次搞了那么大的一个场面
+他不仅把这个活动之间
+植入到了他的首页的档案
+而且今年还考了全程直播
+今天是物理学的开奖
+他还请到了科院物理研究所的
+那些物理的大佬坐这边等着去解释
+结果一出来
+啊这些大佬傻了
+什么Deep Learning Artificial Intelligence
+这跟我们没有关系啊
+不免整一个直播间再聊的
+都是理论物理的一些话题了
+比如说什么大统一啊
+堂论啊
+按能量就去聊那些话题
+因为这是人家的理议
+你找一些做理论物理的人来聊人工智能
+真的还不如联买我去给他聊
+我觉得这不是他们的问题啊
+真的是非常巧合的一下
+诺贝尔这么多年来
+就是今年侧你一下AI的热度
+可以想象出来老外那边应该已经做了很多梗了
+我都没有去看他们有搞什么梗出来
+我觉得我们中国有一个梗是可以用的
+那就是三体里面那句语言
+诺贝尔认会这么一搞
+会让大家觉得物理学真的不是在
+理想只能够帮给计算机科学家
+真的要给的话应该给生物学奖
+因为你这个东西
+你给了John Hopfield
+这是最开始的这个研究结果
+他好歹是从一个生物学的角度去研究的
+平等后面的应用并没有在生物学上
+那你真的要给的话
+我觉得少给生物学还能说得通
+有的什么神经科学
+公司化学反应
+所以你再次一点给他化学
+那还能够站得上边
+就让能够找一个最张不上边的
+我感觉在平等自己都可能没想过
+你给我一个物理学家看吧
+我都不知道
+当时用setting speech到底要讲什么
+光发了说辞
+they trained artificial neural networks using physicists
+这感觉有点像什么
+就像是一个学生在写作文的时候
+写完之后发现完全离体
+怎么办
+直接在标题里面把命题给加上去
+用物理来训练
+你用什么训练
+H100 A100
+这就是老黄的功劳
+我觉得真的可以拿下来给老黄
+标题作文
+内容写成了母爱作后语言回来
+但最后没有语言回来
+他是在标题里面
+来了个母亲的爱
+豆号来自学校
+这样子补的
+他不是在内容里面补的
+我从来都没有对John Hopfield
+获奖有什么质疑
+我记得是Jeff Hinton
+John Hopfield一开始
+他确实是一个物理领域的一个研究
+这个是没有问题的
+但是Hinton做的事情
+就跟物理一毛钱的关系都没有了
+你看他干嘛了
+他自己给他描述了
+John Hopfield uses Hopfield Network
+it's the foundation for a new network
+that uses a different method
+the Boltzmann machine
+this can learn to recognize characteristic elements
+in a given set of data
+given type of data
+Hinton uses tools from statistical physics
+statistical physics
+science of system built from many similar components
+the machine is trained by feeding examples
+that are very slightly raised
+ok 再指示
+第五任你怎么干了的
+你看这里面跟物理回忆有关系的时候
+说是statistical physics
+ok 它发的
+Boltzmann machine发的
+也是connective science
+connective science不就是生物科学吗
+你真的想要给Jeff Hinton一个诺贝尔的话
+你应该给他生物学
+其实在物理学找不到人的话
+他可以空
+我真的觉得你要想来个大的
+你今年物理学讲直接空出来
+我觉得经文效果也不差
+甚至可能比给Jeff Hinton更有震撼力
+首先AI这个东西
+在社会热度已经够了
+天天都是AI的新闻
+因为你诺贝尔讲本身是有热度的
+你称的一个本身就是一个拉满热度的东西
+你这个效果就是一加一小一
+AI用户讲
+ok AI是很厉害
+AI是未来我们知道的
+但是你今天诺贝尔物理学员直接空着他
+证明了说
+诺贝尔人会觉得
+如果现在物理学出问题了
+我们的物理学头顶上的乌云更浓了
+浓到已经看不到阳光了
+我们的未来在哪
+这个讨论绝对比吃AI热度要高多了
+这个热度至少能够吃到
+明天这个时候大家要继续回来看你
+诺贝尔会不会今天再把物理学讲又空出来
+你这个热度能够继续好久
+你还真的不如空着
+那给我的话我就让他空着了
+好了 吐槽完毕

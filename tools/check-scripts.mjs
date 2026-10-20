@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { checkSkills } from './skills-check.mjs';
+
 export function checkToolScripts(root = '.') {
   const dir = path.join(root, 'tools');
   const problems = [];

@@ -17,6 +17,7 @@ mod cmd_explain;
 mod cmd_handover;
 mod cmd_knowledge;
 mod cmd_learn;
+mod cmd_symbol;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -382,6 +383,8 @@ fn run() -> i32 {
         "knowledge" => cmd_knowledge::cmd_knowledge(&root, &rest, json),
         // **学习路径出口**（2026-10-20，pro 任务卡 B）：知识条目按 prereq 排成能照着走的顺序
         "learn" => cmd_learn::cmd_learn(&root, &rest, json),
+        // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
+        "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
     "watch" => {
         let roots: Vec<String> = rest
             .iter()
@@ -566,6 +569,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "learn",
         &[],
         "**学习路径**：按条目的 prereq 排出「先学什么、凭什么」——顺序不是文件名",
+    ),
+    (
+        "symbol",
+        &[],
+        "**反查**：这个符号被哪几条知识条目解释过（条目引用了查不到的符号 → 标「重编」）",
     ),
     (
         "index",

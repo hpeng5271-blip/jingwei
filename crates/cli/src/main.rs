@@ -412,7 +412,7 @@ fn run() -> i32 {
         // **学习路径出口**（2026-10-20，pro 任务卡 B）：知识条目按 prereq 排成能照着走的顺序
         "learn" => cmd_learn::cmd_learn(&root, &rest, json),
         // **学习进度**（2026-10-20，pro 任务卡 F）：同一个出口，进度落在本地状态里
-        "progress" => cmd_learn::cmd_learn(&root, &rest, json),
+        "progress" => cmd_learn::cmd_progress(&root, &rest, json),
         // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
         "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
         // **采集半边**（2026-10-20，pro 任务卡 D）：从散文里抽逐字候选 → _inbox 待确认

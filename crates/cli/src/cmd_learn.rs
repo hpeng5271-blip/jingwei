@@ -362,13 +362,107 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
             }
         }
         if learned < plan.len() {
-            println!("打勾：jingwei learn {topic} --mark <步骤id>（步骤 id 见上面每条对应条目名）");
+            println!("打勾：jingwei learn {topic} --mark <序号>（也可以给条目名）");
         }
     }
     if bad > 0 {
         eprintln!("有 {bad} 步的条目过不了严筛（缺来源/等级）——这些步骤只能算查不了");
         return 1;
     }
+    0
+}
+
+/// `jingwei progress`（不带主题）：**所有主题的鸟瞰**——已学 m/n、下一步是哪条。
+///
+/// 为什么要有它：只有 `progress <主题>` 时，用户得先记得有哪些主题；而"今天学什么"
+/// 恰恰是最常问的一句。这里只读本地进度 + 条目，不写任何东西。
+/// 主题一览的一行：主题、已学、总数、下一步、顺序判不了的原因。
+struct TopicRow {
+    topic: String,
+    learned: usize,
+    total: usize,
+    next: Option<String>,
+    error: Option<String>,
+}
+
+pub fn cmd_progress(root: &Path, rest: &[String], json: bool) -> i32 {
+    let done = load_progress(&progress_path());
+    if let Some(topic) = rest.iter().find(|a| !a.starts_with("--")) {
+        return cmd_learn(root, std::slice::from_ref(topic), json);
+    }
+
+    // 收集主题（去重、稳定排序）：`topic:` 允许写多个（逗号分隔），这里要拆开——
+    // 否则 `判据, 存储` 会整串变成一个假主题（2026-10-21 实跑时抓到）。
+    let mut topics: Vec<String> = Vec::new();
+    for e in crate::cmd_knowledge::load_entries(root) {
+        let Some(raw) = e.fields.get("topic") else {
+            continue;
+        };
+        for t in raw.split([',', '，', '、', ';', '；']) {
+            let t = t.trim();
+            if !t.is_empty() {
+                topics.push(t.to_string());
+            }
+        }
+    }
+    topics.sort();
+    topics.dedup();
+    if topics.is_empty() {
+        println!("查不了：docs/knowledge/ 里还没有带 topic 的条目（先写一条再跑）");
+        return 0;
+    }
+
+    // (主题, 已学, 总数, 下一步, 顺序判不了的原因)
+    let mut rows: Vec<TopicRow> = Vec::new();
+    for t in &topics {
+        match plan(root, t) {
+            Ok(plan) => {
+                let learned = plan.iter().filter(|s| done.contains(&s.entry)).count();
+                let next = plan
+                    .iter()
+                    .find(|s| !done.contains(&s.entry))
+                    .map(|s| s.claim.clone());
+                rows.push(TopicRow {
+                    topic: t.clone(),
+                    learned,
+                    total: plan.len(),
+                    next,
+                    error: None,
+                });
+            }
+            Err(e) => rows.push(TopicRow {
+                topic: t.clone(),
+                learned: 0,
+                total: 0,
+                next: None,
+                error: Some(e),
+            }),
+        }
+    }
+    if json {
+        let v: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "topic": r.topic, "learned": r.learned, "total": r.total,
+                    "next": r.next, "error": r.error,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::json!({"topics": v}));
+        return 0;
+    }
+    println!("主题一览（已学/总步数；下一步 = 第一条没打勾的）：");
+    for r in &rows {
+        if let Some(e) = &r.error {
+            println!("  {}  ? 查不了：{e}", r.topic);
+        } else if let Some(claim) = &r.next {
+            println!("  {}  {}/{}  下一步：{claim}", r.topic, r.learned, r.total);
+        } else {
+            println!("  {}  {}/{}  全部学完", r.topic, r.learned, r.total);
+        }
+    }
+    println!("看某条路径：jingwei learn <主题>；打勾：jingwei learn <主题> --mark <序号>");
     0
 }
 

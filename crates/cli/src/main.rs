@@ -267,6 +267,18 @@ fn run() -> i32 {
             }
             // **扫盘的同源检测**（2026-10-19）：只对同名目录算 Jaccard，代价可控
             "--similar" => rest.push("--similar".to_string()),
+            // **knowledge fix 用**：--symbol <新符号|symbol:id>（带值，原样透传给子命令）
+            "--symbol" => {
+                rest.push("--symbol".to_string());
+                i += 1;
+                match argv.get(i) {
+                    Some(v) => rest.push(v.clone()),
+                    None => {
+                        eprintln!("--symbol 后面要跟符号（名字或 symbol:id）");
+                        return 2;
+                    }
+                }
+            }
             // **为什么没扫到**：扫完按原因统计被跳过的目录
             "--why" => rest.push("--why".to_string()),
             "--help" | "-h" => return help(),

@@ -22,6 +22,17 @@ symbol: symbol:crates/engine/src/graph/store.rs#Store::apply_file_update
 - `symbol` 可写多行，也可写 `symbols: a, b`；**不带 `symbol:` 前缀的按名字查**（同名多义也算查到）。
   路径要从**仓库根**算。
 
+## 回收半边：待重编清单 + 一键改挂
+
+```powershell
+jingwei knowledge stale                                  # 列出「条目引用的符号图谱里查不到」的条目，N>0 时 exit=1
+jingwei knowledge fix <条目> --symbol <新符号|symbol:id>   # 精确改挂（名字重名会拒绝，要求用 id）
+```
+
+- `stale` **并进了真源门禁**：有 0 条才绿——否则"只报不修"会变成新的报而不回收。
+- `fix` 只认**精确匹配**：名字同名多义会拒绝并要求 `symbol:` 全 id；新符号在图谱里查不到也拒绝。
+- 没有图谱时 `stale` 打印「查不了」并 exit=0（干净克隆不该因为还没 `index` 而红）。
+
 ## 不算条目的文件
 
 - `README.md`（本页）与 `_` 开头的文件：说明与草稿，不参与漏斗计数。

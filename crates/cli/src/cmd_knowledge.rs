@@ -114,7 +114,17 @@ fn symbol_ok(store: &Store, s: &str) -> bool {
 /// 其余的（书名、论文标题、"查不了"）不是路径，放行。
 ///
 /// `docs/research/x.md:12` 这种「文件:行号」也算路径——行号只用于回查原文，不参与存在性判断。
+/// **多个来源用 `;` 分隔，逐个都要过**：合并条目时不许把另一条来源悄悄丢掉
+/// （2026-10-20 pro 的监督条件：合并后 source 必须覆盖原来两条的并集）。
 fn source_ok(root: &Path, v: &str) -> bool {
+    let all = v.trim();
+    if all.is_empty() {
+        return false;
+    }
+    all.split(';').all(|part| one_source_ok(root, part))
+}
+
+fn one_source_ok(root: &Path, v: &str) -> bool {
     let s = v.trim().trim_matches('`').trim();
     if s.is_empty() {
         return false;
@@ -326,9 +336,139 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
     r
 }
 
+/// 一条"该重编了"的条目：引用的符号在图谱里已经查不到（改名/删了）。
+#[derive(Debug, Clone)]
+pub struct Stale {
+    pub entry: String,
+    pub symbol: String,
+    pub source: String,
+}
+
+/// 列出待重编的条目。返回 `None` = **没有图谱，判不了**（不是"没有待重编"）。
+pub fn stale_symbols(root: &Path, store: Option<&Store>) -> Option<Vec<Stale>> {
+    let st = store?;
+    let mut out = Vec::new();
+    for e in load_entries(root) {
+        if why_rejected(root, &e).is_some() {
+            continue; // 过不了严筛的先由 check 报，这里不重复
+        }
+        for s in &e.symbols {
+            if !symbol_ok(st, s) {
+                out.push(Stale {
+                    entry: e.file.clone(),
+                    symbol: s.clone(),
+                    source: e.fields.get("source").cloned().unwrap_or_default(),
+                });
+            }
+        }
+    }
+    // 回收没做的后果是腐化：列清单时按条目名稳定排序，便于逐条改挂。
+    out.sort_by(|a, b| a.entry.cmp(&b.entry).then_with(|| a.symbol.cmp(&b.symbol)));
+    Some(out)
+}
+
+/// 把某条目里一个查不到的符号改挂到新符号（**精确匹配**，不许模糊）。
+pub fn fix_symbol(root: &Path, store: Option<&Store>, entry: &str, old: &str, new: &str) -> Result<(), String> {
+    let st = store.ok_or_else(|| "没有图谱（先 jingwei index）".to_string())?;
+    let path = root.join("docs").join("knowledge").join(entry);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读不了 {entry}：{e}"))?;
+    // 旧符号必须真的在文件里、且真的查不到——否则这次"修"没有对象
+    if !text.contains(old) {
+        return Err(format!("{entry} 里没有 `{old}`"));
+    }
+    if symbol_ok(st, old) {
+        return Err(format!("`{old}` 在图谱里查得到，不需要重编"));
+    }
+    // 新符号必须精确解析（id 或唯一名字）
+    let resolved = if new.starts_with("symbol:") {
+        if symbol_ok(st, new) {
+            new.to_string()
+        } else {
+            return Err(format!("新符号 `{new}` 在图谱里查不到（改名/删了？）"));
+        }
+    } else {
+        match st.symbol_ids_by_name(new) {
+            Ok(ids) if ids.len() == 1 => ids[0].clone(),
+            Ok(ids) if ids.is_empty() => {
+                return Err(format!("图谱里没有叫 `{new}` 的符号"));
+            }
+            Ok(ids) => {
+                return Err(format!(
+                    "有 {} 个符号叫 `{new}`，用 `--symbol symbol:...` 精确指定",
+                    ids.len()
+                ))
+            }
+            Err(e) => return Err(format!("查符号失败：{e}")),
+        }
+    };
+    let updated = text.replace(old, &resolved);
+    std::fs::write(&path, updated).map_err(|e| format!("写不回 {entry}：{e}"))?;
+    Ok(())
+}
+
 pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
     if rest.first().map(|s| s.as_str()) == Some("add") {
         return add_from_inbox(root, rest.get(1).map(|s| s.as_str()), json);
+    }
+    if rest.first().map(|s| s.as_str()) == Some("stale") {
+        let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
+        let Some(list) = stale_symbols(root, store.as_ref()) else {
+            println!("查不了：没有图谱（先 jingwei index）——待重编判不出来");
+            return 0;
+        };
+        if json {
+            let v: Vec<_> = list
+                .iter()
+                .map(|s| serde_json::json!({"entry": s.entry, "symbol": s.symbol, "source": s.source}))
+                .collect();
+            println!("{}", serde_json::json!({"stale": v, "count": list.len()}));
+        } else if list.is_empty() {
+            println!("待重编 0 条（条目引用的符号都能在图谱里查到）");
+        } else {
+            println!("待重编 {} 条（条目引用的符号图谱里查不到——改名/删了？）：", list.len());
+            for s in &list {
+                println!("  ! {} → {}", s.entry, s.symbol);
+                println!("     ← {}", s.source);
+            }
+            println!("改挂：jingwei knowledge fix <条目> --symbol <新符号|symbol:id>");
+        }
+        return if list.is_empty() { 0 } else { 1 };
+    }
+    if rest.first().map(|s| s.as_str()) == Some("fix") {
+        let Some(entry) = rest.get(1) else {
+            eprintln!("用法：jingwei knowledge fix <条目文件名> --symbol <新符号|symbol:id>");
+            return 2;
+        };
+        let pos = rest.iter().position(|a| a == "--symbol");
+        let Some(new) = pos.and_then(|i| rest.get(i + 1)) else {
+            eprintln!("缺 --symbol <新符号|symbol:id>");
+            return 2;
+        };
+        let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
+        // 旧符号 = 该条目里所有查不到的符号（通常就一处）
+        let old = load_entries(root)
+            .into_iter()
+            .find(|e| e.file == *entry)
+            .and_then(|e| {
+                e.symbols
+                    .iter()
+                    .find(|s| store.as_ref().map(|st| !symbol_ok(st, s)).unwrap_or(true))
+                    .cloned()
+            });
+        let Some(old) = old else {
+            eprintln!("{entry} 没有查不到的符号——不需要重编");
+            return 1;
+        };
+        return match fix_symbol(root, store.as_ref(), entry, &old, new) {
+            Ok(()) => {
+                println!("已改挂：{entry} 的 {old} → {new}（写回文件了）");
+                0
+            }
+            Err(e) => {
+                eprintln!("改挂失败：{e}");
+                1
+            }
+        };
     }
     if rest.first().map(|s| s.as_str()) != Some("check") {
         eprintln!("用法：jingwei knowledge check                    （严筛 + 核对候选，输出漏斗表）");
@@ -415,6 +555,23 @@ fn add_from_inbox(root: &Path, arg: Option<&str>, json: bool) -> i32 {
     if let Some(why) = why_rejected(root, &e) {
         eprintln!("{name} 过不了严筛：{why}");
         return 1;
+    }
+    // **查重**（2026-10-20 实测暴露）：确认候选时发现库里已有一条意思相同的手写条目
+    // （"架构 = 取舍"），两条并存的后果是 learn 里出现两个同义步骤、采集数字虚高。
+    // 判据：claim 去空白后整串相等，就当同一条——不猜"语义相似"（那会误杀）。
+    let norm = |s: &str| s.split_whitespace().collect::<String>();
+    let want = norm(e.fields.get("claim").map(|s| s.as_str()).unwrap_or(""));
+    if !want.is_empty() {
+        for other in load_entries(root) {
+            let have = norm(other.fields.get("claim").map(|s| s.as_str()).unwrap_or(""));
+            if have == want {
+                eprintln!(
+                    "已有同主张的条目：{}——同一句话不要两条（要么改这条的措辞，要么就别加）",
+                    other.file
+                );
+                return 1;
+            }
+        }
     }
     let to = root.join("docs").join("knowledge").join(&name);
     if to.exists() {
@@ -516,6 +673,21 @@ mod tests {
         assert_eq!(r.total, 1, "README 与 _ 草稿不该计入采集");
         assert_eq!(r.passed, 1);
         _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 同主张的重复条目要能查出来() {
+        // 判据：claim 去空白后整串相等（不猜"语义相似"，那会误杀）
+        let norm = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(
+            norm("架构 = 取舍，且不只在技术层"),
+            norm("架构 =  取舍，且不只在技术层")
+        );
+        assert_ne!(
+            norm("架构就是取舍"),
+            norm("架构 = 取舍，且不只在技术层"),
+            "措辞不同不算重复（由人判断）"
+        );
     }
 
     #[test]

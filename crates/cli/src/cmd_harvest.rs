@@ -30,8 +30,13 @@ pub fn infer_level(path: &str) -> &'static str {
     }
 }
 
-/// 从正文里抽候选：只认 `- ` 列表项与 `|` 表格行，长度 12–200，且不是分隔行/表头。
-pub fn extract(text: &str, max: usize) -> Vec<Candidate> {
+/// 从正文里抽候选。
+///
+/// **默认只抽 `- ` 列表项**。表格行要显式 `--tables` 才抽——2026-10-20 实测：对 `一手来源.md`
+/// （一张"来源 | 借什么 | 读哪"的表）抽出来的 10 条候选全是**来源名/链接**，不是主张。
+/// 这就是 pro 说的"看起来抽了其实全是噪音"：表格第一列在有些文档里是主张，有些里是索引键，
+/// 猜不出来的时候**宁可不抽**，让人用 `--tables` 明确要求。
+pub fn extract(text: &str, max: usize, tables: bool) -> Vec<Candidate> {
     let mut out = Vec::new();
     for (i, raw) in text.lines().enumerate() {
         if out.len() >= max {
@@ -39,7 +44,10 @@ pub fn extract(text: &str, max: usize) -> Vec<Candidate> {
         }
         let line = raw.trim();
         if line.starts_with('|') {
-            // 表格：跳过 `|---|` 与表头（表头没有句号/逗号，且常含"来源""借什么"这类列名）
+            if !tables {
+                continue;
+            }
+            // 表格：跳过 `|---|` 与表头（表头常含"来源""借什么"这类列名）
             if line.contains("---") || line.contains("要求 |") || line.contains("| 来源 |") {
                 continue;
             }
@@ -109,9 +117,11 @@ pub fn cmd_harvest(root: &Path, rest: &[String], json: bool) -> i32 {
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| arg.clone());
 
-    let cands = extract(&text, 40);
+    let cands = extract(&text, 40, rest.iter().any(|a| a == "--tables"));
     if cands.is_empty() {
-        println!("没有可抽的候选（只认 `- ` 列表项与表格行，长度 12–200）");
+        println!(
+            "没有可抽的候选（默认只认 `- ` 列表项；表格要加 --tables，长度 12–200）"
+        );
         return 0;
     }
 
@@ -151,13 +161,21 @@ mod tests {
     #[test]
     fn 只抽列表与表格行_且长度受限() {
         let text = "开头不是列表\n- 短\n- 这一条够长了，应该被抽出来当候选条目。\n| 要点 | 说明 |\n|---|---|\n| 这也是够长的表格主张，应该被抽出来 | 补充 |\n";
-        let c = extract(text, 10);
+        let c = extract(text, 10, true);
         let texts: Vec<&str> = c.iter().map(|x| x.text.as_str()).collect();
         assert_eq!(texts.len(), 2, "{texts:?}");
         assert!(texts[0].contains("应该被抽出来当候选条目"));
         assert!(texts[1].contains("够长的表格主张"));
         assert_eq!(c[0].line, 3);
         assert_eq!(c[1].line, 6);
+    }
+
+    #[test]
+    fn 默认不抽表格行_因为表格第一列常常不是主张() {
+        // 一手来源.md 那张表的第一列是"来源名/链接"：抽出来全是噪音（2026-10-20 实测 10/10）
+        let text = "| [SQLite WAL](https://www.sqlite.org/wal.html) `200` | 追加日志 + checkpoint | WAL 原理 |\n";
+        assert!(extract(text, 10, false).is_empty(), "默认不该抽表格");
+        assert_eq!(extract(text, 10, true).len(), 1, "--tables 才抽");
     }
 
     #[test]

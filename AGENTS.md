@@ -45,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 **流程图**：`SOP.md` S35 是一张 8 行的总表（开工/决策/执行/验收/学习/监督/熔断/入库），细则见 S29–S34。
 
-**8 道**：单测+集成（<!-- fact:tests_total -->469<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
-集成 <!-- fact:integration -->71<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
+**8 道**：单测+集成（<!-- fact:tests_total -->470<!-- /fact --> 条：engine <!-- fact:engine_unit -->379<!-- /fact --> /
+集成 <!-- fact:integration -->72<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->，另 <!-- fact:engine_ignored -->1<!-- /fact --> ignore）·
 文档测试 · clippy 零警告 · 工程门禁 · 外壳 <!-- fact:shell_tests -->79<!-- /fact --> · 交付 · 界面（真窗口自报 DOM）· 真源。
 
 **数字只信 `tools/facts.json`**；改数字用 `node tools/check_facts.mjs --write-docs`，**别手抄**。

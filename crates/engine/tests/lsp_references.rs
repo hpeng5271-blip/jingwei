@@ -207,3 +207,34 @@ fn python_模块属性出现在_references_里() {
     assert!(hit, "应在 main.py 里找到对 DEBUG 的引用；实际 {locs:?}");
     let _ = std::fs::remove_dir_all(&root);
 }
+/// 追加：类属性的引用也能被 LSP 找到（2026-10-20，站点 kind 修好之后）。
+/// 这里用真协议问一次，避免"单测过了、编辑器里没有"。
+
+#[test]
+fn 类属性的引用出现在_references_里() {
+    let root = std::env::temp_dir().join(format!("jw-lspref-cls-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("app.py"),
+        "class Cfg:\n    DEBUG = True\n\n\ndef run():\n    return Cfg.DEBUG\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut s).expect("索引失败");
+
+    let uri = lsp::path_to_uri(&root.join("app.py"));
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 11, "method": "textDocument/references",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": 1, "character": 5 },
+            "context": { "includeDeclaration": false }
+        }
+    });
+    let resp = lsp::handle(Some(&s), &root, &msg).expect("references 要有响应");
+    let locs = resp["result"].as_array().cloned().unwrap_or_default();
+    let hit = locs.iter().any(|l| l["range"]["start"]["line"] == 5);
+    assert!(hit, "应能找到第 6 行（0 基 5）的用法；实际 {locs:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}

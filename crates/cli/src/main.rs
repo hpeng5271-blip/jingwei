@@ -21,6 +21,7 @@ mod cmd_symbol;
 mod cmd_harvest;
 mod cmd_kverify;
 mod cmd_next;
+mod cmd_impact;
 mod cmd_positions;
 mod cmd_rename;
 mod cmd_watch;
@@ -418,6 +419,8 @@ fn run() -> i32 {
         "progress" => cmd_learn::cmd_progress(&root, &rest, json),
         // **一屏"现在该做什么"**（2026-10-21）：把学/收/编/挂四处状态汇总成入口（纯读，不改任何状态）
         "next" => cmd_next::cmd_next(&root, json),
+        // **改动影响面**（2026-10-21）：往上游看谁会受影响——改代码前真正要问的那句
+        "impact" => cmd_impact::cmd_impact(&root, &rest, json),
         // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
         "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
         // **采集半边**（2026-10-20，pro 任务卡 D）：从散文里抽逐字候选 → _inbox 待确认
@@ -594,6 +597,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     // 只能从说明书或记忆里找。帮助表是"有哪些命令"的唯一真源，漏了就等于没这命令。
     ("handover", &[], "接手人一页纸：能不能跑 / 规模 / 热点 / 下一步 / 决策理由 / 文件状态"),
     ("explain", &["why"], "这个符号是什么、定义在哪、被谁调 / 被引用几处"),
+    (
+        "impact",
+        &[],
+        "**改动影响面**：往上游看谁会受影响（静态 `calls` 边逐层，`--depth 1..4`）",
+    ),
     ("positions", &[], "图谱里的行号对不对（用原文回读，0 错才可信）"),
     ("rename", &[], "改名：判不准就不发编辑；`--write` 才落盘，写完回读"),
     ("watch", &[], "盯文件变化，写成 journal，给 `discover --journal` 用"),
@@ -961,3 +969,4 @@ mod tests {
         );
     }
 }
+

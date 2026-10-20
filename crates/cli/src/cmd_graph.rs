@@ -208,8 +208,12 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                 }
             }
             let sites = crate::cmd_graph::sites(&store);
+            // **主张层**（2026-10-20，pro 任务卡 G）：claims 是 docs/knowledge 的投影，
+            // 单独一张表，不混进 nodes——这里是它唯一露脸的地方。
+            let claims = store.claims_count().unwrap_or(0);
+            let claims_linked = store.claims_linked_count().unwrap_or(0);
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({ "nodes": nodes, "edges": edges, "sites": sites })).unwrap_or_default());
+                println!("{}", serde_json::to_string_pretty(&json!({ "nodes": nodes, "edges": edges, "sites": sites, "claims": claims, "claims_linked": claims_linked })).unwrap_or_default());
             } else {
                 println!();
                 println!("  节点：");
@@ -224,6 +228,9 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                 for (k, n) in &sites {
                     println!("    {k:<12} {n}");
                 }
+                println!("  知识层（claims，独立表）：");
+                println!("    {:<12} {}", "claims", claims);
+                println!("    {:<12} {}", "已挂符号", claims_linked);
                 println!();
             }
             0

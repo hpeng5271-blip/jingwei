@@ -13,7 +13,7 @@ use std::path::Path;
 
 use jingwei_engine::graph::store::Store;
 
-use crate::cmd_knowledge::{load_entries, Entry, LEVELS};
+use crate::cmd_knowledge::{Entry, LEVELS};
 
 /// 等级排序：一手 → 转写 → 二手 → 查不了（同等级按条目名稳定排序）。
 fn level_rank(level: &str) -> usize {
@@ -24,16 +24,6 @@ fn level_rank(level: &str) -> usize {
 /// **整串相等**才算，绝不做包含匹配。
 pub fn refers_to(e: &Entry, key: &str) -> bool {
     e.symbols.iter().any(|s| s == key)
-}
-
-/// 按等级排序后的引用条目。
-pub fn sorted_refs(mut refs: Vec<Entry>) -> Vec<Entry> {
-    refs.sort_by(|a, b| {
-        let la = level_rank(a.fields.get("level").map(|s| s.as_str()).unwrap_or(""));
-        let lb = level_rank(b.fields.get("level").map(|s| s.as_str()).unwrap_or(""));
-        la.cmp(&lb).then_with(|| a.file.cmp(&b.file))
-    });
-    refs
 }
 
 pub fn cmd_symbol(root: &Path, rest: &[String], json: bool) -> i32 {
@@ -68,61 +58,63 @@ pub fn cmd_symbol(root: &Path, rest: &[String], json: bool) -> i32 {
     }
 
     let exists = store.node(&key).map(|n| n.is_some()).unwrap_or(false);
-    let all = load_entries(root);
-    // 名字查询时，条目里也可能写的是名字（`symbol: foo` 之外，直接写 foo）——这时按名字也要能匹配。
-    let refs = sorted_refs(
-        all.iter()
-            .filter(|e| refers_to(e, &key) || (!query.starts_with("symbol:") && refers_to(e, query)))
-            .cloned()
-            .collect(),
-    );
 
-    if json {
-        let v: Vec<_> = refs
-            .iter()
-            .map(|e| {
-                serde_json::json!({
-                    "entry": e.file,
-                    "claim": e.fields.get("claim"),
-                    "level": e.fields.get("level"),
-                    "source": e.fields.get("source"),
-                })
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::json!({"symbol": key, "exists": exists, "entries": v, "recompile": if exists {0} else {refs.len()}})
-        );
-        return if exists { 0 } else { 1 };
-    }
-
+    // **走图边**（pro 任务卡 G）：主张层已经落库，这里不再回头 grep Markdown。
+    // 查不到时用 `claim_edges` 的原样串反查——那条边还在，说明条目该重编了。
     if !exists {
+        let refs = store
+            .claims_referencing_missing(query)
+            .or_else(|_| store.claims_referencing_missing(&key))
+            .unwrap_or_default();
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"symbol": key, "exists": false, "entries": [], "recompile": refs.len()})
+            );
+            return 1;
+        }
         println!("查不了：`{query}` 不在图谱里（可能改名/删了，或者还没索引）");
         if refs.is_empty() {
             return 1;
         }
         println!("待重编（{} 条）：", refs.len());
-        for e in &refs {
-            println!(
-                "  ! {} —— 条目的 symbol 指向了一个图谱里没有的符号",
-                e.file
-            );
+        for id in &refs {
+            println!("  ! {id} —— 条目的 symbol 指向了一个图谱里没有的符号");
         }
         return 1;
     }
 
+    let mut claims = store.claims_for_symbol(&key).unwrap_or_default();
+    claims.sort_by(|a, b| level_rank(&a.level).cmp(&level_rank(&b.level)).then_with(|| a.id.cmp(&b.id)));
+
+    if json {
+        let v: Vec<_> = claims
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "entry": c.id,
+                    "claim": c.claim,
+                    "level": c.level,
+                    "source": c.source,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({"symbol": key, "exists": true, "entries": v, "recompile": 0})
+        );
+        return 0;
+    }
+
     println!("符号：{key}");
-    if refs.is_empty() {
+    if claims.is_empty() {
         println!("无条目解释（知识层里还没有围绕这个符号的主张）");
         return 0;
     }
-    println!("条目：{} 条（按等级排：一手 → 转写 → 二手 → 查不了）", refs.len());
-    for (i, e) in refs.iter().enumerate() {
-        let lv = e.fields.get("level").map(|s| s.as_str()).unwrap_or("?");
-        let claim = e.fields.get("claim").map(|s| s.as_str()).unwrap_or("(没写主张)");
-        let src = e.fields.get("source").map(|s| s.as_str()).unwrap_or("(没写来源)");
-        println!("  {}. [{lv}] {claim}", i + 1);
-        println!("     ← {src}");
+    println!("条目：{} 条（按等级排：一手 → 转写 → 二手 → 查不了）", claims.len());
+    for (i, c) in claims.iter().enumerate() {
+        println!("  {}. [{}] {}", i + 1, c.level, c.claim);
+        println!("     ← {}", c.source);
     }
     0
 }
@@ -154,13 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn 按等级排序一手在前() {
-        let v = sorted_refs(vec![
-            e("c", "二手", &["x"]),
-            e("a", "一手", &["x"]),
-            e("b", "转写", &["x"]),
-        ]);
-        let names: Vec<&str> = v.iter().map(|x| x.file.as_str()).collect();
-        assert_eq!(names, vec!["a.md", "b.md", "c.md"]);
+    fn 等级排序一手在前二手最后() {
+        // symbol 的输出顺序靠 level_rank：一手(0) < 转写(1) < 二手(2) < 查不了(3)
+        assert!(level_rank("一手") < level_rank("转写"));
+        assert!(level_rank("转写") < level_rank("二手"));
+        assert!(level_rank("二手") < level_rank("查不了"));
+        assert_eq!(level_rank("没写等级"), LEVELS.len());
     }
 }

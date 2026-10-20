@@ -48,6 +48,21 @@ pub struct FileState {
     pub nodes_count: Option<i64>,
 }
 
+/// 一条知识主张（`docs/knowledge/*.md` 在库里的投影）。
+///
+/// 它与 `Node` **不是一类东西**：claim 不是代码实体，不参与"这个符号是什么"的三态判定。
+/// 单独一张表 + 单独的边表，靠边与符号相连——这样查符号永远不会撞到主张的名字。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimRow {
+    pub id: String,
+    pub claim: String,
+    pub level: String,
+    pub source: String,
+    pub topic: String,
+    /// 条目里写的**原样**符号串（可能指向已经不存在的符号）。
+    pub symbols: Vec<String>,
+}
+
 /// 项目里的图谱库。
 ///
 /// **一个项目一个库**，跟着项目走（放在 `.jingwei/graph.db`），删掉即可重建——
@@ -432,6 +447,88 @@ impl Store {
     /// **为什么必须在一个事务里**：半途失败会让图谱停在
     /// "旧关系已失效、新关系还没写"的状态——看起来像"这个文件什么都没引用了"，
     /// 而那是个假象，而且**不报错**。
+    /// 一条知识主张（`docs/knowledge/*.md` 的投影，**不是**代码实体）。
+    ///
+    /// 为什么单独给类型而不复用 `Node`：claim 与符号是**两种东西**，
+    /// 混进 `nodes` 会让"查符号"查到一个主张的名字——三态就此失真。
+    pub fn sync_claims(&mut self, rows: &[ClaimRow], now: i64) -> Result<(usize, usize)> {
+        let tx = self.conn.transaction().context("开事务失败")?;
+        tx.execute("DELETE FROM claim_edges", [])?;
+        tx.execute("DELETE FROM claims", [])?;
+        let mut linked = 0usize;
+        for r in rows {
+            tx.execute(
+                "INSERT INTO claims(id,claim,level,source,topic,updated_at) VALUES(?1,?2,?3,?4,?5,?6)",
+                rusqlite::params![r.id, r.claim, r.level, r.source, r.topic, now],
+            )
+            .with_context(|| format!("写 claim 失败：{}", r.id))?;
+            for s in &r.symbols {
+                // **原样存**（哪怕图谱里没有这个符号）：这样"条目引用了一个已改名的符号"
+                // 这件事留得下来，`stale` 才有东西可报；真伪由查询侧 JOIN nodes 判。
+                tx.execute(
+                    "INSERT OR IGNORE INTO claim_edges(claim,dst) VALUES(?1,?2)",
+                    rusqlite::params![r.id, s],
+                )?;
+                let hit: i64 = tx.query_row(
+                    "SELECT count(*) FROM nodes WHERE id=?1 AND kind='symbol'",
+                    rusqlite::params![s],
+                    |x| x.get(0),
+                )?;
+                if hit > 0 {
+                    linked += 1;
+                }
+            }
+        }
+        tx.commit().context("提交 claims 失败")?;
+        Ok((rows.len(), linked))
+    }
+
+    pub fn claims_count(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT count(*) FROM claims", [], |r| r.get(0))?)
+    }
+
+    /// 至少挂上一个**真实存在的**符号的主张数。
+    pub fn claims_linked_count(&self) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT count(DISTINCT e.claim) FROM claim_edges e \
+             JOIN nodes n ON n.id=e.dst AND n.kind='symbol'",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// 这个符号被哪些主张解释过（**走图边**，不再回头 grep Markdown）。
+    pub fn claims_for_symbol(&self, symbol_id: &str) -> Result<Vec<ClaimRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT c.id, c.claim, c.level, c.source, c.topic FROM claims c \
+             JOIN claim_edges e ON e.claim=c.id \
+             JOIN nodes n ON n.id=e.dst AND n.kind='symbol' \
+             WHERE e.dst=?1 ORDER BY c.level, c.id",
+        )?;
+        let rows = st.query_map(rusqlite::params![symbol_id], |r| {
+            Ok(ClaimRow {
+                id: r.get(0)?,
+                claim: r.get(1)?,
+                level: r.get(2)?,
+                source: r.get(3)?,
+                topic: r.get(4)?,
+                symbols: Vec::new(),
+            })
+        })?;
+        Ok(rows.filter_map(|x| x.ok()).collect())
+    }
+
+    /// 引用了某个**图谱里没有**的符号的主张（待重编候选）。
+    pub fn claims_referencing_missing(&self, raw: &str) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare(
+            "SELECT c.id FROM claims c JOIN claim_edges e ON e.claim=c.id WHERE e.dst=?1",
+        )?;
+        let rows = st.query_map(rusqlite::params![raw], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(|x| x.ok()).collect())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn apply_file_update(
         &mut self,

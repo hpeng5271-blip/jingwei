@@ -33,6 +33,19 @@ jingwei knowledge fix <条目> --symbol <新符号|symbol:id>   # 精确改挂�
 - `fix` 只认**精确匹配**：名字同名多义会拒绝并要求 `symbol:` 全 id；新符号在图谱里查不到也拒绝。
 - 没有图谱时 `stale` 打印「查不了」并 exit=0（干净克隆不该因为还没 `index` 而红）。
 
+## 主张层：条目落进图谱（`claims` 表）
+
+```powershell
+jingwei knowledge sync     # 把 docs/knowledge/*.md 投影成图谱里的 claims + claim_edges
+```
+
+- 表 `claims` 与 `claim_edges` **单独存在**，不塞进 `nodes`：claim 不是代码实体，
+  混进去会让"查符号"查到主张名、`positions` 原文回读错位。claim 只通过边与符号相连。
+- `knowledge add` / `knowledge fix` 会自动同步；手改条目后要跑一次 `sync`，
+  否则 `knowledge check` 会红：「图谱里的主张 N 条 ≠ 过筛条目 M 条——投影过期了」。
+- `jingwei symbol` 现在是**走图边**返回主张（不再回头 grep Markdown）；
+  `jingwei graph stats` 能看到 `claims` / `已挂符号` 两行；`jingwei handover` 多一行「③b 知识层」。
+
 ## 学到哪了：进度落在本地，不进仓库
 
 ```powershell

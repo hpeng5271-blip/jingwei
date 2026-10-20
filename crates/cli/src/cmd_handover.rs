@@ -65,6 +65,11 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
         Some((f, s, c, r)) => println!("  ③ 规模：{f} 文件 / {s} 符号 / {c} 调用边 / {r} 引用边"),
         None => println!("  ③ 规模：查不了（图谱还没建，先 `jingwei index`）"),
     }
+    // **知识层**（2026-10-20，pro 任务卡 G）：接手人要看到"这个项目积累了多少主张、多少挂上了代码"。
+    // 没有主张就整行不打印——空着比编一句"0 条"更能说明"这里还什么都没积累"。
+    if let Some(n) = knowledge_line(root) {
+        println!("{n}");
+    }
     if tops.is_empty() {
         println!("  ④ 热点：查不了（没有调用边，或还没索引）");
     } else {
@@ -88,4 +93,21 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
     }
     println!();
     0
+}
+
+/// 知识层那一行：主张数 + 挂上代码的条数。
+///
+/// 为什么要它：接手人真正怕的是"这套东西只剩代码，脑子里那部分没了"。
+/// 主张是**知识衰减**的对冲物——不显示，等于不知道有没有积累。
+/// 没有主张就返回 None（整行不打印）：空着比编一句"0 条"更能说明"这里还什么都没积累"。
+fn knowledge_line(root: &Path) -> Option<String> {
+    let s = query::open_for_query(root).ok()?;
+    let n = s.claims_count().ok()?;
+    if n == 0 {
+        return None;
+    }
+    let linked = s.claims_linked_count().unwrap_or(0);
+    Some(format!(
+        "  ③b 知识层：{n} 条主张 / {linked} 条已挂符号（明细 jingwei knowledge check）"
+    ))
 }

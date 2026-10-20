@@ -9,9 +9,9 @@
     "shell_tests": 79,
     "gates": 4,
     "graph_files": 150,
-    "graph_symbols": 2081,
-    "graph_nodes": 2241,
-    "graph_edges": 3739,
+    "graph_symbols": 2089,
+    "graph_nodes": 2249,
+    "graph_edges": 3748,
     "motives_landed": 19,
     "motives_pending": 6
   }

@@ -170,6 +170,33 @@ CREATE VIEW IF NOT EXISTS live_edges AS
   SELECT src, dst, kind, source, confidence, created_at
   FROM edges WHERE expires_at IS NULL;
 
+-- ── 知识主张（2026-10-20 加，pro 任务卡 G）───────────────────────────
+-- 为什么单独一张表、**不塞进 nodes**：
+--   `nodes.kind` 是"代码实体"的 CHECK 枚举，claim 混进去会污染三态判定——
+--   查"符号"会撞到 claim 的名字，`positions` 的原文回读也会错位。
+--   所以 claim 只在自己这张表里，靠 `claim_edges` 与代码符号相连；
+--   它永不被当成符号命中（所有符号查询都按 nodes.kind 过滤）。
+--
+-- 真源仍是 `docs/knowledge/*.md`；这两张表是它的**投影**（`jingwei knowledge sync` 重建）。
+CREATE TABLE IF NOT EXISTS claims (
+  id         TEXT PRIMARY KEY,           -- 条目文件名去 .md（稳定、可读、和条目一一对应）
+  claim      TEXT NOT NULL,
+  level      TEXT NOT NULL CHECK (level IN ('一手','转写','二手','查不了')),
+  source     TEXT NOT NULL,
+  topic      TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+
+-- `dst` 存条目里写的**原样符号串**（`symbol:...#Foo` 或裸名字）：
+-- 这样"条目引用了一个已经被改名的符号"这件事也留得下来，`stale` 才有东西可报。
+-- 指向真实符号的那部分由查询侧 JOIN nodes 过滤（只认 kind='symbol'）。
+CREATE TABLE IF NOT EXISTS claim_edges (
+  claim TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  dst   TEXT NOT NULL,
+  PRIMARY KEY (claim, dst)
+);
+CREATE INDEX IF NOT EXISTS idx_claim_edges_dst ON claim_edges(dst);
+
 -- ── 版本戳 ─────────────────────────────────────────────────────────
 -- schema_version 是唯一的版本真相源（《数据层设计》§9）。迁移脚本读它决定跑哪几步。
 INSERT OR IGNORE INTO meta(k, v) VALUES ('schema_version', '4');

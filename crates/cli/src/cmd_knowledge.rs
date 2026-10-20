@@ -406,8 +406,50 @@ pub fn fix_symbol(root: &Path, store: Option<&Store>, entry: &str, old: &str, ne
     Ok(())
 }
 
+/// 把过筛的条目投影成图谱里的 claim 行（真源仍是 `docs/knowledge/*.md`）。
+pub fn claim_rows(root: &Path) -> Vec<jingwei_engine::graph::store::ClaimRow> {
+    load_entries(root)
+        .into_iter()
+        .filter(|e| why_rejected(root, e).is_none())
+        .map(|e| jingwei_engine::graph::store::ClaimRow {
+            id: entry_stem(&e.file).to_string(),
+            claim: e.fields.get("claim").cloned().unwrap_or_default(),
+            level: e.fields.get("level").cloned().unwrap_or_default(),
+            source: e.fields.get("source").cloned().unwrap_or_default(),
+            topic: e.fields.get("topic").cloned().unwrap_or_default(),
+            symbols: e.symbols.clone(),
+        })
+        .collect()
+}
+
+/// 重建图谱里的主张层。返回 (主张数, 挂上真实符号的条数)；没有图谱时返回 None。
+pub fn sync_claims(root: &Path) -> Option<(usize, usize)> {
+    let mut store = Store::open(&root.join(".jingwei").join("graph.db")).ok()?;
+    let rows = claim_rows(root);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    store.sync_claims(&rows, now).ok()
+}
+
 pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
-    if rest.first().map(|s| s.as_str()) == Some("add") {
+    if rest.first().map(|s| s.as_str()) == Some("sync") {
+        return match sync_claims(root) {
+            Some((n, linked)) => {
+                if json {
+                    println!("{}", serde_json::json!({"claims": n, "linked": linked}));
+                } else {
+                    println!("已同步：图谱里有 {n} 条主张（其中 {linked} 条挂着真实符号）");
+                }
+                0
+            }
+            None => {
+                println!("查不了：没有图谱（先 jingwei index）——主张层没法落库");
+                0
+            }
+        };
+    } else if rest.first().map(|s| s.as_str()) == Some("add") {
         return add_from_inbox(root, rest.get(1).map(|s| s.as_str()), json);
     }
     if rest.first().map(|s| s.as_str()) == Some("stale") {
@@ -461,6 +503,7 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         };
         return match fix_symbol(root, store.as_ref(), entry, &old, new) {
             Ok(()) => {
+                _ = sync_claims(root); // 改挂也要同步，否则图谱里还是旧边
                 println!("已改挂：{entry} 的 {old} → {new}（写回文件了）");
                 0
             }
@@ -476,7 +519,19 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         return 2;
     }
     let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
-    let r = evaluate(root, store.as_ref());
+    let mut r = evaluate(root, store.as_ref());
+
+    // **主张层是不是跟条目一致**（pro 任务卡 G 的验收）：图谱里那张 `claims` 表是投影，
+    // 条目改了不同步，`symbol` 就会拿旧主张回答——那是静默的错，必须红。
+    if let Some(st) = store.as_ref() {
+        let db = st.claims_count().unwrap_or(-1);
+        if db >= 0 && db != r.passed as i64 {
+            r.problems.push(format!(
+                "图谱里的主张 {} 条 ≠ 过筛条目 {} 条——投影过期了，跑 jingwei knowledge sync",
+                db, r.passed
+            ));
+        }
+    }
 
     if json {
         let v = serde_json::json!({
@@ -590,10 +645,13 @@ fn add_from_inbox(root: &Path, arg: Option<&str>, json: bool) -> i32 {
         return 2;
     }
     _ = std::fs::remove_file(&from);
+    // **入库即同步**（pro 任务卡 G）：条目是 Markdown 真源，图谱里那张主张表是投影；
+    // 不同步的话 `symbol` 会查不到刚入库的这条，等于白写。
+    _ = sync_claims(root);
     if json {
         println!("{}", serde_json::json!({"added": name}));
     } else {
-        println!("已入库：docs/knowledge/{name}（候选区已清）");
+        println!("已入库：docs/knowledge/{name}（候选区已清，主张层已同步）");
         println!("接着跑 jingwei knowledge check 看漏斗");
     }
     0

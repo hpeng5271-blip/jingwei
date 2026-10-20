@@ -114,9 +114,14 @@ pub fn cmd_symbol(root: &Path, rest: &[String], json: bool) -> i32 {
         return 0;
     }
     println!("条目：{} 条（按等级排：一手 → 转写 → 二手 → 查不了）", claims.len());
+    // 每条带"在主题里第几步"：反查出来的往往是路径中段，不知道前面还有没有该先补的。
+    let entries = crate::cmd_knowledge::load_entries(root);
     for (i, c) in claims.iter().enumerate() {
         println!("  {}. [{}] {}", i + 1, c.level, c.claim);
         println!("     ← {}", c.source);
+        if let Some(where_) = crate::cmd_learn::topic_position(root, &entries, &c.id) {
+            println!("     {where_}");
+        }
     }
     0
 }

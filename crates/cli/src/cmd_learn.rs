@@ -1,4 +1,4 @@
-//! `jingwei learn <主题>`：把知识条目按**显式前置**排成一条能照着走的路径（2026-10-20，pro 任务卡 B）。
+﻿//! `jingwei learn <主题>`：把知识条目按**显式前置**排成一条能照着走的路径（2026-10-20，pro 任务卡 B）。
 //!
 //! 这是双头漏斗第一个**可见出口**：严筛过的条目（`docs/knowledge/*.md`）按 `prereq:` 排顺序，
 //! 每一步都带「凭什么」——claim / level / source，有符号或决策的再带落点。
@@ -242,7 +242,7 @@ fn learn_by_symbol(root: &Path, query: &str, json: bool) -> i32 {
 
 /// 这条条目在它所属主题里的位置：`主题：判据 第 2/3 步（前面还有 1 步）`。
 /// 判不出来（没主题 / 顺序有环）就返回 None——不编位置。
-fn topic_position(root: &Path, entries: &[crate::cmd_knowledge::Entry], id: &str) -> Option<String> {
+pub(crate) fn topic_position(root: &Path, entries: &[crate::cmd_knowledge::Entry], id: &str) -> Option<String> {
     // 图里的 claim id 是**去 `.md` 的条目名**，`load_entries` 的 `file` 带 `.md`——按 stem 比。
     let e = entries
         .iter()
@@ -621,3 +621,4 @@ mod short_symbol_tests {
         assert_eq!(short_symbol("symbol:weird"), "weird");
     }
 }
+

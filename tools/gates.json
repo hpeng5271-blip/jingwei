@@ -14,8 +14,8 @@
     },
     {
       "name": "真源门禁",
-      "cmd": "node tools/collect_facts.mjs --check",
-      "why": "现场重采一遍，比 tools/facts.json 是不是过期——**这是所有数字校验的地基**。原来它不在门禁链上，于是改了测试不重刷、门禁照样全绿，而文档里 64 处标记是在守旧数字。代价约 30 秒（内含一遍 cargo test），但这是唯一能让「文档数字 = 代码事实」不依赖记忆的办法"
+      "cmd": "node tools/knowledge-gate.mjs && node tools/collect_facts.mjs --check",
+      "why": "两件事同源：①**知识条目严筛**（docs/knowledge/*.md 缺来源/等级就红、关联符号查不到算查不了）②现场重采一遍，比 tools/facts.json 是不是过期。原来真源只守数字，于是'没有来源的主张'只能靠人看——现在它和数字一样，是门禁的事。代价约 40 秒（内含一遍 cargo test）"
     },
     {
       "name": "交付门禁",

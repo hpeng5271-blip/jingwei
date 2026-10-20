@@ -28,6 +28,7 @@
 ## 3. 管理结构（最少集合）
 
 - **门禁 4 道**：单测+集成 · clippy · 真源 · 交付。文档测试并入单测；工程门禁/外壳/界面门禁**挂起**（UI 挂起后无意义）。
+  真源那道守两件事：**数字 = 代码事实**（`collect_facts --check`）+ **主张 = 有据可查**（`knowledge check`，2026-10-20 并入）。
 - **skill 3 条**：`jingwei-gate` / `jingwei-graph` / `jingwei-triage`；其余挂起（目录保留，registry 标 `deprecated`，不安装）。
 - **文档只留 6 份**：`AGENTS.md` / `框架.md` / `SOP.md` / `设计.md` / `数据层设计.md` / `债表.md`；
   其余（process 史料、复审、真输入、今日复盘、标注、总稿）**停更并归档**。`使用说明.md` 是唯一的用户向文档。

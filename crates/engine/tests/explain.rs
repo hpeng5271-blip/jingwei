@@ -1,4 +1,6 @@
-﻿use jingwei_engine::graph::{index, query, store::Store};
+﻿#![allow(clippy::let_underscore_must_use)]
+
+use jingwei_engine::graph::{index, query, store::Store};
 
 fn fixture(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("jw-explain-{tag}-{}", std::process::id()));

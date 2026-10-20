@@ -220,6 +220,9 @@ fn learn_by_symbol(root: &Path, query: &str, json: bool) -> i32 {
         "围绕符号：{key} —— {} 条主张（按等级：一手 → 转写 → 二手 → 查不了）",
         claims.len()
     );
+    // 条目 → 主题与位置（用 plan() 排一次，指出"这条在主题里的第几步、前面还有几步"）：
+    // 光列主张不给上下文，用户不知道要不要先补前面的。
+    let entries = crate::cmd_knowledge::load_entries(root);
     for (i, c) in claims.iter().enumerate() {
         println!(
             "  {i}. [{lv}] {claim}（条目：{name}）",
@@ -229,9 +232,38 @@ fn learn_by_symbol(root: &Path, query: &str, json: bool) -> i32 {
             name = crate::cmd_explain::short_name(&c.id)
         );
         println!("     ← {}", c.source);
+        if let Some(where_) = topic_position(root, &entries, &c.id) {
+            println!("     {where_}");
+        }
     }
-    println!("（想看这些主张的前置顺序：jingwei learn <topic>；打勾：--mark <序号>）");
+    println!("（想看整条路径：jingwei learn <主题>；打勾：--mark <序号>）");
     0
+}
+
+/// 这条条目在它所属主题里的位置：`主题：判据 第 2/3 步（前面还有 1 步）`。
+/// 判不出来（没主题 / 顺序有环）就返回 None——不编位置。
+fn topic_position(root: &Path, entries: &[crate::cmd_knowledge::Entry], id: &str) -> Option<String> {
+    // 图里的 claim id 是**去 `.md` 的条目名**，`load_entries` 的 `file` 带 `.md`——按 stem 比。
+    let e = entries
+        .iter()
+        .find(|e| e.file.trim_end_matches(".md") == id || e.file == id)?;
+    let raw = e.fields.get("topic")?;
+    let topic = raw
+        .split([',', '，', '、', ';', '；'])
+        .map(|t| t.trim())
+        .find(|t| !t.is_empty())?;
+    let plan = plan(root, topic).ok()?;
+    let idx = plan.iter().position(|s| s.entry == id)?;
+    let before = idx;
+    if before == 0 {
+        Some(format!("主题：{topic} 第 1/{} 步", plan.len()))
+    } else {
+        Some(format!(
+            "主题：{topic} 第 {}/{} 步（前面还有 {before} 步）",
+            idx + 1,
+            plan.len()
+        ))
+    }
 }
 
 /// 符号 id 的短形态：`symbol:crates/cli/src/main.rs#cmd_positions` → `cmd_positions（crates/cli/src/main.rs）`。

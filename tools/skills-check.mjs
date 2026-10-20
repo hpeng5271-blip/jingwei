@@ -6,7 +6,7 @@
 // 规则（都可判）：
 //   1. frontmatter 必须有 name / description；name 与目录名一致；description 20–200 字。
 //   2. frontmatter 之后必须有正文，且至少包含三个二级标题（做什么/怎么做/验收）。
-//   3. 单文件 ≤60 行（技能是注入成本，越短越好用）。
+//   3. 单文件 ≤40 行（技能是注入成本，越短越好用）。
 //   4. 不许出现"TODO"/"待补"。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +36,7 @@ export function checkSkills() {
     const body = text.slice(fm[0].length);
     const h2 = (body.match(/^## /gm) || []).length;
     if (h2 < 3) problems.push(`${name}: 正文只有 ${h2} 个二级标题（至少 3 个）`);
-    if (lines.length > 60) problems.push(`${name}: ${lines.length} 行（上限 60）`);
+    if (lines.length > 40) problems.push(`${name}: ${lines.length} 行（上限 40）`);
     if (/TODO|待补/.test(body)) problems.push(`${name}: 含 TODO/待补`);
     rows.push({ name, lines: lines.length, desc: desc.length });
   }

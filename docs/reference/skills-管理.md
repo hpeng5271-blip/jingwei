@@ -38,7 +38,7 @@
 ```
 会话里直接说"用 jingwei-gate" / "按 jingwei-graph 走"，模型会加载对应 skill（目录里能看到的 7 条）。
 
-## 6. 当前清单（7 条）
+## 6. 当前清单（9 条）
 
 | skill | 用途 | 来源 |
 |---|---|---|
@@ -49,3 +49,5 @@
 | `jingwei-docs` | 数字标记、结构约束、交付 | check_facts / pack.ps1 |
 | `review-diff` | 提交前自查，只报真问题 | VS Code Copilot 技能结构（改编） |
 | `commit-evidence` | 证据先行再提交 | VS Code Copilot 技能结构 + 我们的验收三样 |
+| `systematic-debugging` | 先根因再修，四步 | superpowers-zh（MIT，改编） |
+| `writing-plans` | 多步任务先写计划 | superpowers-zh（MIT，改编） |

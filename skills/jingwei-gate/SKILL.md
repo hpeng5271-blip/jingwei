@@ -4,7 +4,6 @@ description: 运行并解读经纬门禁（tools/gates.ps1）。当需要跑门�
 ---
 
 # 经纬门禁：跑、读、红不提交
-
 ## 何时用 / 不用
 
 - 用：收口、交付、改了解析/索引/图谱、要写"多少秒/多少条"的数字。
@@ -21,8 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 ## 读结果
 
-1. 只认结尾表里的 failed 数（别读中间的通过行）。
-2. 红了先看 `FAIL` 那道对应的脚本，**不要重跑整轮**。
+1. 只认结尾表里的 failed 数。2. 红了先看 `FAIL` 那道对应的脚本，不重跑整轮。
 3. 交接口径：门禁表 + `git status` + "新判据改之前确实红过"的输出。
 
 ## 铁律
@@ -38,4 +36,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 
 ## 省 token
 
-只看结尾 10 行；需要细节时按 FAIL 行去读对应脚本输出，不整段粘贴日志。
+只看结尾 10 行；细节按 FAIL 行去读对应脚本输出，不整段粘贴日志。

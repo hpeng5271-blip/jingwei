@@ -148,6 +148,24 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
     let mut written = 0;
     let mut skipped = 0;
     let mut total = 0;
+    // 已有主张（条目 + 待确认区）：用来按**主张文本**去重
+    let known_claims: Vec<String> = {
+        let mut v = Vec::new();
+        for dir in [inbox.clone(), root.join("docs").join("knowledge")] {
+            if let Ok(rd) = std::fs::read_dir(&dir) {
+                for e in rd.filter_map(|e| e.ok()) {
+                    let Ok(t) = std::fs::read_to_string(e.path()) else {
+                        continue;
+                    };
+                    if let Some(c) = t.lines().find(|l| l.starts_with("claim:")) {
+                        v.push(c.trim_start_matches("claim:").trim().to_string());
+                    }
+                }
+            }
+        }
+        v
+    };
+    let mut created: Vec<String> = Vec::new();
     for rec in text.split('\u{1e}') {
         let rec = rec.trim();
         if rec.is_empty() {
@@ -168,6 +186,12 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
         }
         let marker = format!("git:{sha}");
         if seen.contains(&marker) {
+            skipped += 1;
+            continue;
+        }
+        // **按主张去重**：已经收进库（或已在待确认区）的主张不再抽——
+        // 否则同一条"为什么"会以"提交一次、文档一次"的面目重复出现，人还得手动删。
+        if known_claims.iter().any(|c| c == subject) {
             skipped += 1;
             continue;
         }
@@ -196,17 +220,25 @@ fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
         );
         if std::fs::write(inbox.join(&name), content).is_ok() {
             written += 1;
+            created.push(name.trim_end_matches(".md").to_string());
         }
     }
     if json {
         println!(
             "{}",
-            serde_json::json!({"source": "git log", "scanned": total, "candidates": written, "skipped": skipped})
+            serde_json::json!({"source": "git log", "scanned": total, "candidates": written, "skipped": skipped, "created": created})
         );
     } else {
-        println!("看了最近 {total} 个提交，新抽 {written} 条候选（跳过 {skipped}：太短/太长/已抽过）→ docs/knowledge/_inbox/");
+        println!("看了最近 {total} 个提交，新抽 {written} 条候选（跳过 {skipped}：太短/太长/已抽过/主张重复）→ docs/knowledge/_inbox/");
         if written > 0 {
-            println!("确认方式：把 check 改成真判据后跑 `jingwei knowledge add <条目文件名>`");
+            // 直接给可复制的名字（不带 .md，`add` 两种都认）
+            for n in created.iter().take(3) {
+                println!("  · {n}");
+            }
+            if created.len() > 3 {
+                println!("  · …等 {} 条", created.len());
+            }
+            println!("确认方式：把 check 改成真判据后跑 `jingwei knowledge add <名字>`");
         }
     }
     0

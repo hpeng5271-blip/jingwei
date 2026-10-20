@@ -125,9 +125,37 @@ pub fn plan(root: &Path, topic: &str) -> Result<Vec<Step>, String> {
     Ok(order)
 }
 
+/// 进度落在**本地状态**里（`%LOCALAPPDATA%\jingwei\learn-progress.json`），不进仓库：
+/// 它是"我这个人的学到哪了"，不是项目事实；写进 git 会让每次学习产生脏提交与冲突。
+pub fn progress_path() -> std::path::PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    base.join("jingwei").join("learn-progress.json")
+}
+
+/// 读进度：一组**步骤 id**（= 条目名去 .md）。跨主题共用同一份，不许各存一份。
+pub fn load_progress(path: &Path) -> BTreeSet<String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return BTreeSet::new();
+    };
+    serde_json::from_str::<Vec<String>>(&text)
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default()
+}
+
+pub fn save_progress(path: &Path, done: &BTreeSet<String>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let v: Vec<&String> = done.iter().collect();
+    std::fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".into()))
+}
+
+/// `jingwei learn <主题> [--mark <步骤>]`：打勾 + 打路径。
 pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
     let Some(topic) = rest.iter().find(|a| !a.starts_with("--")) else {
-        eprintln!("用法：jingwei learn <主题>     （按 docs/knowledge 条目的 prereq 排顺序）");
+        eprintln!("用法：jingwei learn <主题> [--mark <步骤id>]   （按 docs/knowledge 条目的 prereq 排顺序）");
         return 2;
     };
 
@@ -152,6 +180,37 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
         }
     };
 
+    // `--mark <步骤id>`：只能标 learn **真的输出过**的步骤，别的 id 一律拒绝（防止伪进度）。
+    if let Some(pos) = rest.iter().position(|a| a == "--mark") {
+        let Some(step) = rest.get(pos + 1) else {
+            eprintln!("--mark 后面要跟步骤 id（就是 learn 列表里每条对应的条目名）");
+            return 2;
+        };
+        if !plan.iter().any(|s| &s.entry == step) {
+            eprintln!("`{step}` 不在主题 `{topic}` 的步骤里——只能标 learn 真的输出过的步骤");
+            let ids: Vec<&str> = plan.iter().map(|s| s.entry.as_str()).collect();
+            eprintln!("可用：{}", ids.join(" / "));
+            return 1;
+        }
+        let path = progress_path();
+        let mut done = load_progress(&path);
+        done.insert(step.clone());
+        if let Err(e) = save_progress(&path, &done) {
+            eprintln!("写进度失败：{e}");
+            return 2;
+        }
+        let learned = plan.iter().filter(|s| done.contains(&s.entry)).count();
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"marked": step, "learned": learned, "total": plan.len()})
+            );
+        } else {
+            println!("已记：{step}（{topic} 进度 {learned}/{}）", plan.len());
+        }
+        return 0;
+    }
+
     let bad = plan.iter().filter(|s| s.rejected.is_some()).count();
     if json {
         let v: Vec<_> = plan
@@ -173,18 +232,22 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
             serde_json::json!({"topic": topic, "steps": v, "rejected": bad})
         );
     } else {
+        let done = load_progress(&progress_path());
+        let learned = plan.iter().filter(|s| done.contains(&s.entry)).count();
         println!(
-            "主题：{topic} —— {} 步（顺序来自条目的 prereq，不是文件名）",
+            "主题：{topic} —— {} 步（已学 {learned}/{}；顺序来自条目的 prereq，不是文件名）",
+            plan.len(),
             plan.len()
         );
         for (i, s) in plan.iter().enumerate() {
+            let mark = if done.contains(&s.entry) { "●" } else { "○" };
             match &s.rejected {
                 Some(why) => {
-                    println!("  {}. ? {} —— 查不了：{why}", i + 1, s.claim);
+                    println!("  {mark} {}. ? {} —— 查不了：{why}", i + 1, s.claim);
                     println!("     ← {} · {}", s.level, s.source);
                 }
                 None => {
-                    println!("  {}. {}", i + 1, s.claim);
+                    println!("  {mark} {}. {}", i + 1, s.claim);
                     let mut basis = format!("     ← {} · {}", s.level, s.source);
                     if !s.prereq.is_empty() {
                         basis.push_str(&format!("（前置：{}）", s.prereq.join(" / ")));
@@ -195,6 +258,9 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
                     }
                 }
             }
+        }
+        if learned < plan.len() {
+            println!("打勾：jingwei learn {topic} --mark <步骤id>（步骤 id 见上面每条对应条目名）");
         }
     }
     if bad > 0 {
@@ -207,6 +273,26 @@ pub fn cmd_learn(root: &Path, rest: &[String], json: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 进度落盘再读回来一致() {
+        let p = std::env::temp_dir().join(format!("jw-prog-{}.json", std::process::id()));
+        _ = std::fs::remove_file(&p);
+        let mut s = BTreeSet::new();
+        s.insert("原子能-01-先问为什么".to_string());
+        save_progress(&p, &s).unwrap();
+        let back = load_progress(&p);
+        assert_eq!(back, s);
+        _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn 进度文件坏了就当没学() {
+        let p = std::env::temp_dir().join(format!("jw-prog-bad-{}.json", std::process::id()));
+        std::fs::write(&p, "不是 json").unwrap();
+        assert!(load_progress(&p).is_empty());
+        _ = std::fs::remove_file(&p);
+    }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("jw-learn-{tag}-{}", std::process::id()));

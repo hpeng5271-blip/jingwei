@@ -86,5 +86,27 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
     for (f, l) in ex.references.iter().take(5) {
         println!("  {f}:{l}");
     }
+    // **复用**（2026-10-20）：`explain` 是最常用的入口，知识层却要人另外想起来敲 `symbol`。
+    // 这里只报"有几条"，不重复打印内容——内容仍在 `jingwei symbol <id>`，免得两处各说一套。
+    if let Some(n) = knowledge_count(root, &ex.id) {
+        match n {
+            0 => {}
+            _ => println!("知识层：{n} 条主张解释过它 → jingwei symbol {}", ex.id),
+        }
+    }
     0
+}
+
+/// 知识条目里挂在这个符号上的条数。`None` = 知识层不可用（不算错，只是不显示）。
+fn knowledge_count(root: &Path, symbol_id: &str) -> Option<usize> {
+    let entries = crate::cmd_knowledge::load_entries(root);
+    if entries.is_empty() {
+        return None;
+    }
+    Some(
+        entries
+            .iter()
+            .filter(|e| crate::cmd_symbol::refers_to(e, symbol_id))
+            .count(),
+    )
 }

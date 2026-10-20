@@ -33,6 +33,18 @@ jingwei knowledge fix <条目> --symbol <新符号|symbol:id>   # 精确改挂�
 - `fix` 只认**精确匹配**：名字同名多义会拒绝并要求 `symbol:` 全 id；新符号在图谱里查不到也拒绝。
 - 没有图谱时 `stale` 打印「查不了」并 exit=0（干净克隆不该因为还没 `index` 而红）。
 
+## 学到哪了：进度落在本地，不进仓库
+
+```powershell
+jingwei learn 原子能                                  # 6 步，○/● 标进度
+jingwei learn 原子能 --mark 原子能-01-先问为什么      # 打勾（只能标 learn 真输出过的步骤）
+jingwei progress 原子能                              # 同一视图：已学 N/总 M
+```
+
+- 进度存 `%LOCALAPPDATA%\jingwei\learn-progress.json`：它是**个人的学习状态**，不是项目事实，
+  所以不进 git、不进任何门禁（否则每次学习都产生脏提交与冲突）。
+- `--mark` 的 id 必须是 learn 真输出过的步骤名，别的 id 直接拒绝（防止乱标成"伪进度"）。
+
 ## 不算条目的文件
 
 - `README.md`（本页）与 `_` 开头的文件：说明与草稿，不参与漏斗计数。

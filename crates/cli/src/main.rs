@@ -279,6 +279,18 @@ fn run() -> i32 {
                     }
                 }
             }
+            // **learn --mark 用**：--mark <步骤id>（带值，原样透传）
+            "--mark" => {
+                rest.push("--mark".to_string());
+                i += 1;
+                match argv.get(i) {
+                    Some(v) => rest.push(v.clone()),
+                    None => {
+                        eprintln!("--mark 后面要跟步骤 id（learn 列表里那一条的条目名）");
+                        return 2;
+                    }
+                }
+            }
             // **为什么没扫到**：扫完按原因统计被跳过的目录
             "--why" => rest.push("--why".to_string()),
             "--help" | "-h" => return help(),
@@ -396,6 +408,8 @@ fn run() -> i32 {
         "knowledge" => cmd_knowledge::cmd_knowledge(&root, &rest, json),
         // **学习路径出口**（2026-10-20，pro 任务卡 B）：知识条目按 prereq 排成能照着走的顺序
         "learn" => cmd_learn::cmd_learn(&root, &rest, json),
+        // **学习进度**（2026-10-20，pro 任务卡 F）：同一个出口，进度落在本地状态里
+        "progress" => cmd_learn::cmd_learn(&root, &rest, json),
         // **符号 → 条目 反查**（2026-10-20，pro 任务卡 C）：可操作图谱的第一个查询原语
         "symbol" => cmd_symbol::cmd_symbol(&root, &rest, json),
         // **采集半边**（2026-10-20，pro 任务卡 D）：从散文里抽逐字候选 → _inbox 待确认
@@ -584,6 +598,11 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
         "learn",
         &[],
         "**学习路径**：按条目的 prereq 排出「先学什么、凭什么」——顺序不是文件名",
+    ),
+    (
+        "progress",
+        &[],
+        "**学到哪了**：已学 N/总 M、逐条 ○/●（进度存本地，不进仓库、不进任何门禁）",
     ),
     (
         "symbol",

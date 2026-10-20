@@ -55,11 +55,32 @@ const REQUIRED = [
   // 这条口径变了就要改这里——门禁守的是"现在说好的那件事"，不是历史。
 ];
 
-/** 源码里最新的 .rs 的修改时间——用来判断"包是不是落后于代码"。 */
+/**
+ * 包里那个 exe 是从哪些源码编出来的 —— **只比这些**。
+ *
+ * 2026-10-20 抓到一次假红：`jingwei-gui` 只依赖 `jingwei-engine → jingwei-model`（见 `src-tauri/Cargo.toml`），
+ * 而我改了 `crates/cli`（新命令）之后，交付门禁报「包里的 exe 比源码旧 45.4 分钟」——
+ * 可 GUI 二进制根本不含 cli 代码，那次"旧"是**判据把不相干的源码算进来了**。
+ * 判据错向"假红"比错向"假绿"安全，但假红会逼人重打包或关掉门禁，最后一样失守。
+ * 所以：**比 GUI 的依赖闭包**。哪天包里重新带 CLI，就把 `crates/cli` 加回这个表。
+ */
+const PACK_SOURCE_ROOTS = [
+  join(ROOT, 'crates', 'model'),
+  join(ROOT, 'crates', 'engine'),
+  join(ROOT, 'src-tauri'),
+];
+
+/** 依赖闭包里最新的 .rs 的修改时间——用来判断"包是不是落后于代码"。 */
 function newestSourceMtime() {
   let newest = 0;
   const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
       if (['target', 'node_modules', '.git', 'dist'].includes(name)) continue;
       const p = join(dir, name);
       const st = statSync(p);
@@ -67,7 +88,7 @@ function newestSourceMtime() {
       else if (name.endsWith('.rs')) newest = Math.max(newest, st.mtimeMs);
     }
   };
-  walk(ROOT);
+  for (const r of PACK_SOURCE_ROOTS) walk(r);
   return newest;
 }
 

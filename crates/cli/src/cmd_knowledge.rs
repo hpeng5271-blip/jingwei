@@ -46,6 +46,8 @@ pub struct Report {
     pub problems: Vec<String>,
     /// 三态里的"查不了"：符号查不到、或没有图谱。
     pub gaps: Vec<String>,
+    /// **文本态**：过筛了但没挂任何符号（按符号遍历不到）。只列名字，不算红。
+    pub unmapped: Vec<String>,
     pub no_graph: bool,
     /// 待确认区（`_inbox/`）的候选数——**不计入 total**（候选不是条目）。
     pub inbox: usize,
@@ -309,6 +311,9 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
         r.passed += 1;
 
         if e.symbols.is_empty() {
+            // **文本态**（没挂符号）的要能看见名字，不能只看到一个数字：
+            // 挂不上符号的条目按符号遍历不到，等于只在 Markdown 里睡着。
+            r.unmapped.push(crate::cmd_explain::short_name(&e.file));
             continue;
         }
         match store {
@@ -608,6 +613,7 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
             "total": r.total, "passed": r.passed, "linked": r.linked,
             "problems": r.problems, "gaps": r.gaps, "no_graph": r.no_graph,
             "inbox": r.inbox, "bad_candidates": r.bad_candidates,
+            "unmapped": r.unmapped,
         });
         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
     } else {
@@ -623,6 +629,19 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         }
         for g in &r.gaps {
             println!("  ! {g}");
+        }
+        if !r.unmapped.is_empty() {
+            let shown: Vec<&str> = r.unmapped.iter().take(5).map(|s| s.as_str()).collect();
+            let more = if r.unmapped.len() > 5 {
+                format!(" 等 {} 条", r.unmapped.len())
+            } else {
+                String::new()
+            };
+            println!(
+                "  · 文本态 {} 条（没挂符号：按符号遍历不到，只能按主题学）：{}{more}",
+                r.unmapped.len(),
+                shown.join(" / ")
+            );
         }
         if r.total == 0 {
             println!("  · docs/knowledge/ 里还没有条目（先写一条再跑）");

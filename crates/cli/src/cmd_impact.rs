@@ -1,4 +1,4 @@
-﻿//! `jingwei impact <符号>`：**改这里会牵动什么**（2026-10-21）。
+//! `jingwei impact <符号>`：**改这里会牵动什么**（2026-10-21）。
 //!
 //! `explain` 回答"它是什么、被谁调"；`impact` 回答"往上一层一层往上，谁会受影响"。
 //! 这是改代码前真正要问的那句，也是图谱比 grep 强的地方（grep 找不到"间接调用"）。
@@ -100,6 +100,8 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
     if total == 0 {
         println!("  查不了：静态 calls 边里没有谁调用它——可能是入口/回调/死代码，也可能调用关系是动态的");
         println!("  （工具不猜：动态派发、反射、字符串调用都解析不出来）");
+        // 没有上游 ≠ 没有知识：这条代码自己可能被条目解释过，那才是最该看的"为什么"。
+        print_known(&store, std::slice::from_ref(&key));
         return 0;
     }
     let mut files: BTreeSet<String> = BTreeSet::new();
@@ -121,8 +123,39 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
     if files.len() > 8 {
         println!("    …等 {} 个", files.len());
     }
+    // **知识层交叉**（2026-10-21）：受影响的符号如果被条目解释过，一并列出来。
+    // 一次查询同时回答"谁会坏"和"这条代码背后记着什么为什么"。
+    let mut all_ids: Vec<String> = vec![key.clone()];
+    for ids in by_depth.values() {
+        all_ids.extend(ids.iter().cloned());
+    }
+    print_known(&store, &all_ids);
     println!("  边界：只看静态 calls 边；getattr / 反射 / 字符串调用、跨进程与外部调用都查不了");
     0
+}
+
+/// 受影响的符号里，哪些被知识条目解释过（最多 5 条，超了报数）。
+fn print_known(store: &jingwei_engine::graph::store::Store, ids: &[String]) {
+    let mut known: Vec<(String, String)> = Vec::new();
+    for id in ids {
+        let Ok(cs) = store.claims_for_symbol(id) else {
+            continue;
+        };
+        for c in cs {
+            let (_, name) = split_id(id);
+            known.push((name, crate::cmd_explain::short_name(&c.id)));
+        }
+    }
+    if known.is_empty() {
+        return;
+    }
+    println!("  知识层（受影响的符号被这些主张解释过）：");
+    for (sym, entry) in known.iter().take(5) {
+        println!("    {sym} ← {entry}");
+    }
+    if known.len() > 5 {
+        println!("    …等 {} 条", known.len());
+    }
 }
 
 /// `symbol:path#name` → (path, name)；不是这个形态就都给原串。

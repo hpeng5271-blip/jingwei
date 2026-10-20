@@ -633,6 +633,15 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
             println!("  · 没有图谱：符号侧一律「查不了」（先 jingwei index）");
         }
     }
+    // **待重编提示**（pro 卡：闭环完整性，不是纯 UX）：`stale` 是独立命令，不提示的话
+    // 用户几乎不会去跑它，回收动作就隐形了。N **与 stale 同源**（都来自 `stale_claims()`），
+    // 且**只提示、不置 exit≠0**——"红"只留给缺字段/来源失效那类真问题。
+    if let Some(st) = store.as_ref() {
+        let stale = st.stale_claims().map(|v| v.len()).unwrap_or(0);
+        if stale > 0 && !json {
+            println!("  ⚠ 待重编 {stale} 条 → jingwei knowledge stale");
+        }
+    }
     // 缺字段 / 等级错 / 来源不存在 / 候选来源失效 = 红；缺口（查不了）只如实报。
     if r.problems.is_empty() && r.bad_candidates.is_empty() {
         0

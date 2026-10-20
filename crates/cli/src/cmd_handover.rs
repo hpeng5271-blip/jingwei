@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use jingwei_engine::graph::{query, store::Store};
+use jingwei_engine::graph::query;
 use jingwei_engine::understand::guide;
 
 pub fn cmd_handover(root: &Path, json: bool) -> i32 {

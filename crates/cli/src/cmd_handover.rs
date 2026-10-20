@@ -107,7 +107,42 @@ fn knowledge_line(root: &Path) -> Option<String> {
         return None;
     }
     let linked = s.claims_linked_count().unwrap_or(0);
+    // 主题一览：让接手人一眼看到"这个项目里能学什么"，而不是只知道有条数。
+    // 主题来自条目（编辑态：`topic:` 允许逗号多写）；条数仍以图为准。
+    let mut topics: Vec<(String, usize)> = Vec::new();
+    for e in crate::cmd_knowledge::load_entries(root) {
+        let Some(raw) = e.fields.get("topic") else {
+            continue;
+        };
+        for t in raw.split([',', '，', '、', ';', '；']) {
+            let t = t.trim();
+            if t.is_empty() {
+                continue;
+            }
+            match topics.iter_mut().find(|(name, _)| name == t) {
+                Some((_, c)) => *c += 1,
+                None => topics.push((t.to_string(), 1)),
+            }
+        }
+    }
+    if topics.is_empty() {
+        return Some(format!(
+            "  ③b 知识层：{n} 条主张 / {linked} 条已挂符号（明细 jingwei knowledge check）"
+        ));
+    }
+    topics.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let shown: Vec<String> = topics
+        .iter()
+        .take(4)
+        .map(|(t, c)| format!("{t} {c}"))
+        .collect();
+    let more = if topics.len() > 4 {
+        format!(" 等 {} 个主题", topics.len())
+    } else {
+        String::new()
+    };
     Some(format!(
-        "  ③b 知识层：{n} 条主张 / {linked} 条已挂符号（明细 jingwei knowledge check）"
+        "  ③b 知识层：{n} 条主张 / {linked} 条已挂符号 · 主题：{}{more}（jingwei learn <主题> 照着走）",
+        shown.join(" / ")
     ))
 }

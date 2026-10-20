@@ -32,6 +32,10 @@ pub fn plan(root: &Path, topic: &str) -> Result<Vec<Step>, String> {
     let all: Vec<Entry> = load_entries(root);
     let want = topic.trim();
 
+    // **前置可以跨主题**：知识本身是一张图，主题只是取子图。
+    // 所以"前置存不存在"按**全部条目**判，排序只在本主题内部看（外部前置按"已学"处理）。
+    let all_names: BTreeSet<String> = all.iter().map(|e| entry_stem(&e.file).to_string()).collect();
+
     // 主题匹配：`topic:` 可写多个，逗号分隔，精确匹配（不做模糊，模糊会把不相干的条目卷进来）。
     let picked: Vec<Entry> = all
         .into_iter()
@@ -66,14 +70,14 @@ pub fn plan(root: &Path, topic: &str) -> Result<Vec<Step>, String> {
             })
             .unwrap_or_default();
         for p in &prereq {
-            if !names.contains(p) {
-                // 前置指向了不存在（或不属于本主题）的条目：这一条**不能**猜顺序
+            if !all_names.contains(p) {
+                // 前置指向了根本不存在的条目：这一条**不能**猜顺序
                 return Err(format!(
-                    "{stem} 的前置 `{p}` 不在本主题的条目里——顺序查不了（别猜）"
+                    "{stem} 的前置 `{p}` 在 docs/knowledge 里找不到——顺序查不了（别猜）"
                 ));
             }
-        }
-        steps.insert(
+            let _ = &names; // 主题内的名字只用于排序，见下面的 Kahn
+        }        steps.insert(
             stem.clone(),
             Step {
                 entry: stem,
@@ -95,7 +99,8 @@ pub fn plan(root: &Path, topic: &str) -> Result<Vec<Step>, String> {
         let ready: Vec<String> = steps
             .values()
             .filter(|s| !done.contains(&s.entry))
-            .filter(|s| s.prereq.iter().all(|p| done.contains(p)))
+            // 本主题内的前置要等它先出；**跨主题的前置按"已学"处理**（它不在这个子图里）。
+            .filter(|s| s.prereq.iter().all(|p| !names.contains(p) || done.contains(p)))
             .map(|s| s.entry.clone())
             .collect();
         if ready.is_empty() {
@@ -231,6 +236,28 @@ mod tests {
         let plan = plan(&root, "t").unwrap();
         let order: Vec<&str> = plan.iter().map(|s| s.entry.as_str()).collect();
         assert_eq!(order, vec!["z-first", "a-second", "m-third"]);
+        _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 跨主题的前置按已学处理() {
+        let root = tmp("cross");
+        put(&root, "base.md", &entry("other", ""));
+        put(&root, "in-topic.md", &entry("t", "prereq: base\n"));
+        let plan = plan(&root, "t").unwrap();
+        // 子图里只有 in-topic；外部前置 base 不在子图里，按"已学"处理，不报错也不排进去
+        let order: Vec<&str> = plan.iter().map(|s| s.entry.as_str()).collect();
+        assert_eq!(order, vec!["in-topic"]);
+        assert_eq!(plan[0].prereq, vec!["base"]);
+        _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 前置根本不存在就拒绝给顺序() {
+        let root = tmp("ghost");
+        put(&root, "a.md", &entry("t", "prereq: 根本没有这条\n"));
+        let e = plan(&root, "t").unwrap_err();
+        assert!(e.contains("找不到"), "{e}");
         _ = std::fs::remove_dir_all(&root);
     }
 

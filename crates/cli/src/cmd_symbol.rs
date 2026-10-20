@@ -11,8 +11,6 @@
 
 use std::path::Path;
 
-use jingwei_engine::graph::store::Store;
-
 use crate::cmd_knowledge::{Entry, LEVELS};
 
 /// 等级排序：一手 → 转写 → 二手 → 查不了（同等级按条目名稳定排序）。
@@ -32,7 +30,7 @@ pub fn cmd_symbol(root: &Path, rest: &[String], json: bool) -> i32 {
         return 2;
     };
 
-    let Ok(store) = Store::open(&root.join(".jingwei").join("graph.db")) else {
+    let Some(store) = crate::cmd_knowledge::open_graph(root) else {
         println!("查不了：没有图谱（先 jingwei index）");
         return 1;
     };

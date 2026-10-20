@@ -509,6 +509,16 @@ impl Store {
             .query_row("SELECT count(*) FROM claims", [], |r| r.get(0))?)
     }
 
+    /// 图谱里有多少个符号。**判"有没有索引过"**用它：
+    /// 0 = 还没 index（此时"条目引用的符号查不到"是**查不了**，不是"该重编"）。
+    pub fn symbol_count(&self) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT count(*) FROM nodes WHERE kind='symbol'",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
     /// 至少挂上一个**真实存在的**符号的主张数。
     pub fn claims_linked_count(&self) -> Result<i64> {
         Ok(self.conn.query_row(

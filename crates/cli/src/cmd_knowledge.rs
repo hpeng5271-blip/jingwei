@@ -443,15 +443,40 @@ pub fn claim_rows(root: &Path) -> Vec<jingwei_engine::graph::store::ClaimRow> {
         .collect()
 }
 
-/// 重建图谱里的主张层。返回 (主张数, 挂上真实符号的条数)；没有图谱时返回 None。
+/// 重建图谱里的主张层。返回 (主张数, 挂上真实符号的条数)；**没索引过**时返回 None
+/// （不许悄悄建一个空库——那会在人家目录里留东西，还让三态变糊）。
 pub fn sync_claims(root: &Path) -> Option<(usize, usize)> {
-    let mut store = Store::open(&root.join(".jingwei").join("graph.db")).ok()?;
+    let db = root.join(".jingwei").join("graph.db");
+    if !db.exists() {
+        return None;
+    }
+    let mut store = Store::open(&db).ok()?;
+    if store.symbol_count().unwrap_or(0) == 0 {
+        return None; // 库在但还没索引过：主张无处可挂，别写进去
+    }
     let rows = claim_rows(root);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     store.sync_claims(&rows, now).ok()
+}
+
+/// **只读**打开图谱：库不存在或还没索引过 → None（= 查不了，**不是**"没有主张"）。
+///
+/// 为什么不能用 `Store::open`：它会**建库**。在没索引过的项目里跑一次 `knowledge check`
+/// 就在人家目录里留下一个空 `.jingwei/graph.db`，而且随后 `stale` 会把"还没索引"
+/// 误报成"条目全该重编"——三态就压扁了（2026-10-20 实测踩到）。
+pub fn open_graph(root: &Path) -> Option<Store> {
+    let db = root.join(".jingwei").join("graph.db");
+    if !db.exists() {
+        return None;
+    }
+    let s = jingwei_engine::graph::query::open_for_query(root).ok()?;
+    if s.symbol_count().unwrap_or(0) == 0 {
+        return None;
+    }
+    Some(s)
 }
 
 pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
@@ -476,7 +501,7 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
     if rest.first().map(|s| s.as_str()) == Some("stale") {
         // **走库**（pro 任务卡 H）：过期判断与反查同源，不再读 Markdown。
         // 库落后于 Markdown 的风险由 `knowledge check` 的投影对账兜底（那边会红）。
-        let Ok(store) = Store::open(&root.join(".jingwei").join("graph.db")) else {
+        let Some(store) = open_graph(root) else {
             println!("查不了：没有图谱（先 jingwei index）——待重编判不出来");
             return 0;
         };
@@ -512,7 +537,7 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
             eprintln!("缺 --symbol <新符号|symbol:id>");
             return 2;
         };
-        let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
+        let store = open_graph(root);
         // 旧符号 = 该条目里所有查不到的符号（通常就一处）
         let old = load_entries(root)
             .into_iter()
@@ -544,7 +569,8 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         eprintln!("      jingwei knowledge add <_inbox 里的文件名>   （人确认后把候选移进条目）");
         return 2;
     }
-    let store = Store::open(&root.join(".jingwei").join("graph.db")).ok();
+    // 读路径一律**只读**开图（`open_graph` 不建库）：没索引过就说查不了，不制造副作用。
+    let store = open_graph(root);
     let mut r = evaluate(root, store.as_ref());
 
     // **投影对账**（pro 任务卡 G/H）：`claims` 表是 Markdown 的投影。

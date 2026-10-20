@@ -87,6 +87,7 @@ jingwei progress 原子能                              # 同一视图：已学 
 
 ```powershell
 jingwei harvest docs/research/原子能-转写要点.md   # 抽逐字候选到 _inbox/
+jingwei harvest --from-git 8                     # 从最近 8 个提交发现候选（标题逐字、正文随附；同一 sha 只抽一次）
 jingwei knowledge add 原子能-转写要点-L43.md       # 人确认（先补 check 字段）后入账
 ```
 

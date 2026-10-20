@@ -101,9 +101,130 @@ pub fn candidate_name(src: &Path, line: u32) -> String {
     format!("{clean}-L{line}.md")
 }
 
+/// `jingwei harvest --from-git [N]`：**从提交记录里发现新知识**（2026-10-21）。
+///
+/// 为什么是提交记录：这个仓库的提交信息按规矩写 `## 为什么` / `## 证据`，"为什么"正是
+/// 知识衰减最快的那部分——它只在人的脑子里和 commit 里，不在代码里。
+///
+/// 规矩与文档采集一致：`claim` 用**提交标题原样**（逐字，不改写）、`source: git:<短 sha>`、
+/// `check: 待验`（人补了才准 `add`）、写进 `_inbox/` **不计入采集**；同一 sha 抽过就跳过。
+fn harvest_git(root: &Path, n: usize, json: bool) -> i32 {
+    // `\x1e` 分隔提交、`\x1f` 分隔字段（标题里可能有空格/中文，不能用空格分列）
+    let out = std::process::Command::new("git")
+        .args([
+            "log",
+            &format!("-n{n}"),
+            "--format=%h%x1f%s%x1f%b%x1e",
+            "--no-merges",
+        ])
+        .current_dir(root)
+        .output();
+    let Ok(o) = out else {
+        println!("查不了：这台机器上没有 git");
+        return 0;
+    };
+    if !o.status.success() {
+        println!("查不了：git log 跑不起来（这个目录是 git 仓库吗？）");
+        return 0;
+    }
+    let text = String::from_utf8_lossy(&o.stdout).to_string();
+    let inbox = root.join("docs").join("knowledge").join("_inbox");
+    if let Err(e) = std::fs::create_dir_all(&inbox) {
+        eprintln!("建不了 {}：{e}", inbox.display());
+        return 2;
+    }
+    // 已抽过哪些 sha：扫 _inbox 与正式条目里的 `source: git:<sha>`
+    let mut seen = String::new();
+    for dir in [inbox.clone(), root.join("docs").join("knowledge")] {
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.filter_map(|e| e.ok()) {
+                if let Ok(t) = std::fs::read_to_string(e.path()) {
+                    seen.push_str(&t);
+                }
+            }
+        }
+    }
+
+    let mut written = 0;
+    let mut skipped = 0;
+    let mut total = 0;
+    for rec in text.split('\u{1e}') {
+        let rec = rec.trim();
+        if rec.is_empty() {
+            continue;
+        }
+        let mut it = rec.split('\u{1f}');
+        let (Some(sha), Some(subject)) = (it.next(), it.next()) else {
+            continue;
+        };
+        let body = it.next().unwrap_or("").trim();
+        total += 1;
+        let sha = sha.trim();
+        let subject = subject.trim();
+        // 标题太短/太长都不是一句主张；`Merge` 之类在 --no-merges 后也不会出现
+        if subject.chars().count() < 8 || subject.chars().count() > 120 {
+            skipped += 1;
+            continue;
+        }
+        let marker = format!("git:{sha}");
+        if seen.contains(&marker) {
+            skipped += 1;
+            continue;
+        }
+        // 文件名：git-<sha>-<标题前 16 字>。**空格换成 `-`**——文件名带空格就没法在命令行里
+        // 直接 `knowledge add <名字>`（实测踩到）；Windows 还不许结尾是空格/点。
+        let slug: String = subject
+            .chars()
+            .take(16)
+            .map(|c| {
+                if c.is_whitespace() || "\\/:*?\"<>|".contains(c) {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let slug = slug.trim_matches(|c: char| c == '-' || c == '.');
+        let name = format!("git-{sha}-{slug}.md");
+        let body_text = if body.is_empty() {
+            String::new()
+        } else {
+            format!("\n提交正文：\n{body}\n")
+        };
+        let content = format!(
+            "---\nclaim: {subject}\nsource: git:{sha}\nlevel: 一手\ncheck: 待验\ncandidate: true\n---\n\n来自提交 `{sha}`（标题原样，未改写）。{body_text}"
+        );
+        if std::fs::write(inbox.join(&name), content).is_ok() {
+            written += 1;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"source": "git log", "scanned": total, "candidates": written, "skipped": skipped})
+        );
+    } else {
+        println!("看了最近 {total} 个提交，新抽 {written} 条候选（跳过 {skipped}：太短/太长/已抽过）→ docs/knowledge/_inbox/");
+        if written > 0 {
+            println!("确认方式：把 check 改成真判据后跑 `jingwei knowledge add <条目文件名>`");
+        }
+    }
+    0
+}
+
 pub fn cmd_harvest(root: &Path, rest: &[String], json: bool) -> i32 {
+    // `--git [N]`：从提交记录里发现新知识（第 N 默认为 8）。
+    if let Some(pos) = rest.iter().position(|a| a == "--from-git") {
+        let n = rest
+            .get(pos + 1)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(8)
+            .clamp(1, 50);
+        return harvest_git(root, n, json);
+    }
     let Some(arg) = rest.iter().find(|a| !a.starts_with("--")) else {
         eprintln!("用法：jingwei harvest <docs/research 下的文件>   （抽候选条目到 docs/knowledge/_inbox/）");
+        eprintln!("      jingwei harvest --from-git [N]                （从最近 N 个提交里发现候选，默认 8）");
         return 2;
     };
     let src = PathBuf::from(arg);
@@ -194,3 +315,4 @@ mod tests {
         assert_eq!(infer_level("docs/research/观点地图.md"), "二手");
     }
 }
+

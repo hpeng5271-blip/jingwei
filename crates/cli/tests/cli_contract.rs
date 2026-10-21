@@ -1499,3 +1499,24 @@ fn spec_的_json_带协议() {
         }
     }
 }
+
+/// **环境失败必须带三字段**：`env use <不存在的路径>` 不许只给一句"失败"。
+/// 判据：带「暂无法探知 / 缺：/ 为什么：/ 怎么补：」四样，且退出码非 0。
+#[test]
+fn env_失败时带三字段() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("env-three-fields");
+    let p = d.to_str().unwrap().to_string();
+    let bogus = if cfg!(windows) {
+        "D:\\nope\\python.exe"
+    } else {
+        "/nope/python"
+    };
+    let o = run(&["env", "use", bogus, "--root", &p]);
+    let s = stdout(&o);
+    assert_ne!(code(&o), 0, "绑不上必须非 0 退出：{s}");
+    for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+        assert!(s.contains(k), "环境失败必须带三字段（缺 `{k}`）：{s}");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

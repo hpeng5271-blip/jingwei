@@ -386,7 +386,17 @@ pub(crate) fn cmd_env(root: &Path, rest: Vec<String>, venv_name: Option<String>,
                 .or(bound)
                 .or_else(|| probe::first_working(root, contract.as_ref(), 3).map(|(p, _)| p));
             let Some(base) = base else {
-                println!("\n  {} 找不到可用解释器，先 jingwei envs 看一眼\n", c(RED, "✗"));
+                // **三字段**（2026-10-21，人定的口径）：环境类失败不许只给一句"找不到"。
+                println!(
+                    "\n  {} {}\n",
+                    c(RED, "✗"),
+                    env3(
+                        "建虚拟环境要一个能用的解释器",
+                        "可用的 Python 解释器",
+                        "PATH、注册表、常见安装目录、项目 venv 与契约里都没找到",
+                        "先 jingwei envs 看这台机器有什么；或用 jingwei env use <python.exe> 指定一个",
+                    )
+                );
                 return 1;
             };
             println!();
@@ -411,8 +421,16 @@ pub(crate) fn cmd_env(root: &Path, rest: Vec<String>, venv_name: Option<String>,
                     0
                 }
                 Err(e) => {
-                    println!("  {} {}", c(RED, "✗"), e);
-                    println!();
+                    println!(
+                        "\n  {} {}\n",
+                        c(RED, "✗"),
+                        env3(
+                            "这个解释器建不了虚拟环境",
+                            "能建 venv 的解释器（venv / ensurepip 至少有一个）",
+                            &format!("{e}"),
+                            "换一个完整发行版：jingwei env use <python.exe>；或装 uv 后跑 uv venv",
+                        )
+                    );
                     1
                 }
             }
@@ -441,8 +459,14 @@ pub(crate) fn cmd_env(root: &Path, rest: Vec<String>, venv_name: Option<String>,
                     println!("\n  {} 契约已指向 {}\n", c(GREEN, "✓"), p.display());
                     if st.version.is_empty() {
                         println!(
-                            "  {} 但它跑不起来——重新绑一个能用的\n",
-                            c(YELLOW, "!")
+                            "  {} {}\n",
+                            c(RED, "✗"),
+                            env3(
+                                "这个解释器绑上了，但跑不起来",
+                                "能跑出 --version 的解释器",
+                                "绑定的路径存在、但执行 --version 拿不到版本",
+                                "换一个：jingwei env use <另一个 python.exe>；用 jingwei envs 看候选",
+                            )
                         );
                         return 1;
                     }
@@ -450,7 +474,16 @@ pub(crate) fn cmd_env(root: &Path, rest: Vec<String>, venv_name: Option<String>,
                     0
                 }
                 Err(e) => {
-                    println!("\n  {} {}\n", c(RED, "✗"), e);
+                    println!(
+                        "\n  {} {}\n",
+                        c(RED, "✗"),
+                        env3(
+                            "这个路径绑不进契约",
+                            "一个存在且能跑的解释器路径",
+                            &format!("{e}"),
+                            "确认路径写对（Windows 上是 python.exe）；用 jingwei envs 看这台机器有什么",
+                        )
+                    );
                     1
                 }
             }
@@ -650,4 +683,13 @@ pub(crate) fn cmd_snap(root: &Path, json: bool, diff_only: bool) -> i32 {
     }
     println!();
     0
+}
+
+/// **环境类失败的三字段**（2026-10-21，人定的口径）：
+/// `暂无法探知：<一句话>｜缺：…｜为什么：…｜怎么补：…`。
+///
+/// 为什么单列一个函数：环境失败是这套工具最容易"给一句没用的错"的地方——
+/// 用户想知道的是"缺什么、为什么缺、下一步敲什么"，而不是"失败了"。
+fn env3(what: &str, missing: &str, why: &str, how: &str) -> String {
+    format!("暂无法探知：{what}｜缺：{missing}｜为什么：{why}｜怎么补：{how}")
 }

@@ -396,3 +396,18 @@ mod env_allow_tests {
         assert_eq!(hs, vec!["evil.example".to_string(), "other.example".to_string()], "{hs:?}");
     }
 }
+
+/// 收回一条允许（`net deny` 用）：只删这一条，其他不动。返回有没有删掉。
+pub fn remove_allow(path: &Path, what: &str, now: i64) -> bool {
+    let rows = read_allows(path);
+    let kept: Vec<&(String, i64)> = rows.iter().filter(|(w, _)| w != what).collect();
+    if kept.len() == rows.len() {
+        return false;
+    }
+    let out: Vec<serde_json::Value> = kept
+        .iter()
+        .filter(|(_, until)| *until > now)
+        .map(|(w, u)| json!({"what": w, "until": u}))
+        .collect();
+    std::fs::write(path, serde_json::to_string_pretty(&out).unwrap_or_default()).is_ok()
+}

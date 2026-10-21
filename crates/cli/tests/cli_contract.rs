@@ -1618,3 +1618,48 @@ fn 本次会话放行后网络闸门不再拒() {
     assert!(!s.contains("暂无法探知"), "放行后不该再打拒绝话术：{s}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`jingwei net`**：白名单看得见、临时允许放得进也收得回，且 `--json` 走同一份协议。
+///
+/// 守的是"允许表只有一处实现"（失效模式 #17）：界面以后也走这条命令，不许自己写一份 JSON。
+#[test]
+fn net_能看清白名单并放行收回() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("net-cmd");
+    let allow = d.join("allow.json");
+    let allow_s = allow.to_str().unwrap().to_string();
+    let env = [("JINGWEI_ALLOW_FILE", allow_s.as_str())];
+
+    // ① 初始：只有白名单，没有临时允许
+    let o = run_env(&["net", "status", "--json"], &env);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).expect("status --json 该是 JSON");
+    for k in ["state", "summary", "evidence", "coverage"] {
+        assert!(v.get(k).is_some(), "status --json 缺 `{k}`：{v}");
+    }
+    assert!(v["whitelist"].as_array().map(|a| !a.is_empty()).unwrap_or(false), "白名单不许空：{v}");
+    assert_eq!(v["allowed"].as_array().map(|a| a.len()), Some(0), "一开始不该有临时允许：{v}");
+
+    // ② 放行（URL 形式也要认）→ 出现在 allowed
+    let a = run_env(&["net", "allow", "https://evil.example/simple"], &env);
+    assert_eq!(code(&a), 0, "放行该成功：{}", stdout(&a));
+    let o2 = run_env(&["net", "status", "--json"], &env);
+    let v2: serde_json::Value = serde_json::from_str(&stdout(&o2)).unwrap();
+    let hosts: Vec<&str> = v2["allowed"].as_array().unwrap().iter().filter_map(|x| x["host"].as_str()).collect();
+    assert_eq!(hosts, vec!["evil.example"], "放行后该出现在 allowed：{v2}");
+
+    // ③ 收回 → 没了
+    let dny = run_env(&["net", "deny", "evil.example"], &env);
+    assert_eq!(code(&dny), 0, "收回该成功");
+    let o3 = run_env(&["net", "status", "--json"], &env);
+    let v3: serde_json::Value = serde_json::from_str(&stdout(&o3)).unwrap();
+    assert_eq!(v3["allowed"].as_array().map(|a| a.len()), Some(0), "收回后该是空的：{v3}");
+
+    // ④ 认不出的"域名"拒绝，并带三字段（版本号不许进允许表）
+    let bad = run_env(&["net", "allow", "3.12"], &env);
+    assert_eq!(code(&bad), 2, "3.12 不是域名，该拒：{}", stdout(&bad));
+    let s = stdout(&bad);
+    for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+        assert!(s.contains(k), "拒绝必须带三字段（缺 `{k}`）：{s}");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

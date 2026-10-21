@@ -12,6 +12,7 @@ static MORE: AtomicBool = AtomicBool::new(false);
 mod cmd_clean;
 mod cmd_doctor;
 mod cmd_deps;
+mod cmd_net;
 mod cmd_discover;
 mod cmd_explain;
 mod cmd_handover;
@@ -438,6 +439,8 @@ fn run(used_cmd: &mut String) -> i32 {
         // **位置回读**：用原文当裁判核图谱（2026-10-19）
         // **依赖对账**：清单 vs 锁文件（2026-10-19）
         "deps" => cmd_deps::cmd_deps(&root, json),
+        // **网络允许**（2026-10-22）：看清白名单 + 人手放行（本次会话 / 24 小时）。
+        "net" => cmd_net::cmd_net(&rest, json),
         "positions" => cmd_positions::cmd_positions(&root, json),
         // **知识条目严筛**（2026-10-20，pro 任务卡 A）：双头漏斗最细的那道颈
         "knowledge" => cmd_knowledge::cmd_knowledge(&root, &rest, json),

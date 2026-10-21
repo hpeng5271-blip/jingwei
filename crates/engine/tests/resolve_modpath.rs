@@ -48,10 +48,9 @@ fn 模块路径调用能连到那个文件里的同名函数() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 负向：`crate::` / `super::` 前缀**不**走这条窄规则（它们要模块树，留给后续），
-/// 所以这里只断言"不会乱连"——`crate::info::command()` 不因这个函数变成 1 条边。
+/// `crate::a::b` 现在也能连（2026-10-21 第二步：带前缀的路径）。
 #[test]
-fn 带前缀的路径不被窄规则乱连() {
+fn crate_前缀的路径也能连到模块文件() {
     let root = fixture("prefix");
     std::fs::write(
         root.join("src/lib.rs"),
@@ -63,11 +62,37 @@ fn 带前缀的路径不被窄规则乱连() {
     let a = query::explain_symbol(&s, "symbol:src/info/mod.rs#command")
         .expect("查询失败")
         .expect("符号应在图谱里");
-    // 末段唯一命中在这里会失败（两个 command），所以期望 0；若将来做了模块树解析，这里要改成 1。
     assert_eq!(
-        a.calls, 0,
-        "带 crate:: 前缀不该被窄规则连上（现在查不了才是诚实的），实际 {:?}",
+        a.calls, 1,
+        "crate::info::command 应连到 src/info/mod.rs#command，实际 {:?}",
         a.callers
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// **负向**：`crate::a::b` 的同后缀候选有多个时，必须放弃（宁少勿错）。
+#[test]
+fn crate_前缀遇到多个同后缀候选时不连() {
+    let d = std::env::temp_dir().join(format!("jw-modpath-amb-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("src/x/util")).unwrap();
+    std::fs::create_dir_all(d.join("src/y/util")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    // 两个 util.rs 里都有 do_it —— 后缀相同、全图两个候选
+    std::fs::write(d.join("src/x/util.rs"), "pub fn do_it() {}\n").unwrap();
+    std::fs::write(d.join("src/y/util.rs"), "pub fn do_it() {}\n").unwrap();
+    std::fs::write(
+        d.join("src/lib.rs"),
+        "mod x;\nmod y;\npub fn main_() {\n    crate::x::util::do_it();\n}\n",
+    )
+    .unwrap();
+    let mut s = Store::open(&d.join("g.db")).expect("开库失败");
+    index::index_source(&d, &mut s).expect("索引失败");
+    for f in ["src/x/util.rs", "src/y/util.rs"] {
+        let e = query::explain_symbol(&s, &format!("symbol:{f}#do_it"))
+            .expect("查询失败")
+            .expect("符号应在图谱里");
+        assert_eq!(e.calls, 0, "两个候选时不许乱连，实际 {:?}", e.callers);
+    }
+    let _ = std::fs::remove_dir_all(&d);
 }

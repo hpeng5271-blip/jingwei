@@ -190,6 +190,21 @@ pub fn resolve_file(
             }
             continue;
         }
+        // ①.7 **带前缀的模块路径**：`crate::a::b` / `self::b` / `super::b`（2026-10-21）。
+        //     不知道 crate 根时按路径后缀找候选，并要求全图唯一；多个候选就放弃（宁少勿错）。
+        if r.name.starts_with("crate::") || r.name.starts_with("self::") || r.name.starts_with("super::") {
+            if let Some(hit) = through_prefixed_path(rel, r, all) {
+                if let Some(caller) = r.scope.last() {
+                    if &hit != caller {
+                        out.sites.push((caller.clone(), hit.clone(), r.line));
+                        out.resolved.push((caller.clone(), hit));
+                    }
+                } else {
+                    out.module_level += 1;
+                }
+                continue;
+            }
+        }
 
         // ①.5 **限定名先拆掉路径，按末段查。**（2026-10-16 实测抓出的真缺口）
         //
@@ -291,6 +306,86 @@ fn through_module_path(rel: &str, r: &RefFact, all: &SymbolTable) -> Option<Stri
         }
     }
     None
+}
+
+
+/// **带前缀的模块路径**：`crate::a::b` / `super::b` / `self::b`（2026-10-21）。
+///
+/// 与上面那条窄规则的区别：这里不知道 crate 根在哪，所以**按路径后缀**找候选文件
+/// （`a.rs` / `a/mod.rs`），并要求"全图只有一个候选"——同后缀多个就放弃（宁少勿错）。
+/// - `crate::a::b`：任意 `a.rs` / `a/mod.rs` 里的 `b`
+/// - `self::b`：**本文件**里的 `b`
+/// - `super::b`：本文件所在模块的**父模块**（`src/foo/bar.rs` → `src/foo.rs` / `src/foo/mod.rs`）
+fn through_prefixed_path(rel: &str, r: &RefFact, all: &SymbolTable) -> Option<String> {
+    let (prefix, rest) = r.name.split_once("::")?;
+    let mut segs = rest.split("::");
+    let (a, b) = match (segs.next(), segs.next(), segs.next()) {
+        (Some(a), Some(b), None) => (Some(a), b),
+        (Some(b), None, None) => (None, b),
+        _ => return None, // 三段以上不猜
+    };
+    if b.is_empty() {
+        return None;
+    }
+    let dir = match rel.rsplit_once('/') {
+        Some((d, _)) => d.to_string(),
+        None => String::new(),
+    };
+    let mut cands: Vec<String> = Vec::new();
+    match prefix {
+        "self" => {
+            if a.is_none() {
+                cands.push(rel.to_string());
+            }
+        }
+        "super" => match a {
+            // super::b：父模块文件
+            None => {
+                let parent = match dir.rsplit_once('/') {
+                    Some((p, m)) => format!("{p}/{m}"),
+                    None => dir.clone(),
+                };
+                if !parent.is_empty() {
+                    cands.push(format!("{parent}.rs"));
+                    cands.push(format!("{parent}/mod.rs"));
+                }
+            }
+            // super::a::b：父模块下的 a 模块
+            Some(a) => {
+                let parent = match dir.rsplit_once('/') {
+                    Some((p, m)) => format!("{p}/{m}/"),
+                    None => String::new(),
+                };
+                cands.push(format!("{parent}{a}.rs"));
+                cands.push(format!("{parent}{a}/mod.rs"));
+            }
+        },
+        "crate" => {
+            let a = a?; // crate::b（根上的 b）不猜：根文件可能是 lib.rs 也可能 main.rs
+            // 后缀匹配：任意目录下的 a.rs / a/mod.rs
+            cands.push(format!("{a}.rs"));
+            cands.push(format!("/{a}.rs"));
+            cands.push(format!("/{a}/mod.rs"));
+            cands.push(format!("{a}/mod.rs"));
+        }
+        _ => return None,
+    }
+    let entries = all.get(b)?;
+    let mut hit: Option<&String> = None;
+    for e in entries
+        .iter()
+        .filter(|e| e.class == "value" || e.class == "local")
+    {
+        for cand in &cands {
+            if id_is_symbol_in(&e.id, cand, b) {
+                if hit.is_some() && hit != Some(&e.id) {
+                    return None; // 多个候选：放弃
+                }
+                hit = Some(&e.id);
+            }
+        }
+    }
+    hit.cloned()
 }
 
 

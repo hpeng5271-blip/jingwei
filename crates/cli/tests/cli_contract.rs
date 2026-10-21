@@ -1093,3 +1093,39 @@ fn help_主路径在最前且只有八个() {
         .count();
     assert_eq!(n, want.len(), "主路径只该有 8 个命令，实际 {n}：\n{seg}");
 }
+
+/// **主路径 `next` 的端到端冒烟：三层都在**（2026-10-21，阶段 0）。
+///
+/// 判据来自"项目状态解释器"的定性：一屏必须同时给
+/// ①结论（现在该做什么）②每行怎么自己验（带命令）③依据与边界。
+/// 只给①=玩具，只给③=调试器——三层都有才算学习工具。
+#[test]
+fn next_一屏三层都在() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("next-three-layers");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    assert_eq!(code(&run(&["index", "--root", &p])), 0, "索引应成功");
+
+    let out = run(&["next", "--root", &p]);
+    assert_eq!(code(&out), 0, "next 应成功退出");
+    let s = stdout(&out);
+
+    // ① 结论层
+    assert!(s.contains("现在该做什么"), "缺结论层：\n{s}");
+    // ② 可自查层：至少一行带括号命令（`（jingwei …）`）
+    assert!(
+        s.contains("（jingwei "),
+        "缺「怎么自己验」——每行该带可复跑的命令：\n{s}"
+    );
+    // ③ 依据与边界层
+    assert!(s.contains("依据："), "缺依据层：\n{s}");
+    assert!(s.contains("边界："), "缺边界层：\n{s}");
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -1,4 +1,4 @@
-//! 解析期：把**引用事实**变成**确定的关系**。
+﻿//! 解析期：把**引用事实**变成**确定的关系**。
 //!
 //! ## 为什么单独一层
 //!
@@ -78,6 +78,14 @@ pub struct Resolution {
     /// 压根没有调用者的（模块级引用），单独算一类——
     /// 它们不是"解析失败"，只是"不属于任何函数"。
     pub module_level: usize,
+    /// **点号形（方法调用 `x.m()`）却没连上的引用数**（2026-10-21 量化用）。
+    /// 这是"已知盲点有多大"的量尺：有数才谈得上修不修。
+    pub method_unresolved: usize,
+    /// 点号形引用**总数**（含已连上的）：和上面那个一起看才知道"是没连"还是"根本没进来"。
+    pub method_refs: usize,
+    /// 点号形里**目标看起来是我们自己的符号**（末段能在值命名空间里找到）却没连上的条数。
+    /// 这才是"我们的缺口"；`vec.push` / `iter.map` 那些是别人的库，不算。
+    pub method_unresolved_own: usize,
 }
 
 /// 符号表里的一条：id 加上它属于**哪个命名空间**。
@@ -115,6 +123,9 @@ pub fn resolve_file(
 ) -> Resolution {
     let mut out = Resolution::default();
     for r in refs {
+        if r.raw.contains('.') {
+            out.method_refs += 1;
+        }
         // ⓪− **Python 的模块属性**（债 0.28 / D-04）：`mod.CONST` / `pkg.mod.CONST`。
         //      前缀必须正好是本文件的某条 import（不许全图按名猜）；
         //      模块路径 → 文件按 `pkg::cfg` ↔ `pkg/cfg.py` 的约定走。
@@ -252,7 +263,13 @@ pub fn resolve_file(
                     out.module_level += 1;
                 }
             }
-            0 => {
+             0 => {
+                    if r.raw.contains('.') {
+                        out.method_unresolved += 1;
+                        if method_targets_own(r, all) {
+                            out.method_unresolved_own += 1;
+                        }
+                    }
                 // **名字在图谱里、但不在值命名空间**——别把它混进"外部"。
                 // 外部是"不归我们管"，这个是"有，但不是能调的东西"。
                 // 用 `lookup`（末段）而不是 `r.name`：限定名的情况下
@@ -267,13 +284,32 @@ pub fn resolve_file(
             // 但把**名字**记下来，因为"46 条拿不准"这句话不告诉你该去看什么。
             // 记**名字 + 位置**：只有名字的话，看到 "which" 也不知道是哪一条，
             // 还得回去翻全文。位置是免费的，而且一眼能定位。
-            _ => out.ambiguous.push(format!("{}:{}", rel, r.line)),
+            _ => {
+                if r.raw.contains('.') {
+                    out.method_unresolved += 1;
+                        if method_targets_own(r, all) {
+                            out.method_unresolved_own += 1;
+                        }
+                }
+                out.ambiguous.push(format!("{}:{}", rel, r.line))
+            }
         }
     }
     out.resolved.sort();
     out.resolved.dedup();
     let _ = rel;
     out
+}
+
+/// 点号形引用的末段是不是"我们自己的值符号"（能调的东西）。
+fn method_targets_own(r: &RefFact, all: &SymbolTable) -> bool {
+    let last = match r.raw.rsplit_once('.') {
+        Some((_, l)) => l,
+        None => return false,
+    };
+    all.get(last)
+        .map(|v| v.iter().any(|e| e.class == "value" || e.class == "local"))
+        .unwrap_or(false)
 }
 
 /// `mod::item` 的窄解析：把 `mod` 落到**本文件同目录**的 `mod.rs` / `mod/mod.rs`，
@@ -954,3 +990,6 @@ mod tests {
         assert_eq!(r.namespace_mismatch.len(), 1);
     }
 }
+
+
+

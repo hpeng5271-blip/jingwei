@@ -1,4 +1,4 @@
-//! 图谱那一摊（命令行版）：`graph` 看运行历史，`graph runs <id>` 看某一次的明细。
+﻿//! 图谱那一摊（命令行版）：`graph` 看运行历史，`graph runs <id>` 看某一次的明细。
 //!
 //! ## 为什么只做"读"，不做索引
 //!
@@ -634,6 +634,15 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
         rep.ambiguous.len(),
         rep.external
     );
+    // **方法调用的盲点有多大**（2026-10-21）：点号形（`store.sync_claims(...)`）没连上的条数。
+    // 先量再决定修不修——看不见的缺口最容易被当成"已经连上了"。
+    if rep.method_refs > 0 {
+        println!(
+            "      点号形引用 {} 条（没连上 {}，其中目标像我们自己的 {}——接收者类型没推断）",
+            rep.method_refs, rep.method_unresolved, rep.method_unresolved_own
+        );
+    }
+    
     // **这两类必须单独说，但不能说成"都是我们的锅"**（2026-10-18 真 Python 项目换的）。
     //
     // 原话是「其中**我们自己漏的**」——而实测在 `flask`（83 个 .py）上它会报 203 + 350，
@@ -680,3 +689,7 @@ fn truncate(s: &str, max: usize) -> String {
 fn sites(store: &Store) -> std::collections::BTreeMap<String, i64> {
     jingwei_engine::graph::query::site_counts(store).unwrap_or_default()
 }
+
+
+
+

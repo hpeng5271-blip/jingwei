@@ -37,6 +37,10 @@ pub struct IndexReport {
     /// **解析不了**的引用条数。这个数字要显示出来：
     /// 界面上该能回答"这张图漏了多少"，而不是让人以为"就这些调用"。
     pub unresolved_refs: usize,
+    /// **点号形（方法调用）没连上的引用数**（2026-10-21）：已知盲点有多大，先量再决定修不修。
+    pub method_unresolved: usize,
+    pub method_refs: usize,
+    pub method_unresolved_own: usize,
     /// 解析不完整（语法树里带错误）的文件数。**它们仍然会进图谱**（符号是真的），
     /// 只是调用方据此知道"这些文件的调用关系不可信"。
     pub incomplete: usize,
@@ -341,7 +345,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@15";
+pub const EXTRACTOR_VERSION: &str = "parse@18";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -659,6 +663,9 @@ pub fn index_source(
             rep.namespace_mismatch
                 .extend(res.namespace_mismatch.iter().cloned());
             rep.external += res.external;
+            rep.method_unresolved += res.method_unresolved;
+            rep.method_refs += res.method_refs;
+            rep.method_unresolved_own += res.method_unresolved_own;
             extra.extend(crate::graph::resolve::to_edges(&res, now));
             // **调用点**：写进小表，给 LSP 找引用用（跳到调用那一行，而不是函数定义）
             sites.extend(res.sites.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
@@ -980,6 +987,11 @@ mod version_tests {
         assert!(extractor_changed(Some("parse@1")), "老版本 = 必须重解析");
     }
 }
+
+
+
+
+
 
 
 

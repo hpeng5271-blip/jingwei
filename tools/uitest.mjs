@@ -547,6 +547,19 @@ try {
   });
   check('网络：列出临时允许（带剩余时间）', netSt.n === 1 && /小时后过期|分钟后过期/.test(netSt.html), netSt.html);
   check('网络：点 × 走 net deny', netSt.calls.some((c) => c.startsWith('deny')), JSON.stringify(netSt.calls));
+  // 终端里网络被拒 → 就地给一个能点的「允许 24 小时」（2026-10-22）。
+  const ta = await page.evaluate(async () => {
+    globalThis.__netCalls = [];
+    termLine('  ✗ 暂无法探知：这条安装命令要访问 evil.example，它不在白名单里｜缺：该仓库域名的允许｜为什么：网络默认拒绝｜怎么补：加前缀重跑');
+    const btn = document.querySelector('[data-allow-host]');
+    const before = !!btn;
+    if (btn) btn.click();
+    await new Promise((r) => setTimeout(r, 200));
+    const after = document.querySelector('[data-allow-host]');
+    return { before, label: after ? after.textContent : '', calls: globalThis.__netCalls || [] };
+  });
+  check('终端里网络被拒时给可点的允许按钮', ta.before === true, JSON.stringify(ta));
+  check('点它就真的调了 net allow', ta.calls.some((c) => c.startsWith('allow evil.example')), JSON.stringify(ta.calls));
   check('编辑器：标记分得出 error 与 warn', gd.lv === 'error,warn', gd.lv);
   check('编辑器：点标记跳到那一行', gd.lncol.includes('第 2 行'), gd.lncol);
 

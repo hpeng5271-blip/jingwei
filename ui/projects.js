@@ -320,8 +320,47 @@ function termLine(text, kind) {
   if (kind) d.className = kind;
   d.textContent = text;
   out.appendChild(d);
+  // **网络被拒 → 就地给一个能点的「允许 24 小时」**（2026-10-22）。
+  // 以前用户得把域名抄下来、去设置页贴一遍；现在在这条输出下面点一下就行。
+  // 允许本身仍走 CLI 的 \`jingwei net allow\`，这里不写第二份允许表。
+  const m = /要访问\s+([a-z0-9][a-z0-9.-]*\.[a-z]{2,})\s*，它不在白名单里/i.exec(text || '');
+  if (m) {
+    const host = m[1];
+    const bar = document.createElement('div');
+    bar.className = 'term-allow';
+    bar.style.margin = '2px 0 6px 0';
+    bar.innerHTML = '<button class="btn sm" data-allow-host="' + esc(host) + '">允许 ' + esc(host) + ' 24 小时</button>'
+      + '<span class="hint" style="margin-left:6px">只对这台机器、最多 24 小时；随时能在设置里收回。</span>';
+    out.appendChild(bar);
+  }
   out.parentElement.scrollTop = out.parentElement.scrollHeight;
 }
+
+// 点「允许 24 小时」→ 走 CLI 的 net allow；成功后把按钮改成"已允许"，并刷新设置页那张表。
+document.addEventListener('click', async (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('[data-allow-host]') : null;
+  if (!b) return;
+  e.preventDefault();
+  const host = b.dataset.allowHost;
+  b.disabled = true;
+  b.textContent = '正在允许…';
+  try {
+    const v = await invoke('cli_json', { root: S.root || '', args: ['net', 'allow', host] });
+    if (v && v.state === 'yes') {
+      b.textContent = '已允许 ' + host;
+      toast('已允许 ' + host + '（24 小时），可以重跑了');
+      if (typeof netRefresh === 'function') netRefresh();
+    } else {
+      b.disabled = false;
+      b.textContent = '允许 ' + host + ' 24 小时';
+      toast((v && v.summary) || '没允许成', true);
+    }
+  } catch (err) {
+    b.disabled = false;
+    b.textContent = '允许 ' + host + ' 24 小时';
+    toast('没允许成：' + (err && err.message ? err.message : err), true);
+  }
+});
 
 function termSection(title) {
   termLine('');

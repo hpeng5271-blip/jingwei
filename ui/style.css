@@ -1996,3 +1996,6 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .net-chip i { opacity: 0.65; font-style: normal; }
 .net-chip b { cursor: pointer; opacity: 0.7; font-weight: 400; }
 .net-chip b:hover { opacity: 1; color: #ff8a8a; }
+
+/* 终端里的「允许 24 小时」条（2026-10-22）。 */
+.term-allow { display: flex; align-items: center; gap: 6px; }

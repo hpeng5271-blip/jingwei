@@ -95,5 +95,14 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
     if stale == 0 && inbox == 0 && unmapped == 0 {
         println!("  干净：没有待回收、没有待确认、没有文本态");
     }
+    // 项目侧下一步：与 `handover` ⑤ 同一来源（guide 的 nextStep），不另算一套。
+    let facts = jingwei_engine::detect::probe::make_facts(root, None);
+    let g = jingwei_engine::understand::guide::make_guide(&facts, &[]).to_json();
+    match g["nextStep"].as_str() {
+        Some(s) if !s.trim().is_empty() && s != "查不了" => {
+            println!("  做　{s}（jingwei handover 看完整一页）");
+        }
+        _ => println!("  做　查不了（这个项目没法给出下一步；jingwei handover 看细节）"),
+    }
     0
 }

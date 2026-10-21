@@ -860,3 +860,50 @@ fn impact_泛型方法会提醒不要当成没有上游() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`handover` 的「③ 规模」必须与 `graph stats` 逐个数一致**（2026-10-21）。
+///
+/// 由来：这两个数我给用户念过好几次，也**因为不同步被坑过两次**（包是旧的、报告是旧的）。
+/// 它们是同一个事实的两个出口，任何一处漂移都该红——**人来对眼睛不可靠，让它自动对**。
+#[test]
+fn handover_的规模与_graph_stats_一致() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("handover-counts");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("src/a.rs"),
+        "pub fn helper() -> i32 { 1 }\npub fn run() -> i32 { helper() + helper() }\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+    assert_eq!(code(&run(&["index", "--root", &p])), 0, "索引应成功");
+
+    let stats = stdout(&run(&["graph", "stats", "--json", "--root", &p]));
+    let sj: serde_json::Value = serde_json::from_str(&stats).expect("stats JSON 解析失败");
+    let want_files = sj["nodes"]["file"].as_i64().unwrap_or(0);
+    let want_symbols = sj["nodes"]["symbol"].as_i64().unwrap_or(0);
+    let want_calls = sj["edges"]["calls"].as_i64().unwrap_or(0);
+    let want_refs = sj["edges"]["references"].as_i64().unwrap_or(0);
+
+    let ho = stdout(&run(&["handover", "--root", &p]));
+    let line = ho
+        .lines()
+        .find(|l| l.contains("③ 规模"))
+        .unwrap_or_else(|| panic!("没有「③ 规模」行：{ho}"));
+    let nums: Vec<i64> = line
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    assert_eq!(
+        nums,
+        vec![want_files, want_symbols, want_calls, want_refs],
+        "handover 的规模与 graph stats 不一致：{line}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

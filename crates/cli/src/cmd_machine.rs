@@ -8,6 +8,7 @@
 //! 不按"大小平均切"——同一个文件里的东西该回答同一类问题。
 
 use super::{c, pad, BOLD, DIM, GREEN, YELLOW};
+use crate::protocol::{envelope, print as print_protocol, Coverage, Evidence, State};
 
 pub(crate) fn cmd_spec(json: bool) -> i32 {
     let facts = jingwei_engine::machine::spec_report();
@@ -17,13 +18,42 @@ pub(crate) fn cmd_spec(json: bool) -> i32 {
         &format!("spec_facts={} judgements={}", facts.len(), notes.len()),
     );
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &serde_json::json!({ "facts": facts, "judgements": notes })
+        // **协议**（2026-10-21）：机器信息也要能回答"凭什么 / 覆盖多少"。
+        // 来源不一致时 `state=no`（**并列摆出来，不选边**）——与"三态不许压扁"是同一条。
+        let bad = facts.iter().filter(|f| !f.agree).count();
+        let multi = facts.iter().filter(|f| f.sources.len() > 1).count();
+        let state = if facts.is_empty() {
+            State::Unknown
+        } else if bad > 0 {
+            State::No
+        } else {
+            State::Yes
+        };
+        let summary = if facts.is_empty() {
+            "暂无法探知：这台机器的配置一项都没读到｜缺：CPU/内存/磁盘等基础信息｜为什么：几种探法（WMI / 注册表 / 系统接口）都没返回｜怎么补：换普通权限再跑一次，或看 dlog 里的原始错误".to_string()
+        } else if bad > 0 {
+            format!(
+                "读到 {} 项，其中 {bad} 项**来源之间不一致**（并列摆着，不替你选边）；多来源印证 {multi} 项",
+                facts.len()
             )
-            .unwrap_or_default()
+        } else {
+            format!("读到 {} 项机器配置；多来源印证 {multi} 项", facts.len())
+        };
+        let v = envelope(
+            state,
+            summary,
+            vec![
+                Evidence::command("jingwei spec", "同一条命令可复跑；每项的来源与分歧都在 facts 里"),
+                Evidence::file("dlog", "读不到的原因记在调试日志里"),
+            ],
+            Coverage::partial(
+                facts.len(),
+                Some(facts.len()),
+                "读到几项就报几项；来源不一致的项不会被压成一个值",
+            ),
+            serde_json::json!({ "facts": facts, "judgements": notes }),
         );
+        print_protocol(&v);
         return 0;
     }
     println!();

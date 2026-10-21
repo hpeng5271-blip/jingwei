@@ -1467,3 +1467,35 @@ fn rename_的_json_带协议且判不准时是_no() {
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::remove_dir_all(&d2);
 }
+
+/// **`spec --json` 也走协议**：机器信息要能回答"凭什么 / 覆盖多少"。
+/// 来源不一致时 `state=no`（并列摆出来、不选边），一项都没读到时带三字段。
+#[test]
+fn spec_的_json_带协议() {
+    let Some(_) = bin() else { return };
+    let o = run(&["spec", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o))
+        .unwrap_or_else(|e| panic!("`spec --json` 该是 JSON（{e}）：{}", stdout(&o)));
+    for k in ["state", "summary", "evidence", "coverage"] {
+        assert!(v.get(k).is_some(), "`spec --json` 缺 `{k}`：{v}");
+    }
+    let st = v["state"].as_str().unwrap_or("");
+    assert!(
+        matches!(st, "yes" | "no" | "unknown"),
+        "state 只许三态之一：{st:?}"
+    );
+    assert!(
+        v["evidence"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "依据不许为空：{v}"
+    );
+    assert!(
+        v["facts"].is_array(),
+        "facts 还要在（领域数据不许丢）：{v}"
+    );
+    if st == "unknown" {
+        let s = v["summary"].as_str().unwrap_or("");
+        for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+            assert!(s.contains(k), "一项都没读到时必须带三字段（缺 `{k}`）：{s}");
+        }
+    }
+}

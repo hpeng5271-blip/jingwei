@@ -59,8 +59,8 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
             serde_json::to_string_pretty(&serde_json::json!({
                 "id": ex.id, "name": ex.name, "file": ex.file, "line": ex.line,
                 "calls": ex.calls, "references": ex.refs,
-                "callers": ex.callers.iter().map(|(f, l)| serde_json::json!({"file": f, "line": l})).collect::<Vec<_>>(),
-                "referenced_by": ex.references.iter().map(|(f, l)| serde_json::json!({"file": f, "line": l})).collect::<Vec<_>>(),
+                "callers": ex.callers.iter().map(|(f, l, s)| serde_json::json!({"file": f, "line": l, "by": s})).collect::<Vec<_>>(),
+                "referenced_by": ex.references.iter().map(|(f, l, s)| serde_json::json!({"file": f, "line": l, "by": s})).collect::<Vec<_>>(),
             }))
             .unwrap_or_default()
         );
@@ -73,18 +73,25 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
         (Some(f), None) => println!("在哪：{f}（行号未知）"),
         _ => println!("在哪：查不了（图谱里没记文件）"),
     }
-    println!("被调用：{} 处", ex.calls);
-    for (f, l) in ex.callers.iter().take(5) {
-        println!("  {f}:{l}");
+    // `calls` 是**边数**（= 有几个符号在调它），`callers.len()` 是**调用点行数**——
+    // 同一个符号在循环/多个分支里调多次会有多条站点。两个数都报，免得"3 处"下面列 5 行对不上。
+    println!(
+        "被调用：{} 个符号 / {} 个调用点",
+        ex.calls,
+        ex.callers.len()
+    );
+    for (f, l, s) in ex.callers.iter().take(5) {
+        // 调用点后面直接给**谁在调**：只给行号，读的人还得翻到那一行
+        println!("  {f}:{l} ← {}", caller_name(s));
     }
-    println!("被引用：{} 处", ex.refs);
+    println!("被引用：{} 个符号 / {} 个引用点", ex.refs, ex.references.len());
     if ex.calls == 0 && ex.refs == 0 {
         println!("判定依据：查不了（这个符号在库里没有任何边；可能没解析到，也可能真没人用）");
     } else {
         println!("判定依据：图谱的 calls {} / references {} 条边（可用 jingwei graph stats 复核）", ex.calls, ex.refs);
     }
-    for (f, l) in ex.references.iter().take(5) {
-        println!("  {f}:{l}");
+    for (f, l, s) in ex.references.iter().take(5) {
+        println!("  {f}:{l} ← {}", caller_name(s));
     }
     // **复用**（2026-10-20；2026-10-21 改成给短名）：`explain` 是最常用的入口，知识层却要人
     // 另外想起来敲 `symbol`。这里直接报"哪几条"——但**必须走图边**（`claims_for_symbol`），
@@ -111,6 +118,17 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
         );
     }
     0
+}
+
+/// 调用者 id → 名字：`symbol:path#name` 取 `name`；`file:path` 取路径末段。
+fn caller_name(id: &str) -> String {
+    if let Some(rest) = id.strip_prefix("symbol:") {
+        return rest.split_once('#').map(|(_, n)| n.to_string()).unwrap_or_else(|| rest.to_string());
+    }
+    if let Some(rest) = id.strip_prefix("file:") {
+        return rest.rsplit('/').next().unwrap_or(rest).to_string();
+    }
+    id.to_string()
 }
 
 /// 短名：去 `.md`、去前导 `YYYY-MM-DD-`，剩下的就是"topic-序号-标题"那种能一眼睛看懂的形态。

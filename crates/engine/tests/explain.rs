@@ -28,7 +28,12 @@ fn explain_给出定义与被调用点() {
     assert_eq!(ex.file.as_deref(), Some("src/a.rs"));
     assert_eq!(ex.line, Some(1));
     assert!(ex.calls >= 1, "应至少有一条调用边，实际 {}", ex.calls);
-    let hit = ex.callers.iter().any(|(f, l)| f == "src/b.rs" && *l == 2);
+    let hit = ex.callers.iter().any(|(f, l, s)| f == "src/b.rs" && *l == 2 && s.contains("caller"));
+    assert!(
+        !ex.callers.is_empty() && ex.callers[0].2.starts_with("symbol:"),
+        "调用点还要带**谁在调**（第三列是调用者 id），实际 {:?}",
+        ex.callers
+    );
     assert!(hit, "调用点应在 src/b.rs:2，实际 {:?}", ex.callers);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -42,3 +47,4 @@ fn explain_不存在的符号返回_none() {
     assert!(query::explain_symbol(&s, "symbol:src/a.rs#nope").unwrap().is_none());
     let _ = std::fs::remove_dir_all(&root);
 }
+

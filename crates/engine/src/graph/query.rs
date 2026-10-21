@@ -308,8 +308,8 @@ pub struct Explain {
     pub name: String,
     pub file: Option<String>,
     pub line: Option<i64>,
-    pub callers: Vec<(String, i64)>,   // (文件, 行)
-    pub references: Vec<(String, i64)>,
+    pub callers: Vec<(String, i64, String)>, // (文件, 行, 调用者 id)
+    pub references: Vec<(String, i64, String)>, // (文件, 行, 引用者 id)
     pub calls: i64,
     pub refs: i64,
 }
@@ -339,12 +339,12 @@ pub fn explain_symbol(store: &Store, id: &str) -> Result<Option<Explain>> {
     Ok(Some(Explain { id: id.to_string(), name, file, line, callers, references, calls, refs }))
 }
 
-fn sites_for(store: &Store, id: &str, kind: &str) -> Result<Vec<(String, i64)>> {
+fn sites_for(store: &Store, id: &str, kind: &str) -> Result<Vec<(String, i64, String)>> {
     let mut st = store.conn.prepare(
-        "SELECT s.file, s.line FROM edge_sites s                          JOIN edges e ON e.src=s.src AND e.dst=s.dst AND e.kind=s.kind                          WHERE s.dst=?1 AND s.kind=?2 AND e.expires_at IS NULL                          ORDER BY s.file, s.line LIMIT 50",
+        "SELECT s.file, s.line, s.src FROM edge_sites s                          JOIN edges e ON e.src=s.src AND e.dst=s.dst AND e.kind=s.kind                          WHERE s.dst=?1 AND s.kind=?2 AND e.expires_at IS NULL                          ORDER BY s.file, s.line LIMIT 50",
     )?;
     let rows = st.query_map(rusqlite::params![id, kind], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
     })?;
     Ok(rows.flatten().collect())
 }
@@ -405,3 +405,4 @@ pub fn file_life_counts(store: &Store) -> Result<std::collections::BTreeMap<Stri
     let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
     Ok(rows.flatten().collect())
 }
+

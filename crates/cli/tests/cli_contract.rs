@@ -1,4 +1,4 @@
-//! **CLI 的端到端契约测试**（2026-10-16 加）。
+﻿//! **CLI 的端到端契约测试**（2026-10-16 加）。
 //!
 //! ## 为什么需要这一层
 //!
@@ -672,3 +672,56 @@ fn check_文本态的个数与列出的名字一致() {
     assert_eq!(listed, shown, "报 {n} 条，却列了 {listed} 个名字：{line}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`symbol` 的"条目：N 条"必须等于列出的条数**（2026-10-21，第三处同形状的不变量）。
+///
+/// 现在它不截断（全列），但"报数 + 列表"的形状在别处都出过事；这条测试先把口径钉住：
+/// 将来若加截断，必须同时给出"等 N 条"，否则数字与清单就对不上了。
+#[test]
+fn symbol_报的条目数与列出的条数一致() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("symbol-count");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("src").join("a.rs"),
+        "fn helper() -> i32 { 1 }\nfn run() -> i32 { helper() }\n",
+    )
+    .unwrap();
+    let kdir = d.join("docs").join("knowledge");
+    std::fs::create_dir_all(&kdir).unwrap();
+    for i in 1..=2 {
+        std::fs::write(
+            kdir.join(format!("e{i}.md")),
+            format!(
+                "---\nclaim: 第 {i} 条主张\nsource: https://example.com/{i}\nlevel: 一手\ncheck: 只是想清楚\nsymbol: symbol:src/a.rs#helper\n---\n"
+            ),
+        )
+        .unwrap();
+    }
+    let p = d.to_str().unwrap().to_string();
+    let _ = run(&["index", "--root", &p]);
+    let _ = run(&["knowledge", "sync", "--root", &p]);
+    let out = run(&["symbol", "helper", "--root", &p]);
+    let text = stdout(&out);
+
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("条目："))
+        .unwrap_or_else(|| panic!("没有'条目'行：{text}"));
+    let n: usize = line
+        .split("条目：")
+        .nth(1)
+        .and_then(|s| s.split(" 条").next())
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or_else(|| panic!("这行没有可解析的条数：{line}"));
+    let listed = text
+        .lines()
+        .filter(|l| {
+        let t = l.trim_start();
+        t.starts_with(|c: char| c.is_ascii_digit()) && t.contains(". [")
+    })
+    .count();
+    assert_eq!(listed, n, "报 {n} 条，却列了 {listed} 条：{text}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+

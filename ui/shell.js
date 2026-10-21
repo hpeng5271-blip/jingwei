@@ -1289,7 +1289,9 @@ async function renderTaskIcons() {
     box.className = 'task-icons';
     box.innerHTML = '<span class="ti" data-kind="index" data-state="idle" title="索引">索</span>'
       + '<span class="ti" data-kind="env" data-state="idle" title="环境探测">环</span>'
-      + '<span class="ti" data-kind="deep_graph" data-state="idle" title="深度绘制">绘</span>';
+      + '<span class="ti" data-kind="deep_graph" data-state="idle" title="深度绘制">绘</span>'
+      // 错误计数与任务是两条通道：任务说"在不在跑"，这个说"还有几处要处理"。
+      + '<span class="ti ti-err" id="tiErr" hidden title="打开问题栏">!</span>';
     document.body.appendChild(box);
   }
   try {
@@ -1304,6 +1306,25 @@ async function renderTaskIcons() {
   } catch (e) {
     /* 没有任务源不算错：图标保持 idle */
   }
+  // **错误角标**（2026-10-22）：数量只来自 `DOCK.diags`（检查 + 测试定位），不另算一份。
+  // 有 error 才亮，点它打开问题栏——抬头看一眼角落就知道"还有几处要处理"。
+  const chip = box.querySelector('#tiErr');
+  if (chip) {
+    const diags = (typeof DOCK !== 'undefined' && DOCK.diags) || [];
+    const errs = diags.filter((d) => d.level === 'error').length;
+    chip.hidden = errs === 0;
+    chip.textContent = errs > 9 ? '9+' : String(errs);
+    chip.title = errs ? (errs + ' 处 error，点开问题栏') : '没有 error';
+    box.dataset.err = String(errs);
+  }
 }
 setInterval(renderTaskIcons, 3000);
 window.addEventListener('load', renderTaskIcons);
+
+// 点错误角标 → 打开问题栏（复用 dockShow，不另写一份"打开"）。
+document.addEventListener('click', (e) => {
+  const c = e.target && e.target.closest ? e.target.closest('#tiErr') : null;
+  if (!c) return;
+  e.preventDefault();
+  if (typeof dockShow === 'function') dockShow('problems');
+});

@@ -2017,3 +2017,7 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .result-line[data-sev="warn"] { border-left: 3px solid #d8a13a; }
 .result-line .rl-n { opacity: 0.7; }
 .result-line .rl-jump { margin-left: auto; cursor: pointer; text-decoration: underline; opacity: 0.85; }
+
+/* 错误角标（2026-10-22）：有 error 才亮，红底白字。 */
+.task-icons .ti-err { background: rgba(200,40,40,0.9); color: #fff; font-weight: 600; cursor: pointer; }
+.task-icons .ti-err[hidden] { display: none; }

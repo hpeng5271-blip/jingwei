@@ -431,8 +431,9 @@ try {
     const box = document.getElementById('taskIcons');
     if (!box) return { n: 0, running: 0, states: [] };
     const els = Array.from(box.querySelectorAll('.ti'));
-    return { n: els.length, running: els.filter((e) => e.dataset.state === 'running').length,
-      states: els.map((e) => e.dataset.kind + ':' + e.dataset.state) };
+    const kinds = els.filter((e) => e.dataset.kind);   // 错误角标不是任务，别算进来
+    return { n: kinds.length, running: kinds.filter((e) => e.dataset.state === 'running').length,
+      states: kinds.map((e) => e.dataset.kind + ':' + e.dataset.state) };
   });
   check('任务角标：三个图标都在', ti.n === 3, JSON.stringify(ti.states));
   check('任务角标：只有真任务源在跑', ti.running === 1, JSON.stringify(ti.states));
@@ -632,6 +633,28 @@ try {
     return { txt, hasJump: !!jump, sev: el.querySelector('.result-line')?.dataset.sev || '' };
   });
   check('最近结果：检查与测试分开计数', /检查 2 处/.test(rl.txt) && /测试 1 处定位/.test(rl.txt), rl.txt);
+  // 错误角标（2026-10-22）：有 error 才亮、显示数量、点它打开问题栏。
+  const eb = await page.evaluate(async () => {
+    const f = ED.path;
+    DOCK.diags = [
+      { level: 'error', file: f, line: 2, col: 1, message: 'e1' },
+      { level: 'error', file: f, line: 3, col: 1, message: 'e2' },
+      { level: 'warn', file: f, line: 4, col: 1, message: 'w1' },
+    ];
+    await renderTaskIcons();
+    const chip = document.getElementById('tiErr');
+    const shown = chip && !chip.hidden;
+    const txt = chip ? chip.textContent : '';
+    if (chip) chip.click();
+    await new Promise((r) => setTimeout(r, 200));
+    const opened = typeof DOCK !== 'undefined' && DOCK.tab === 'problems';
+    DOCK.diags = [];
+    await renderTaskIcons();
+    const hiddenAfter = document.getElementById('tiErr').hidden;
+    return { shown, txt, opened, hiddenAfter };
+  });
+  check('错误角标：有 error 才亮并显示数量', eb.shown === true && eb.txt === '2', JSON.stringify(eb));
+  check('错误角标：点它打开问题栏，没 error 就收走', eb.opened === true && eb.hiddenAfter === true, JSON.stringify(eb));
   check('最近结果：error 时标红并给跳转', rl.sev === 'error' && rl.hasJump === true, JSON.stringify(rl));
   const tl2 = await page.evaluate(() => {
     DOCK.testLocs = [{ loc: testLocOf('nope/missing.rs:99:1'), text: '未知文件的失败' }];

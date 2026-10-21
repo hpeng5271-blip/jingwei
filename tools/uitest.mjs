@@ -64,8 +64,10 @@ function stubTauri() {
           case 'tasks_state':
             // 任务角标的桩（2026-10-21）：一类在跑、一类刚完成、一类没任务源。
             return { running: 1, latest: {
-              index: { id: 'x', state: 'running', name: 'jingwei index', started_at: 1, ended_at: null, detail: '正在索引' },
-              env: { id: 'y', state: 'done', name: '环境探测', started_at: 1, ended_at: 2, detail: '探到 3 项' },
+              index: { id: 'x', state: 'running', name: 'jingwei index', started_at: 1, ended_at: null,
+                detail: '正在索引', elapsed_s: 45, running: true },
+              env: { id: 'y', state: 'done', name: '环境探测', started_at: 1, ended_at: 4,
+                detail: '探到 3 项', elapsed_s: 3, running: false },
             } };
           case 'msg_ingest': {
             // 引擎语义的简化版：同 key 只占一槽并计数（真实去重在引擎里）。
@@ -452,6 +454,17 @@ try {
       states: kinds.map((e) => e.dataset.kind + ':' + e.dataset.state) };
   });
   check('任务角标：三个图标都在', ti.n === 3, JSON.stringify(ti.states));
+  // 角标 hover 说得出耗时（2026-10-22）：跑着的报"已跑"，跑完的报"用时"。
+  const tt2 = await page.evaluate(async () => {
+    await renderTaskIcons();
+    const box = document.getElementById('taskIcons');
+    const idx = box.querySelector('.ti[data-kind="index"]');
+    const env = box.querySelector('.ti[data-kind="env"]');
+    const deep = box.querySelector('.ti[data-kind="deep_graph"]');
+    return { idx: idx.title, env: env.title, deep: deep.title };
+  });
+  check('角标说得出用了多久', /已跑 45 秒/.test(tt2.idx) && /用时 3 秒/.test(tt2.env), JSON.stringify(tt2));
+  check('没接任务源的角标如实说', /还没接任务源/.test(tt2.deep), tt2.deep);
   check('任务角标：只有真任务源在跑', ti.running === 1, JSON.stringify(ti.states));
 
   check('概览协议条：文件数 / 体积 / 生命周期都在', /文件/.test(st) && /体积/.test(st) && /生命周期/.test(st), st.slice(0, 160));

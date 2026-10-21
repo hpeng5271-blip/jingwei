@@ -1281,6 +1281,14 @@ document.addEventListener('click', (e) => {
 
 // **角落任务角标**（2026-10-21）：只认真任务源（engine 的任务日志），不认假状态。
 // 没有任务源的种类显示"还没接"——不许假装空闲。
+/// 秒数说人话（2026-10-22）：<60s 说"几秒"，再长说"几分"，一天以上说"几小时"。
+function fmtDur(secs) {
+  const n = Number(secs) || 0;
+  if (n < 60) return n + ' 秒';
+  if (n < 3600) return Math.floor(n / 60) + ' 分 ' + (n % 60) + ' 秒';
+  return Math.floor(n / 3600) + ' 小时 ' + Math.floor((n % 3600) / 60) + ' 分';
+}
+
 async function renderTaskIcons() {
   let box = document.getElementById('taskIcons');
   if (!box) {
@@ -1301,7 +1309,14 @@ async function renderTaskIcons() {
       const k = el.dataset.kind;
       const t = latest[k];
       el.dataset.state = t ? (t.state || 'idle') : 'idle';
-      el.title = t ? (k + '：' + (t.detail || t.state)) : (k + '：还没接任务源');
+      if (!t) {
+        el.title = k + '：还没接任务源';
+      } else {
+        const when = t.running
+          ? '已跑 ' + fmtDur(t.elapsed_s)
+          : (t.state === 'done' ? '用时 ' + fmtDur(t.elapsed_s) : '失败（' + fmtDur(t.elapsed_s) + '后）');
+        el.title = k + '：' + when + (t.detail ? ' · ' + t.detail : '');
+      }
     }
   } catch (e) {
     /* 没有任务源不算错：图标保持 idle */

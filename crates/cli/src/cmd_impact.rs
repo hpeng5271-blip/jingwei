@@ -18,6 +18,8 @@ use std::path::Path;
 use jingwei_engine::graph::store::{Dir, Store};
 use jingwei_engine::EdgeKind;
 
+use crate::protocol::{envelope, print, Coverage, Evidence, State};
+
 /// 一个受影响的符号：id + 最小层数。
 type Affected = (String, usize);
 
@@ -31,8 +33,7 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
         .clamp(1, 4);
 
     let Some(store) = crate::cmd_knowledge::open_graph(root) else {
-        println!("查不了：没有图谱（先 jingwei index）");
-        return 1;
+        return 查不了(json, root, "查不了：没有图谱（先 jingwei index）", 1);
     };
 
     // `--file <路径>`：按文件问（实际动手时更常见）
@@ -41,7 +42,7 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
             eprintln!("--file 后面要跟项目内的相对路径");
             return 2;
         };
-        return file_mode(&store, path, depth, json);
+        return file_mode(&store, root, path, depth, json);
     }
 
     let Some(query) = rest.iter().find(|a| !a.starts_with("--")) else {
@@ -55,26 +56,34 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
         if store.node(query).map(|n| n.is_some()).unwrap_or(false) {
             query.to_string()
         } else {
-            println!("查不了：`{query}` 不在图谱里（可能改名/删了）");
-            return 1;
+            return 查不了(json, root, &format!("查不了：`{query}` 不在图谱里（可能改名/删了）"), 1);
         }
     } else {
         match store.symbol_ids_by_name(query) {
             Ok(ids) if ids.len() == 1 => ids[0].clone(),
             Ok(ids) if ids.is_empty() => {
-                println!("查不了：图谱里没有叫 `{query}` 的符号（先 index，或名字拼错了）");
-                return 1;
+                return 查不了(
+                    json,
+                    root,
+                    &format!("查不了：图谱里没有叫 `{query}` 的符号（先 index，或名字拼错了）"),
+                    1,
+                );
             }
             Ok(ids) => {
-                println!("有 {} 个符号叫 `{query}`，用 id 指定：", ids.len());
-                for id in ids {
-                    println!("  {id}");
+                eprintln!("有 {} 个符号叫 `{query}`，用 id 指定：", ids.len());
+                for id in &ids {
+                    eprintln!("  {id}");
                 }
-                return 1;
+                return 查不了(
+                    json,
+                    root,
+                    &format!("查不了：有 {} 个符号叫 `{query}`，要指定 id（不替你挑）", ids.len()),
+                    1,
+                );
             }
             Err(e) => {
                 eprintln!("查符号失败：{e}");
-                return 1;
+                return 查不了(json, root, &format!("查不了：查符号失败（{e}）"), 1);
             }
         }
     };
@@ -86,10 +95,26 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
             .iter()
             .map(|(d, ids)| serde_json::json!({"depth": d, "callers": ids}))
             .collect();
-        println!(
-            "{}",
-            serde_json::json!({"symbol": key, "callers": v, "total": total})
+        let state = if total > 0 { State::Yes } else { State::Unknown };
+        let summary = if total > 0 {
+            format!("往上游 {depth} 层共 {total} 个符号（只看静态 calls 边）")
+        } else {
+            format!("查不了：静态 calls 边里没有谁调用 {key}（可能是入口/回调/死代码，或动态派发）")
+        };
+        let out = envelope(
+            state,
+            summary,
+            vec![
+                Evidence::graph(root, "上游关系来自图库的 calls 边"),
+                Evidence::command(
+                    &format!("jingwei impact {key}"),
+                    "同一条命令可复跑；层数用 --depth 1..4",
+                ),
+            ],
+            Coverage::partial(total, None, "只覆盖静态 calls 边：动态派发/反射/方法调用不在内"),
+            serde_json::json!({"symbol": key, "callers": v, "total": total}),
         );
+        print(&out);
         return 0;
     }
 
@@ -124,7 +149,7 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
 ///
 /// 做法：取文件定义的所有符号，各自往上游走，按"最小层数"合并。
 /// 同文件内的上游单独算（那是"一个文件里要一起改的地方"），跨文件的上游才是"牵动的别人"。
-fn file_mode(store: &Store, raw: &str, depth: usize, json: bool) -> i32 {
+fn file_mode(store: &Store, root: &Path, raw: &str, depth: usize, json: bool) -> i32 {
     let rel = raw.trim_start_matches("./").replace('\\', "/");
     let file_id = format!("file:{rel}");
     if store.node(&file_id).map(|n| n.is_none()).unwrap_or(true) {
@@ -174,13 +199,36 @@ fn file_mode(store: &Store, raw: &str, depth: usize, json: bool) -> i32 {
             .iter()
             .map(|(id, d, indeg)| serde_json::json!({"symbol": id, "depth": d, "in_degree": indeg}))
             .collect();
-        println!(
-            "{}",
+        let state = if other.is_empty() { State::Unknown } else { State::Yes };
+        let summary = if other.is_empty() {
+            format!(
+                "查不了：`{rel}` 定义的符号在静态 calls 边里没有文件外上游（可能全是动态调用/还没索引）"
+            )
+        } else {
+            format!(
+                "`{rel}` 定义 {} 个符号；牵动 {} 个文件外符号（同文件内还有 {} 个一起改）",
+                symbols.len(),
+                other.len(),
+                same_file.len()
+            )
+        };
+        let out = envelope(
+            state,
+            summary,
+            vec![
+                Evidence::graph(root, "文件级上游来自图库的 calls 边"),
+                Evidence::command(
+                    &format!("jingwei impact --file {rel}"),
+                    "同一条命令可复跑；层数用 --depth 1..4",
+                ),
+            ],
+            Coverage::partial(other.len(), None, "只覆盖静态 calls 边：动态派发/反射/方法调用不在内"),
             serde_json::json!({
                 "file": rel, "symbols": symbols.len(),
                 "affected": v, "same_file": same_file.len(),
-            })
+            }),
         );
+        print(&out);
         return 0;
     }
     println!("改动影响面：{rel}（{depth} 层，只看静态 calls 边）");
@@ -310,3 +358,23 @@ fn split_id(id: &str) -> (String, String) {
 
 
 
+
+/// 「查不了」也走协议：`--json` 的用户拿到结构，不是空 stdout。
+fn 查不了(json: bool, root: &Path, why: &str, code: i32) -> i32 {
+    if json {
+        let v = envelope(
+            State::Unknown,
+            why,
+            vec![
+                Evidence::graph(root, "影响面只能从图库的 calls 边读"),
+                Evidence::command("jingwei index", "先建图谱，才有可问的影响面"),
+            ],
+            Coverage::partial(0, None, "没有可判断的对象（不是 0 个上游）"),
+            serde_json::json!({}),
+        );
+        print(&v);
+    } else {
+        println!("{why}");
+    }
+    code
+}

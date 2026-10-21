@@ -11,6 +11,8 @@ use std::path::Path;
 use jingwei_engine::graph::query;
 use jingwei_engine::understand::guide;
 
+use crate::protocol::{envelope, Coverage, Evidence, State};
+
 pub fn cmd_handover(root: &Path, json: bool) -> i32 {
     let facts = jingwei_engine::detect::probe::make_facts(root, None);
     let g = guide::make_guide(&facts, &[]);
@@ -26,18 +28,51 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
         .unwrap_or_default();
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
+        // 统一协议：接手人一页纸也必须能回答"能不能下结论、凭什么、覆盖多少"。
+        let state = if counts.is_none() {
+            State::Unknown
+        } else if gj["ready"].as_bool().unwrap_or(false) {
+            State::Yes
+        } else {
+            State::No
+        };
+        let summary = gj["headline"]
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "查不了：还没法给出能不能跑的结论".to_string());
+        let mut evidence = vec![if store.is_some() {
+            Evidence::graph(root, "规模/热点/文件状态都来自图库")
+        } else {
+            Evidence::command("jingwei index", "图谱没建，规模与热点查不了")
+        }];
+        if !decs.is_empty() {
+            evidence.push(Evidence::file(
+                "docs/decisions/",
+                &format!("最近 {} 条决策记录", decs.len()),
+            ));
+        }
+        let coverage = match counts {
+            Some((f, _, _, _)) => Coverage::full(
+                usize::try_from(f).unwrap_or(0),
+                "图库里的文件数就是这次读到的规模",
+            ),
+            None => Coverage::partial(0, None, "图谱没建：规模与热点都没读到（不是 0）"),
+        };
+        let out = envelope(
+            state,
+            summary,
+            evidence,
+            coverage,
+            serde_json::json!({
                 "what": gj["what"], "ready": gj["ready"], "headline": gj["headline"],
                 "blockers": gj["blockers"], "nextStep": gj["nextStep"],
                 "counts": counts.map(|(f, s, c, r)| serde_json::json!({"files": f, "symbols": s, "calls": c, "references": r})),
                 "entrances": tops.iter().map(|(f, n)| serde_json::json!({"file": f, "incomingCalls": n})).collect::<Vec<_>>(),
                 "fileLife": lives,
                 "decisions": decs.iter().map(|d| serde_json::json!({"id": d.id, "title": d.title, "why": d.why})).collect::<Vec<_>>(),
-            }))
-            .unwrap_or_default()
+            }),
         );
+        crate::protocol::print(&out);
         return 0;
     }
 

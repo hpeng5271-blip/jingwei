@@ -1234,6 +1234,37 @@ fn positions_没索引时的_json_是协议对象() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// **主路径命令的 `--json` 一律带协议**：`impact` / `handover` 查不了时也一样。
+///
+/// 判据：四件套齐全、`state` 是三态之一、`partial=true`（没图谱 = 没读到，不是 0 个上游）。
+#[test]
+fn impact_与_handover_的_json_也带协议() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("protocol-impact-handover");
+    let p = d.to_str().unwrap().to_string();
+    for (args, tag) in [
+        (vec!["impact", "f", "--root", &p, "--json"], "impact"),
+        (vec!["handover", "--root", &p, "--json"], "handover"),
+    ] {
+        let o = run(&args);
+        let v: serde_json::Value = serde_json::from_str(&stdout(&o))
+            .unwrap_or_else(|e| panic!("`{tag} --json` 该是合法 JSON（{e}）：{}", stdout(&o)));
+        for k in ["state", "summary", "evidence", "coverage"] {
+            assert!(v.get(k).is_some(), "`{tag} --json` 缺 `{k}`：{v}");
+        }
+        assert_eq!(
+            v["state"].as_str(),
+            Some("unknown"),
+            "`{tag}` 在没图谱的目录里该说 unknown（查不了 ≠ 没有）：{v}"
+        );
+        assert!(
+            v["coverage"]["partial"].as_bool().unwrap_or(false),
+            "`{tag}` 没读到东西时必须 partial=true：{v}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 
 
 

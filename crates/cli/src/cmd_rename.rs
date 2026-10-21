@@ -7,6 +7,8 @@
 //! 进"不敢改"清单并让退出码非零（有没改完的地方，不许假报成功）。
 
 use std::collections::BTreeMap;
+
+use crate::protocol::{envelope, print as print_protocol, Coverage, Evidence, State};
 use std::path::Path;
 
 pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) -> i32 {
@@ -15,7 +17,7 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
     // 没索引过的项目敲一次 rename 就在人家目录里留一个空 `.jingwei/`。
     if !db.exists() {
         eprintln!("查不了：还没索引（先跑一次 jingwei index）——没有图谱就不知道该改哪几处");
-        return 2;
+        return 查不了(json, root, "查不了：还没索引（先跑一次 jingwei index）——没有图谱就不知道该改哪几处", 2);
     }
     let store = match jingwei_engine::graph::query::open_for_query(root) {
         Ok(s) => s,
@@ -40,14 +42,14 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
     };
     if ids.is_empty() {
         eprintln!("图谱里没有叫 `{name}` 的符号（先 index，或名字拼错了）");
-        return 2;
+        return 查不了(json, root, &format!("查不了：图谱里没有叫 `{name}` 的符号"), 2);
     }
     if ids.len() > 1 {
         eprintln!("有 {} 个符号叫 `{name}`，用 id 指定：", ids.len());
         for id in &ids {
             eprintln!("  {id}");
         }
-        return 2;
+        return 查不了(json, root, &format!("查不了：有 {} 个符号叫 `{name}`，要指定 id（不替你挑）", ids.len()), 2);
     }
 
     let plan = match store.plan_rename(root, &ids[0], to) {
@@ -58,7 +60,52 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
         }
     };
     if json {
-        println!("{}", serde_json::to_string_pretty(&plan).unwrap_or_default());
+        // **协议**（2026-10-21）：改名是"高信息量、低注意力"的动作（人原话），
+        // 所以先把"将改几处/哪几处/敢不敢改"结构化交出来，再谈写不写。
+        let (state, summary) = if !plan.ambiguous.is_empty() {
+            (
+                State::No,
+                format!(
+                    "有 {} 处判不准，整次不改（半截重命名比不改更糟）；能改 {} 处",
+                    plan.ambiguous.len(),
+                    plan.edits.len()
+                ),
+            )
+        } else if plan.edits.is_empty() {
+            (State::No, "图谱里没有可改的位置（同名符号可能没被引用）".to_string())
+        } else if write {
+            (
+                State::Yes,
+                format!(
+                    "将改 {} 处（{} 个文件），随后回读校验",
+                    plan.edits.len(),
+                    plan.files().len()
+                ),
+            )
+        } else {
+            (
+                State::Yes,
+                format!(
+                    "预演：将改 {} 处（{} 个文件）；确认后加 --write",
+                    plan.edits.len(),
+                    plan.files().len()
+                ),
+            )
+        };
+        let v = envelope(
+            state,
+            summary,
+            vec![
+                Evidence::graph(root, "改哪几处来自图库的符号位置"),
+                Evidence::command(
+                    &format!("jingwei rename {} --to {} --json", name, to),
+                    "同一条命令可复跑；--write 才真的写",
+                ),
+            ],
+            Coverage::full(plan.edits.len(), "能改的位置；判不准的另列，不混进来"),
+            serde_json::json!({"plan": plan, "write": write}),
+        );
+        print_protocol(&v);
     } else {
         println!("符号：{}  →  {to}", ids[0]);
         println!("能改：{} 处（{} 个文件）", plan.edits.len(), plan.files().len());
@@ -183,4 +230,22 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
     println!("回读通过：{} 处都已是 `{}`", plan.edits.len(), to);
 
     if plan.ambiguous.is_empty() { 0 } else { 1 }
+}
+
+/// 「查不了」也走协议：`--json` 的调用方拿到结构，不是空 stdout。
+fn 查不了(json: bool, root: &Path, why: &str, code: i32) -> i32 {
+    if json {
+        let v = envelope(
+            State::Unknown,
+            why,
+            vec![
+                Evidence::graph(root, "改名要知道符号在图库里的位置"),
+                Evidence::command("jingwei index", "没索引就没有位置可改"),
+            ],
+            Coverage::partial(0, None, "没有可判断的对象（不是 0 处可改）"),
+            serde_json::json!({}),
+        );
+        print_protocol(&v);
+    }
+    code
 }

@@ -1430,3 +1430,40 @@ fn graph_的_json_也带协议() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`rename --json` 也要走协议**：先把"将改几处 / 敢不敢改"结构化交出来。
+///
+/// 改名是"信息量大、注意力低"的动作（人原话），所以确认前必须能一眼看到清单；
+/// 判不准时 `state=no`（整次拒绝），而不是偷偷改一半。
+#[test]
+fn rename_的_json_带协议且判不准时是_no() {
+    let Some(_) = bin() else { return };
+    // ① 没索引 → unknown + 四件套
+    let d = empty_dir("rename-json-nodeps");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["rename", "greet", "--to", "welcome", "--root", &p, "--json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("没索引时 `rename --json` 也该是 JSON");
+    assert_eq!(v["state"].as_str(), Some("unknown"), "没索引该是 unknown：{v}");
+
+    // ② 有索引 → yes + summary 带"将改/预演" + plan 在
+    let d2 = empty_dir("rename-json-ok");
+    std::fs::create_dir_all(d2.join("src")).unwrap();
+    std::fs::write(d2.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d2.join("src/a.rs"), "pub fn greet() {}\n\npub fn call() { greet(); }\n").unwrap();
+    let p2 = d2.to_str().unwrap().to_string();
+    assert_eq!(code(&run(&["index", "--root", &p2])), 0, "索引应成功");
+    let o2 = run(&["rename", "greet", "--to", "welcome", "--root", &p2, "--json"]);
+    let v2: serde_json::Value =
+        serde_json::from_str(&stdout(&o2)).expect("`rename --json` 该是 JSON");
+    assert_eq!(v2["state"].as_str(), Some("yes"), "能改时该是 yes：{v2}");
+    let s = v2["summary"].as_str().unwrap_or("");
+    assert!(s.contains("将改") || s.contains("预演"), "summary 要说清将改几处：{s}");
+    assert!(v2["plan"].is_object(), "清单要在（plan）：{v2}");
+    assert!(
+        v2["coverage"]["read"].as_u64().unwrap_or(0) >= 1,
+        "覆盖度至少 1 处：{v2}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&d2);
+}

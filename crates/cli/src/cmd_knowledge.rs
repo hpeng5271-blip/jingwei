@@ -1,4 +1,4 @@
-﻿//! `jingwei knowledge check`：**知识条目的严筛**——双头漏斗最细的那道颈（2026-10-20，pro 任务卡 A）。
+//! `jingwei knowledge check`：**知识条目的严筛**——双头漏斗最细的那道颈（2026-10-20，pro 任务卡 A）。
 //!
 //! 为什么要有它：采集与二次编制如果只靠文档自觉，条目会越写越像"感觉"，
 //! 而这道颈的判据只有一句话：**没有来源、没有等级、没有判据的条目，不算过筛**；
@@ -482,6 +482,31 @@ pub fn sync_claims(root: &Path) -> Option<(usize, usize)> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     store.sync_claims(&rows, now).ok()
+}
+
+/// **索引收尾时的知识层对账**（2026-10-21）：只在"文档有主张、库里 0 条"时重建。
+///
+/// 触发场景：删掉 `.jingwei` 重建、换机器、或从 git 拉了别人的仓库（库不在版本控制里）。
+/// 不补的话，`explain` 的"知识层"那行会**静默变空**——看着像"这条代码没被任何主张解释过"，
+/// 而真相是"投影还没建"。三态纪律：不能让"没建"伪装成"没有"。
+///
+/// 返回 `Some((主张数, 挂符号数))` 表示做了重建；`None` 表示不需要或做不了（库不存在等）。
+pub fn ensure_claims_projection(root: &Path) -> Option<(usize, usize)> {
+    let db = root.join(".jingwei").join("graph.db");
+    if !db.exists() {
+        return None;
+    }
+    {
+        let store = Store::open_readonly(&db).ok()?;
+        if store.claim_count().unwrap_or(0) > 0 {
+            return None; // 已经有投影：不擅自动
+        }
+    }
+    let rows = claim_rows(root);
+    if rows.is_empty() {
+        return None; // 文档里也没主张：没什么可建
+    }
+    sync_claims(root)
 }
 
 /// **只读**打开图谱：库不存在或还没索引过 → None（= 查不了，**不是**"没有主张"）。

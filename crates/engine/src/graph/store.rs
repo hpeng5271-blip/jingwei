@@ -484,6 +484,18 @@ impl Store {
     ///
     /// 为什么单独给类型而不复用 `Node`：claim 与符号是**两种东西**，
     /// 混进 `nodes` 会让"查符号"查到一个主张的名字——三态就此失真。
+    /// 图谱里有多少条主张（`claims` 投影表）。**老库没有这张表时按 0 算**——
+    /// 那时确实一条投影都没有，而不是"查不了"（2026-10-21）。
+    pub fn claim_count(&self) -> Result<usize> {
+        match self
+            .conn
+            .query_row("SELECT count(*) FROM claims", [], |r| r.get::<_, i64>(0))
+        {
+            Ok(n) => Ok(n.max(0) as usize),
+            Err(_) => Ok(0),
+        }
+    }
+
     pub fn sync_claims(&mut self, rows: &[ClaimRow], now: i64) -> Result<(usize, usize)> {
         let tx = self.conn.transaction().context("开事务失败")?;
         tx.execute("DELETE FROM claim_edges", [])?;

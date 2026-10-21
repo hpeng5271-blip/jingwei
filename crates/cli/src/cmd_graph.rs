@@ -687,6 +687,18 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
     if rep.truncated {
         println!("    {} 撞到文件数上限，这次没索引完", c(YELLOW, "!"));
     }
+    // **知识层自动对账**（2026-10-21）：删掉 `.jingwei` 重建、或换了机器之后，
+    // claims 投影是空的，而 `explain` 的"知识层"那行会**静默变空**——用户看不出是"没挂"
+    // 还是"库刚重建"。这里在索引收尾时补一次：**只补空的**（文档有主张、库里 0 条），
+    // 不做静默覆盖（那会把别人手改的库状态抹掉）。
+    if let Some((n, linked)) = crate::cmd_knowledge::ensure_claims_projection(root) {
+        println!(
+            "    {} 知识层已按文档重建（{} 条主张，{} 条挂着真实符号）",
+            c(DIM, "·"),
+            n,
+            linked
+        );
+    }
     println!("    {}", c(DIM, "看图：打开桌面界面 → 「图谱」页（或 jingwei graph）"));
     println!();
     0

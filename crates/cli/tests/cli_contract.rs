@@ -725,3 +725,54 @@ fn symbol_报的条目数与列出的条数一致() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+
+/// **删库重建后，`index` 要自动把知识层按文档补回来**（2026-10-21）。
+///
+/// 场景：换机器 / 清了 `.jingwei` / 从 git 拉了别人仓库（库不在版本控制里）。
+/// 不补的话 `explain` 的"知识层"那行会**静默变空**——看着像"这条代码没被任何主张解释过"，
+/// 真相是"投影还没建"。三态纪律：不能让"没建"伪装成"没有"。
+#[test]
+fn index_后知识层自动重建() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("index-claims");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let kdir = d.join("docs").join("knowledge");
+    std::fs::create_dir_all(&kdir).unwrap();
+    std::fs::write(
+        kdir.join("e.md"),
+        "---\nclaim: 示例主张\nsource: https://example.com/x\nlevel: 一手\ncheck: 只是想清楚\nsymbol: src/a.rs#f\n---\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    // 1) 第一次索引：库是空的，应当**顺手把知识层建起来**并在输出里说一句。
+    let out = run(&["index", "--root", &p]);
+    let text = stdout(&out);
+    assert!(
+        text.contains("知识层已按文档重建"),
+        "删库后第一次索引应重建知识层，实际输出：{text}"
+    );
+
+    // 2) 紧接着问一次：不该再报"漂移"（说明投影真的建好了，不是只打了句话）。
+    let chk = run(&["knowledge", "check", "--root", &p]);
+    let ctext = stdout(&chk);
+    assert!(
+        !ctext.contains("漂移"),
+        "索引后不该还报漂移：{ctext}"
+    );
+
+    // 3) 第二次索引：已经有投影，**不该**再打印重建（不擅自动用户的库）。
+    let out2 = run(&["index", "--root", &p]);
+    let text2 = stdout(&out2);
+    assert!(
+        !text2.contains("知识层已按文档重建"),
+        "投影已存在时不该重建，实际输出：{text2}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

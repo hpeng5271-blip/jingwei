@@ -61,6 +61,10 @@ pub struct IndexReport {
     /// **悬空边**：端点不在图谱里的边——写之前筛掉并计数（2026-10-21）。
     /// 一条脏边不该让整次索引失败：宁可少一条，也不要半张图。
     pub dangling_edges: usize,
+    /// 带全项目签名提示重解析的文件数（跨文件返回值推导，2026-10-21）。
+    pub reparsed_with_hints: usize,
+    /// 守卫触发次数：重解析后**符号数变了** → 不采用。
+    pub hint_guard_tripped: usize,
     /// 这次更新里被标成失效的旧关系条数。
     pub edges_expired: usize,
     /// **解析期连上的跨文件关系**（含就近遮蔽命中的）。
@@ -348,7 +352,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@31";
+pub const EXTRACTOR_VERSION: &str = "parse@32";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -433,8 +437,76 @@ pub fn index_source(
     }
     let t_prep = std::time::Instant::now();
     // `files` 后面还要用（筛悬空边时要拿它拼 `file:` 节点 id），所以 clone 一份进并行准备
-    let prepared = crate::graph::parse_pool::prepare(files.clone(), &states, version_changed, now);
+    let mut prepared = crate::graph::parse_pool::prepare(files.clone(), &states, version_changed, now);
     timing.add_parse(t_prep);
+
+    // **跨文件返回值提示**（2026-10-21 第二次尝试）：`let x = make();` 里 `make` 常定义在别的文件。
+    // 提示来自库里已落下的符号 `ret`（上一轮索引的产物）+ 本轮解析出的 `ret`。
+    // 两条铁律：①**同名不同返回类型 → 作废**（`new`/`parse` 这种重名函数不许跨文件借类型）；
+    //          ②**重解析后符号数一变就不采用**（上一轮没这条守卫，删库量到符号 2167→2148，整块回滚）。
+    {
+        let mut hints: std::collections::BTreeMap<String, Option<String>> =
+            std::collections::BTreeMap::new();
+        let put = |m: &mut std::collections::BTreeMap<String, Option<String>>, name: &str, ty: &str| {
+            match m.get(name) {
+                None => {
+                    m.insert(name.to_string(), Some(ty.to_string()));
+                }
+                Some(Some(prev)) if prev == ty => {}
+                Some(_) => {
+                    m.insert(name.to_string(), None);
+                }
+            }
+        };
+        for (k, v) in store.signature_hints().unwrap_or_default() {
+            put(&mut hints, &k, &v);
+        }
+        for p in &prepared {
+            if let Some(pr) = &p.parsed {
+                for n in &pr.symbols {
+                    if let Some(ret) = n
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.get("ret"))
+                        .and_then(|x| x.as_str())
+                    {
+                        put(&mut hints, &n.name, ret);
+                    }
+                }
+            }
+        }
+        let hints: std::collections::BTreeMap<String, String> = hints
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| (k, v)))
+            .collect();
+        if !hints.is_empty() {
+            for p in prepared.iter_mut() {
+                let Some(pr) = &p.parsed else { continue };
+                let needs = pr
+                    .references
+                    .iter()
+                    .any(|r| r.raw.contains('.') && r.want_path.is_none());
+                if !needs {
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(&p.abs) else {
+                    continue;
+                };
+                let file = crate::util::textfile::decode(&bytes);
+                if !file.readable {
+                    continue;
+                }
+                let parsed = crate::parse::parse_rust_with_hints(&p.rel, &file.text, now, &hints);
+                if parsed.symbols.len() != pr.symbols.len() {
+                    rep.hint_guard_tripped += 1;
+                    continue;
+                }
+                p.result_sha = crate::graph::result_sha::parsed_result_sha(&parsed);
+                p.parsed = Some(parsed);
+                rep.reparsed_with_hints += 1;
+            }
+        }
+    }
 
     for p in prepared {
         if let Some(s) = p.skip {
@@ -1071,6 +1143,9 @@ mod dangling_edge_tests {
         assert_eq!(edges.len(), 1, "只剩那条好边：{edges:?}");
     }
 }
+
+
+
 
 
 

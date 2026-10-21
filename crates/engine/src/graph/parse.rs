@@ -1,4 +1,4 @@
-//! 把源码变成符号。M3 的落点。
+﻿//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -1051,12 +1051,14 @@ fn ty_of_initializer(
             if first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
                 Some(first.to_string())
             } else {
-                // `let x = make();` —— 类型来自**本文件里那个函数的返回类型**（2026-10-21）。
-                // 只认裸标识符的调用（`make` / `make(...)`），`obj.make()` 那种要看接收者，不猜。
+                // `let x = make();` / `let x = crate::a::make();` —— 类型来自**被调函数的返回类型**。
+                // 首段是小写时按**最后一段**查（`crate::a::make` → `make`）；`obj.make()` 那种
+                // 接收者不是路径，走不到这里（要看接收者类型，不猜）。
+                let last = t.rsplit("::").next().unwrap_or(first).trim();
                 if unwrapped {
-                    returns_unwrapped.get(first).cloned()
+                    returns_unwrapped.get(last).cloned()
                 } else {
-                    returns.get(first).cloned()
+                    returns.get(last).cloned()
                 }
             }
         }
@@ -1326,6 +1328,7 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
 
 
 

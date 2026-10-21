@@ -1,4 +1,4 @@
-﻿//! 图谱那一摊（命令行版）：`graph` 看运行历史，`graph runs <id>` 看某一次的明细。
+//! 图谱那一摊（命令行版）：`graph` 看运行历史，`graph runs <id>` 看某一次的明细。
 //!
 //! ## 为什么只做"读"，不做索引
 //!
@@ -631,6 +631,17 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
         println!(
             "    {} 个文件内容变了但解析结果没变——图没重写（早期截断）",
             rep.skipped_same_result
+        );
+    }
+    if rep.reparsed_with_hints > 0 {
+        let guard = if rep.hint_guard_tripped > 0 {
+            format!("；守卫拦下 {} 个（符号数会变）", rep.hint_guard_tripped)
+        } else {
+            String::new()
+        };
+        println!(
+            "    带全项目签名提示重解析了 {} 个文件（跨文件返回值推导）{}",
+            rep.reparsed_with_hints, guard
         );
     }
     println!("    {}", c(DIM, "理解了多少："));

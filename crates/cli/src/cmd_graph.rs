@@ -18,6 +18,7 @@
 //! 命令行不画颜色块，所以用**三种不同的措辞**分开——文字界面同样不许把后两种混成一句。
 
 use super::{c, pad, BOLD, CYAN, DIM, GREEN, RED, YELLOW};
+use crate::protocol::{envelope, print as print_protocol, Coverage, Evidence, State};
 use jingwei_engine::graph::{query, store::Store};
 use jingwei_engine::Verdict;
 use serde_json::json;
@@ -578,6 +579,35 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             eprintln!("  　它有：{}", list.join("、"));
             eprintln!("  　**不是你没有源码，是我们还没支持这门语言。**");
         }
+        // **查不了也要走协议**（2026-10-21）：三字段是硬要求——缺什么 / 为什么缺 / 怎么补。
+        if json {
+            let (what, why_missing, how) = if foreign.is_empty() {
+                (
+                    "这个目录里没有可索引的源码",
+                    "目录里确实没有 .rs / .py",
+                    "放一个源文件，或把 --root 指到真正的项目目录",
+                )
+            } else {
+                (
+                    "这个目录里有源码，但我们还不支持这门语言",
+                    "目前只解析 Rust 与 Python",
+                    "换一个支持的目录，或等我们加语言",
+                )
+            };
+            let summary =
+                format!("暂无法探知：{what}｜缺：.rs / .py 源文件｜为什么：{why_missing}｜怎么补：{how}");
+            let v = envelope(
+                State::Unknown,
+                summary,
+                vec![
+                    Evidence::file(&shown.to_string(), "扫到 0 个文件；我们能解析的是 .rs / .py"),
+                    Evidence::command("jingwei index", "换一个目录（--root）再跑一次"),
+                ],
+                Coverage::partial(0, Some(0), "扫到 0 个文件（不是「索引了 0 个」）"),
+                json!({"scanned": 0, "files": 0, "symbols": 0, "foreign": foreign.len()}),
+            );
+            print_protocol(&v);
+        }
         return 1;
     }
     let ms = t0.elapsed().as_millis() as u64;
@@ -589,10 +619,32 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
         if let Some(o) = v.as_object_mut() {
             o.insert("ms".into(), json!(ms));
         }
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&v).unwrap_or_default()
+        // 协议四件套：`scanned` 才是"看了多少"，`files` 是"这次真处理了几个"（增量时会很小）。
+        let summary = if rep.files == rep.scanned {
+            format!(
+                "索引完成：扫到 {} 个文件，{} 个符号，{} 条调用（{ms}ms）",
+                rep.scanned, rep.symbols, rep.calls
+            )
+        } else {
+            format!(
+                "索引完成：扫到 {} 个文件，处理 {} 个（其余没变/跳过），{} 个符号（{ms}ms）",
+                rep.scanned, rep.files, rep.symbols
+            )
+        };
+        let out = envelope(
+            State::Yes,
+            summary,
+            vec![
+                Evidence::command("jingwei index", "同一条命令可复跑；增量会跳过没变的文件"),
+                Evidence::graph(root, "结果写进图库，下一次从这里读"),
+            ],
+            Coverage::full(
+                rep.scanned,
+                &format!("扫到 {} 个文件；这次处理 {} 个", rep.scanned, rep.files),
+            ),
+            v,
         );
+        print_protocol(&out);
         return 0;
     }
 

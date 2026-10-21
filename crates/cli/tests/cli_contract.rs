@@ -1238,8 +1238,7 @@ fn positions_没索引时的_json_是协议对象() {
 ///
 /// 判据：四件套齐全、`state` 是三态之一、`partial=true`（没图谱 = 没读到，不是 0 个上游）。
 #[test]
-fn impact_与_handover_的_json_也带协议() {
-    let Some(_) = bin() else { return };
+fn impact_与_handover_的_json_也带协议() {    let Some(_) = bin() else { return };
     let d = empty_dir("protocol-impact-handover");
     let p = d.to_str().unwrap().to_string();
     for (args, tag) in [
@@ -1269,3 +1268,46 @@ fn impact_与_handover_的_json_也带协议() {
 
 
 
+
+/// **`index --json` 也带协议；扫到 0 个文件时必须说清「缺什么/为什么/怎么补」。**
+///
+/// 这条对应 2026-10-21 的硬要求：环境与索引这类"探不到"的东西，不许只给一句"查不了"——
+/// 那会让人以为项目是空的，而实际可能是"我们还不支持这门语言"。
+#[test]
+fn index_的_json_带协议_扫不到时带三字段() {
+    let Some(_) = bin() else { return };
+    // ① 空目录：state=unknown + 三字段 + 非 0 退出
+    let d = empty_dir("index-json-empty");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["index", "--root", &p, "--json"]);
+    assert_ne!(code(&o), 0, "扫到 0 个文件必须非 0 退出（不许长得像成功）");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("扫不到时 `index --json` 也该是 JSON");
+    assert_eq!(v["state"].as_str(), Some("unknown"), "扫不到该是 unknown：{v}");
+    let s = v["summary"].as_str().unwrap_or("");
+    for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+        assert!(s.contains(k), "查不了必须带三字段（缺 `{k}`）：{s}");
+    }
+    assert!(
+        v["coverage"]["partial"].as_bool().unwrap_or(false),
+        "扫到 0 个文件时 coverage 必须是 partial：{v}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+
+    // ② 有源码：state=yes，覆盖度 = 扫到的文件数
+    let d2 = empty_dir("index-json-ok");
+    std::fs::create_dir_all(d2.join("src")).unwrap();
+    std::fs::write(d2.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d2.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p2 = d2.to_str().unwrap().to_string();
+    let o2 = run(&["index", "--root", &p2, "--json"]);
+    assert_eq!(code(&o2), 0, "索引该成功：{}", stdout(&o2));
+    let v2: serde_json::Value =
+        serde_json::from_str(&stdout(&o2)).expect("`index --json` 该是 JSON");
+    assert_eq!(v2["state"].as_str(), Some("yes"), "扫到了源码该是 yes：{v2}");
+    assert!(
+        v2["coverage"]["read"].as_u64().unwrap_or(0) >= 1,
+        "覆盖度至少 1 个文件：{v2}"
+    );
+    let _ = std::fs::remove_dir_all(&d2);
+}

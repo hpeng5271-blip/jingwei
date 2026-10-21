@@ -970,3 +970,53 @@ fn 全量索引报的数字等于_graph_stats() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **没有主张时，`handover` 的「③b 知识层」整行不打印**（2026-10-21）。
+///
+/// 这是有意的设计：**空着 ≠ 0 条**。打印「0 条主张」会被读成"这个项目一条知识都没有"，
+/// 而真相常常是"还没开始采集"。三态纪律：不许把"还没做"说成"没有"。
+/// 这条测试守的就是这个区分——**有人后来把它改成无条件打印就会红**。
+#[test]
+fn handover_没有主张时不打印知识层() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("handover-noclaims");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    assert_eq!(code(&run(&["index", "--root", &p])), 0, "索引应成功");
+
+    let out = stdout(&run(&["handover", "--root", &p]));
+    assert!(
+        out.contains("③ 规模"),
+        "规模那一行应该在（否则测不到东西）：{out}"
+    );
+    assert!(
+        !out.contains("③b 知识层"),
+        "没有主张时不该打印知识层（空着 ≠ 0 条），实际：{out}"
+    );
+
+    // 放一条主张进去：这次必须出现，而且数字对得上（1 条）。
+    let kdir = d.join("docs").join("knowledge");
+    std::fs::create_dir_all(&kdir).unwrap();
+    std::fs::write(
+        kdir.join("e.md"),
+        "---\nclaim: 示例主张\nsource: https://example.com/x\nlevel: 一手\ncheck: 只是想清楚\n---\n",
+    )
+    .unwrap();
+    assert_eq!(code(&run(&["index", "--root", &p])), 0);
+    let out2 = stdout(&run(&["handover", "--root", &p]));
+    let line = out2
+        .lines()
+        .find(|l| l.contains("③b 知识层"))
+        .unwrap_or_else(|| panic!("有主张时应打印知识层：{out2}"));
+    assert!(
+        line.contains('1'),
+        "知识层应报 1 条主张，实际：{line}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -1,4 +1,4 @@
-# Packaging (2026-10-20, user's call): dist\<yyyy-MM-dd>\ holding the GUI program and the manual.
+﻿# Packaging (2026-10-20, user's call): dist\<yyyy-MM-dd>\ holding the GUI program and the manual.
 # Nothing else -- no CLI exe, no run.cmd, no demo trees, no second copy of the same text.
 # Why: the old package carried several copies of the same docs plus three demo projects; each
 # copy could go stale, and what a user needs to start is one exe and one page.
@@ -27,6 +27,10 @@ Push-Location $root
 try {
     & cargo build --release -p jingwei-app
     if ($LASTEXITCODE -ne 0) { throw "cargo build --release -p jingwei-app failed ($LASTEXITCODE)" }
+    # The GUI's protocol bridge runs the CLI: jingwei <verb> --json. Without jingwei.exe the
+    # overview strip can only say "can't tell" -- and smoke-pack.mjs expects it in the package.
+    & cargo build --release -p jingwei
+    if ($LASTEXITCODE -ne 0) { throw "cargo build --release -p jingwei failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 
 $gui = Join-Path $root 'target\release\jingwei-gui.exe'
@@ -40,6 +44,10 @@ if (Test-Path -LiteralPath $out) { [System.IO.Directory]::Delete($out, $true) }
 [void](New-Item -ItemType Directory -Path $out -Force)
 Copy-Item -LiteralPath $gui -Destination (Join-Path $out 'jingwei-gui.exe')
 Copy-Item -LiteralPath $manual -Destination (Join-Path $out $manualName)
+# GUI depends on the CLI for its protocol strip; keep them side by side.
+$cli = Join-Path $root 'target\release\jingwei.exe'
+if (-not (Test-Path -LiteralPath $cli)) { throw "missing $cli (did the release build run?)" }
+Copy-Item -LiteralPath $cli -Destination (Join-Path $out 'jingwei.exe')
 
 Write-Host "done: $out"
 Get-ChildItem -LiteralPath $out | ForEach-Object { Write-Host ("  {0}  {1:N0} bytes" -f $_.Name, $_.Length) }

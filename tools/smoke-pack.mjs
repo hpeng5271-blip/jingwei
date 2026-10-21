@@ -1,83 +1,118 @@
-// **包冒烟**（2026-10-20）：不只是"包里文件对"，而是**解压出来真能跑**。
+// **包冒烟**（2026-10-20 起；2026-10-21 改成跟新包形状）：取包 → 真跑 → 断言。
 //
-// 步骤：解压到临时目录 → 对包里的演示项目跑 `index` → 跑 `positions` →
-// 断言：① 有"个文件 ·"这行（真的解析了）② positions 的"对不上"为 0。
+// 包形状变了两次，这个脚本也得跟着变（不然它测的是"上一版的包"）：
+// - 2026-10-20 之前：zip，里面带三套演示项目；
+// - 现在：`dist\<yyyy-MM-dd>\` 目录，只放 `jingwei-gui.exe` + `jingwei.exe` + 说明书，**不带演示项目**。
 //
-// 用法：node tools/smoke-pack.mjs [zip 路径]
-
-import { execFileSync } from 'node:child_process';
+// 所以演示项目改成**脚本自己铺**（临时目录），断言不变：
+// ① `index` 真的解析了东西（有规模行）② `positions` 的"对不上"为 0 ③ `rename --write` 回读通过。
+// 用法：node tools/smoke-pack.mjs [--gui] [包目录或 zip 路径]
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 
-const argZip = process.argv.slice(2).find((a) => a.endsWith('.zip'));
-const zip = argZip || findDefault();
-function findDefault() {
+const args = process.argv.slice(2);
+const givePath = args.find((a) => !a.startsWith('--'));
+
+/// 最新的包：优先 `dist/<YYYY-MM-DD>/` 目录，其次 `dist/*.zip`。
+function findPackage() {
   const dist = path.join(process.cwd(), 'dist');
-  const names = fs.readdirSync(dist).filter((n) => n.endsWith('.zip') && !n.startsWith('_'));
-  if (!names.length) {
-    console.error('dist/ 里没有 zip');
-    process.exit(2);
-  }
-  return path.join(dist, names[names.length - 1]);
+  if (!fs.existsSync(dist)) return null;
+  const names = fs.readdirSync(dist).filter((n) => !n.startsWith('_'));
+  const dirs = names
+    .filter((n) => /^\d{4}-\d{2}-\d{2}$/.test(n) && fs.existsSync(path.join(dist, n, 'jingwei.exe')))
+    .sort();
+  if (dirs.length) return { kind: 'dir', p: path.join(dist, dirs[dirs.length - 1]) };
+  const zips = names.filter((n) => n.endsWith('.zip')).sort();
+  if (zips.length) return { kind: 'zip', p: path.join(dist, zips[zips.length - 1]) };
+  return null;
+}
+
+const chosen = givePath
+  ? { kind: givePath.endsWith('.zip') ? 'zip' : 'dir', p: path.resolve(givePath) }
+  : findPackage();
+if (!chosen) {
+  console.error('dist/ 下没有包（先跑 pack.ps1）');
+  process.exit(2);
 }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jw-smoke-'));
-try {
-  execFileSync(
-    'powershell',
-    ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${tmp}' -Force`],
-    { stdio: 'pipe' },
+/// 自铺演示项目：一个能被 rename 命中的符号 + 一次调用（positions 才有东西可核）。
+function makeDemo(dir) {
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'Cargo.toml'),
+    '[package]\nname = "hello_rust"\nversion = "0.1.0"\nedition = "2021"\n',
   );
-  // 包里的文件直接在根下（没有套一层目录）。
-  const root = tmp;
+  fs.writeFileSync(
+    path.join(dir, 'src', 'main.rs'),
+    'fn greet() -> &\'static str { "hi" }\n\nfn main() {\n    println!("{}", greet());\n}\n',
+  );
+}
+
+try {
+  let root;
+  if (chosen.kind === 'zip') {
+    execFileSync(
+      'powershell',
+      ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${chosen.p}' -DestinationPath '${tmp}' -Force`],
+      { stdio: 'pipe' },
+    );
+    root = tmp;
+  } else {
+    root = chosen.p;
+  }
   const exe = path.join(root, 'jingwei.exe');
-  if (!fs.existsSync(exe)) throw new Error('包里没有 jingwei.exe');
+  if (!fs.existsSync(exe)) throw new Error(`包里没有 jingwei.exe：${root}`);
 
-  // 演示项目目录名是中文（演示项目/hello_python）——包里的真实布局，不假装成英文。
-  const demo = path.join(root, '演示项目', 'hello_python');
-  if (!fs.existsSync(demo)) throw new Error('包里没有 演示项目/hello_python');
+  const demo = path.join(tmp, 'demo');
+  makeDemo(demo);
 
-  const idx = execFileSync(exe, ['index'], { cwd: demo, encoding: 'utf8' });
+  const idx = execFileSync(exe, ['index', '--root', demo], { encoding: 'utf8' });
   if (!/个文件 ·/.test(idx)) throw new Error(`index 没给出规模行：${idx.slice(0, 200)}`);
 
-  const pos = execFileSync(exe, ['positions', '--json'], { cwd: demo, encoding: 'utf8' });
-  const rep = JSON.parse(pos);
+  // `positions --json` 现在带协议（2026-10-21）：领域字段在里面，先取 `positions` 再退回旧形状。
+  const pos = execFileSync(exe, ['positions', '--root', demo, '--json'], { encoding: 'utf8' });
+  const wire = JSON.parse(pos);
+  const rep = wire.positions || wire;
   const bad = Number(rep.bad || 0);
   if (bad !== 0) throw new Error(`positions 有 ${bad} 处对不上`);
-
-  const checked = Number(rep.ok || 0) + bad + Number(rep.unknown || 0) + Number(rep.imprecise || 0);
+  const checked =
+    Number(rep.ok || 0) + bad + Number(rep.unknown || 0) + Number(rep.imprecise || 0);
   if (checked === 0) throw new Error('positions 一个符号都没核到');
+  if (wire.state && wire.state !== 'yes' && wire.state !== 'no') {
+    throw new Error(`positions 协议 state 异常：${wire.state}`);
+  }
 
+  // 重命名：拷一份 demo（别改包里的东西）→ index → rename --write → 回读。
+  const copy = path.join(tmp, '__rename_demo');
+  fs.cpSync(demo, copy, { recursive: true });
+  execFileSync(exe, ['index', '--root', copy], { encoding: 'utf8' });
+  const ren = execFileSync(exe, ['rename', 'greet', '--to', 'welcome', '--write', '--root', copy], {
+    encoding: 'utf8',
+  });
+  if (!/回读通过/.test(ren)) throw new Error(`rename 没回读通过：${ren.slice(0, 300)}`);
 
-  // **GUI 也要能起来**（用户打开包第一时间点的是它）：起进程、等 3 秒、确认还活着，再杀掉。
+  // GUI 也要能起来：起进程、等 3 秒、确认还活着，再杀掉。
   const gui = path.join(root, 'jingwei-gui.exe');
-  if (process.argv.includes('--gui') && fs.existsSync(gui)) {
-    const { spawn } = await import('node:child_process');
+  if (args.includes('--gui')) {
+    if (!fs.existsSync(gui)) throw new Error('包里没有 jingwei-gui.exe');
     const child = spawn(gui, [], { cwd: root, stdio: 'ignore', detached: false });
     let exited = false;
-    child.on('exit', () => { exited = true; });
+    child.on('exit', () => {
+      exited = true;
+    });
     await new Promise((r) => setTimeout(r, 3000));
     if (exited) throw new Error('GUI 起来 3 秒内就退出了（起不来）');
     child.kill();
     console.log('  GUI 冒烟通过：起来 3 秒没退');
   }
 
-
-  // **重命名也要能在包里跑通**：拷一份 demo（别改包里的原件）→ index → rename --write → 回读。
-  const copy = path.join(tmp, '__rename_demo');
-  fs.cpSync(demo, copy, { recursive: true });
-  execFileSync(exe, ['index'], { cwd: copy, encoding: 'utf8' });
-  const ren = execFileSync(exe, ['rename', 'greet', '--to', 'welcome', '--write'], {
-    cwd: copy,
-    encoding: 'utf8',
-  });
-  if (!/回读通过/.test(ren)) throw new Error(`rename 没回读通过：${ren.slice(0, 300)}`);
-  console.log('  重命名冒烟通过：3 处改完并回读');
-
-  console.log(`包冒烟通过：${path.basename(zip)}`);
+  console.log(`包冒烟通过：${path.basename(root)}`);
   console.log(`  demo 索引：${(idx.match(/.*个文件 ·.*/) || [''])[0].trim()}`);
   console.log(`  位置回读：核了 ${checked} 个符号，对不上 0`);
+  console.log('  重命名冒烟通过：改完并回读');
 } catch (e) {
   console.error(`包冒烟失败：${e.message || e}`);
   process.exit(1);

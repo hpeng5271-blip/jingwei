@@ -1,4 +1,4 @@
-// 外壳那一圈：右侧诊断栏、四角信息卡策略、底部活动带、顶部项目切换器、项目列表。
+﻿// 外壳那一圈：右侧诊断栏、四角信息卡策略、底部活动带、顶部项目切换器、项目列表。
 //
 // 这些是"任何页面都在场"的东西，所以跟具体某一页分开放——它们是壳，不是页。
 // ── 右侧诊断栏（常驻）：任何页面都能看到"现在有没有挡路的问题" ──
@@ -928,7 +928,8 @@ function renderDetail() {
   const why = (PS.draft && PS.draft.why) || [];
   const run = (c && c.commands && c.commands.run) || info.run;
 
-  box.innerHTML = '<div class="pd-bar">'
+  box.innerHTML = '<div class="pd-metrics" id="pdMetrics">正在读协议（CLI 那边算的）…</div>'
+    + '<div class="pd-bar">'
     + '<span class="pd-title">' + esc(p.name) + '</span>'
     + '<button class="btn sm" data-pd="open">打开项目</button>'
     + '<button class="btn ghost sm" data-pd="contract">' + (info.contract ? '重新起草契约' : '生成契约') + '</button>'
@@ -954,8 +955,52 @@ function renderDetail() {
     + ' · ' + (info.todo ? info.todo + ' 件要处理' : '没有挡路的问题')
     + (info.auditAll != null ? ' · 项目检查 ' + info.auditAll + ' 条（' + info.auditHot + ' 条值得处理）' : '')
     + '</div></div></div>';
+  fillMetrics(p.path);
 }
 
+/// **协议条**（2026-10-21）：三数字 + 三态 + 依据，全部来自 CLI 的 --json。
+///
+/// 界面这里**不加工**：数字怎么算、生命周期怎么判，都在 CLI 那边（一份真源）。
+/// 拿不到就显式说"查不了"，不许显示 0 或空白——那会把"没读到"说成"没有"。
+function fmtBytes(n) {
+  if (n == null) return '—';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+function stateText(s) {
+  return s === 'yes' ? '可以下结论' : s === 'no' ? '先别下结论' : '查不了';
+}
+function lifeText(s) {
+  const m = {
+    active: '活跃（近 30 天有提交且有改动）',
+    recent: '近期活跃（近 30 天有提交）',
+    maintenance: '维护中（30–180 天）',
+    stale: '停更（180 天以上）',
+    no_git: '判断不了（没有 .git）',
+    unknown: '判断不了',
+  };
+  return m[s] || s || '判断不了';
+}
+async function fillMetrics(root) {
+  const el = document.getElementById('pdMetrics');
+  if (!el) return;
+  try {
+    const v = await invoke('cli_json', { root, args: ['handover'] });
+    const m = (v && v.metrics) || {};
+    const st = (v && v.state) || 'unknown';
+    const life = (m.lifecycle && m.lifecycle.state) || 'unknown';
+    el.innerHTML = '<span class="pm-pill pm-' + esc(st) + '">' + esc(stateText(st)) + '</span>'
+      + '<span class="pm">文件 <b>' + (m.files == null ? '—' : esc(String(m.files))) + '</b></span>'
+      + '<span class="pm">体积 <b>' + esc(fmtBytes(m.volume_bytes)) + '</b>'
+      + (m.capped ? '<i class="pm-cap">只量了一部分</i>' : '') + '</span>'
+      + '<span class="pm">生命周期 <b>' + esc(lifeText(life)) + '</b></span>'
+      + '<span class="pm-why">' + esc((m.lifecycle && m.lifecycle.basis) || '') + '</span>'
+      + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>';
+  } catch (e) {
+    el.innerHTML = '<span class="pm-pill pm-unknown">查不了</span><span class="pm-why">' + esc(String(e)) + '</span>';
+  }
+}
 async function detailAct(act) {
   const p = PS.sel;
   if (!p) return;

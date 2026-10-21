@@ -115,9 +115,13 @@ pub fn envelope(
         !evidence.is_empty(),
         "没有依据就不该有结论：envelope() 至少要一条 evidence"
     );
+    let summary = summary.into();
     let mut v = json!({
         "state": state.as_str(),
-        "summary": summary.into(),
+        "summary": summary,
+        // **与引擎的 `graph::envelope::Envelope` 对齐**：外壳只认 `state` + `reason`。
+        // 同文输出，GUI 与 CLI 才不会各说各的（两套说法正是这套协议要消灭的东西）。
+        "reason": summary,
         "evidence": evidence
             .iter()
             .map(|e| json!({"kind": e.kind, "ref": e.at, "note": e.note}))
@@ -132,7 +136,10 @@ pub fn envelope(
     if let (Value::Object(dst), Value::Object(src)) = (&mut v, fields) {
         for (k, val) in src {
             // 四件套是协议本身，领域字段不许覆盖它们
-            if matches!(k.as_str(), "state" | "summary" | "evidence" | "coverage") {
+            if matches!(
+                k.as_str(),
+                "state" | "summary" | "reason" | "evidence" | "coverage"
+            ) {
                 continue;
             }
             dst.insert(k, val);

@@ -1936,3 +1936,17 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 #verifyResult{margin:6px 0 10px}
 .verdict.skip{background:var(--bg2);border:1px solid var(--line);color:var(--dim)}
 .verdict.ask{background:rgba(255,193,7,.10);border:1px solid rgba(255,193,7,.45)}
+
+/* 协议条（2026-10-21）：三数字 + 三态 + 依据。窄屏自动换行，不占主屏。 */
+.pd-metrics {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 6px 10px; margin: 6px 0; border-radius: 6px;
+  background: rgba(127,127,127,0.08); font-size: 12px;
+}
+.pd-metrics .pm b { font-weight: 600; }
+.pd-metrics .pm-cap { margin-left: 4px; opacity: 0.7; font-style: normal; }
+.pd-metrics .pm-why { opacity: 0.65; max-width: 46ch; }
+.pd-metrics .pm-pill { padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.pd-metrics .pm-yes { color: #2e7d32; }
+.pd-metrics .pm-no { color: #b26a00; }
+.pd-metrics .pm-unknown { color: #6b6b6b; }

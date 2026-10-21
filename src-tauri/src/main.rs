@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 
 mod payload;
+mod cli;
 use payload::{hygiene_value, inspect_payload};
 
 // 开发工具：`--report <路径>` 把界面状态写进文件（见模块头）。
@@ -942,6 +943,7 @@ fn main() {
             graph::graph_stats,
             graph::graph_dump,
             graph::graph_runs,
+            cli::cli_json,
             initial_project,
             scan::scan_start,
             scan::scan_status,

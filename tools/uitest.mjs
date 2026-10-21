@@ -1,4 +1,4 @@
-// 外壳的全量测试：一条命令跑完，失败就非零退出。
+﻿// 外壳的全量测试：一条命令跑完，失败就非零退出。
 //
 // 为什么必须有一个这样的东西：Rust 那边有 130 多条测试，前端却一直靠
 // "开个浏览器手点"——那不是测试，那是抽检。这个脚本把主要链路固定下来：
@@ -57,7 +57,14 @@ function stubTauri() {
               { name: 'demo-parent', path: 'D:/projects/demo-parent', age_days: 0,
                 markers: [], kinds: ['认不出类型'] },
             ] };
-          case 'inspect':
+          case 'cli_json': {
+            // **协议桥的桩**（2026-10-21）：界面只消费 CLI 的 JSON，桩给一份最小协议对象。
+            return { state: 'unknown', summary: '暂无法探知：桩数据', reason: '暂无法探知：桩数据',
+              evidence: [{ kind: 'command', ref: 'jingwei handover', note: '桩' }],
+              coverage: { read: 0, total: null, partial: true, note: '桩' },
+              metrics: { files: 12, volume_bytes: 4096, capped: false,
+                lifecycle: { state: 'no_git', basis: '桩：没有 .git' } } };
+          }          case 'inspect':
             // 容器目录那一支：依赖清单里混着两个不同语言的子项目，
             // 外加那条 `projects-dir-not-a-project`。
             if (args && String(args.root || '').includes('demo-parent')) {
@@ -370,6 +377,14 @@ try {
   // 路径分隔符不参与判断：Windows 上两种写法都合法
   check('打开项目：全局选中生效', !!st.root && st.root.replace(/\\/g, '/') === 'D:/projects/demo', st.root);
   check('结构树渲染出文件节点', st.tree >= 2, `${st.tree} 个节点`);
+  // **协议条**（2026-10-21）：界面吃的是 CLI 的 `--json`（三数字 + 三态 + 依据）。
+  // 判据：条子在、且三个数字都出现——拿不到就该显式说「查不了」，不许空白。
+  // 详情面板由 openDetail() 打开（点 banner 只改选中）：这里直接走同一个入口，
+  // 验证的是"界面真的渲染了协议条"，不是替它另写一条路径。
+  await page.evaluate(async () => { if (typeof openDetail === 'function' && PS.sel) await openDetail(PS.sel); });
+  await page.waitForTimeout(400);
+  st = await page.evaluate(() => (document.getElementById('pdMetrics') || {}).textContent || '');
+  check('概览协议条：文件数 / 体积 / 生命周期都在', /文件/.test(st) && /体积/.test(st) && /生命周期/.test(st), st.slice(0, 160));
 
   // 1.5 **两张卡必须说同一件事**（2026-10-16 加）。
   //

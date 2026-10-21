@@ -1192,6 +1192,13 @@ fn next_的_json_带三态依据与覆盖度() {
         v["coverage"]["read"].as_u64().is_some(),
         "coverage.read 必须是数（覆盖度不许缺）：{v}"
     );
+    // **与引擎的 `Envelope` 对齐**：外壳只认 `state` + `reason` 两个键。
+    // `summary` 是给人看的那句话，`reason` 必须同文——否则 GUI 与 CLI 又是两套说法。
+    assert_eq!(
+        v["reason"].as_str(),
+        v["summary"].as_str(),
+        "`reason` 必须与 `summary` 同文（外壳的 Envelope 只认 reason）：{v}"
+    );
     let _ = std::fs::remove_dir_all(&d);
 }
 

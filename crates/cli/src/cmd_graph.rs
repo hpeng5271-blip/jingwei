@@ -59,6 +59,18 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
             //            而且要把原始错误带出来（不然没法查）。
             let db = jingwei_engine::graph_db_path(root);
             if !db.is_file() {
+                // **认不出的子命令不许被"还没建过图谱"盖住**（2026-10-22 修）。
+                // 删缓存后这条测试才暴露：原来它能过，是因为仓库根上恰好有个 .jingwei 库，
+                // 于是走的是"有库"那条路、最后撞上 other 臂报错；库没了就一路 0 退出——
+                // "没做"看起来像"做成了"，正是这个仓库最贵的那类错。
+                let known = matches!(
+                    sub,
+                    "" | "stats" | "stat" | "counts" | "runs" | "run" | "log" | "roles" | "role"
+                );
+                if !known {
+                    eprintln!("不认识的 graph 子命令：{sub}（只有 stats / runs / roles）");
+                    return 2;
+                }
                 if json {
                     // **协议**（2026-10-21）：`no` 是"查过了，确实没有"——这里确实还没建过图谱。
                     let v = envelope(

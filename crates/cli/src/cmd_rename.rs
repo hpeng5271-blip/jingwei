@@ -143,6 +143,22 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
         println!("已改：{file}");
     }
 
+    // **动作声明**（2026-10-21）：先声明"打算写哪些文件"，再过 runner 核对（项目内 / 不碰 .git）。
+    // 这不是确认弹窗——弹窗是交互层的事；这里保证的是"没声明的东西碰不到"。
+    let action = crate::sandbox_allow::Action::declare(
+        "rename --write",
+        plan.edits.iter().map(|e| root.join(&e.file)).collect(),
+    );
+    match action.check(root) {
+        Ok(touched) => {
+            println!("动作声明：{}（{} 个写目标）", action.name, touched.len());
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    }
+
     // **写完回读**：每一处都要真的以新名字开头——写入不等于改对（编码/换行都可能坑）。
     let mut bad = 0;
     for e in &plan.edits {

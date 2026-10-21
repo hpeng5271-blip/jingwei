@@ -1380,3 +1380,28 @@ fn envs_的_json_带协议且没探到时带三字段() {
     }
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **改名必须过「动作声明」**：`rename --write` 打一行"动作声明"，且声明里越界就整次拒绝。
+///
+/// 这条守的是沙箱的边界（2026-10-21）：声明不是弹窗，是"没声明的东西碰不到"。
+#[test]
+fn rename_写之前要过动作声明() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("rename-action");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn greet() {}\n\npub fn call() { greet(); }\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    assert_eq!(code(&run(&["index", "--root", &p])), 0, "索引应成功");
+    let o = run(&["rename", "greet", "--to", "welcome", "--write", "--root", &p]);
+    let s = stdout(&o);
+    assert!(
+        s.contains("动作声明"),
+        "改名前该打印动作声明（没声明的东西不许碰）：{s}"
+    );
+    assert!(
+        s.contains("回读通过"),
+        "写完该回读通过（失败说明写坏了）：{s}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

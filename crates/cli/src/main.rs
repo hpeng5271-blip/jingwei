@@ -39,6 +39,8 @@ mod usage;
 mod protocol;
 // **写操作的沙箱边界**：路径边界 + .git 只读 + 原子写。
 mod sandbox;
+// 沙箱的**动作声明与允许表**（本次会话 / 24 小时）：声明什么才许碰什么。
+mod sandbox_allow;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};

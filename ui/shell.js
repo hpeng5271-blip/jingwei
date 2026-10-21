@@ -1200,6 +1200,85 @@ async function scanInit() {
 }
 
 
+// **网络允许**（2026-10-22）：界面上"允许一次"走 CLI 的 jingwei net，
+// 不在这里另写一份允许表 JSON——一条判据只能有一处实现（失效模式 #17）。
+function netRoot() {
+  return S.root || '';
+}
+
+async function netRefresh() {
+  const box = document.getElementById('netList');
+  if (!box) return;
+  try {
+    const v = await invoke('cli_json', { root: netRoot(), args: ['net', 'status'] });
+    const allowed = (v && v.allowed) || [];
+    const wl = ((v && v.whitelist) || []).length;
+    if (!allowed.length) {
+      box.textContent = '白名单 ' + wl + ' 个包仓库；没有额外的临时允许。';
+      return;
+    }
+    box.innerHTML = '白名单 ' + wl + ' 个包仓库；临时允许：'
+      + allowed.map((a) => '<span class="net-chip" data-host="' + esc(a.host) + '">'
+        + esc(a.host) + ' <i>' + esc(netLeftText(a.left)) + '</i>'
+        + '<b data-deny="' + esc(a.host) + '" title="收回">×</b></span>').join(' ');
+  } catch (e) {
+    box.textContent = '读不到允许表（' + (e && e.message ? e.message : e) + '）——这不等于"什么都没允许"。';
+  }
+}
+
+function netLeftText(secs) {
+  const s = Number(secs) || 0;
+  if (s <= 0) return '已过期';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? h + ' 小时后过期' : m + ' 分钟后过期';
+}
+
+async function netAllowHost() {
+  const inp = document.getElementById('netHost');
+  const host = ((inp && inp.value) || '').trim();
+  if (!host) {
+    toast('先写一个域名，例如 mirrors.aliyun.com', true);
+    return;
+  }
+  try {
+    const v = await invoke('cli_json', { root: netRoot(), args: ['net', 'allow', host] });
+    if (v && v.state === 'yes') {
+      toast('已允许 ' + host + '（24 小时）');
+      if (inp) inp.value = '';
+      await netRefresh();
+    } else {
+      toast((v && v.summary) || '没允许成', true);
+    }
+  } catch (e) {
+    toast('没允许成：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+async function netDenyHost(host) {
+  try {
+    await invoke('cli_json', { root: netRoot(), args: ['net', 'deny', host] });
+    await netRefresh();
+  } catch (e) {
+    toast('收回失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t || !t.closest) return;
+  if (t.closest('#netAllow')) {
+    e.preventDefault();
+    netAllowHost();
+    return;
+  }
+  const deny = t.closest('[data-deny]');
+  if (deny) {
+    e.preventDefault();
+    netDenyHost(deny.dataset.deny);
+  }
+});
+
 // **角落任务角标**（2026-10-21）：只认真任务源（engine 的任务日志），不认假状态。
 // 没有任务源的种类显示"还没接"——不许假装空闲。
 async function renderTaskIcons() {

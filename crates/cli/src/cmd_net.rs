@@ -131,6 +131,21 @@ pub(crate) fn cmd_net(rest: &[String], json: bool) -> i32 {
                 println!("  {} 写允许表失败：{e}", c(RED, "✗"));
                 return 1;
             }
+            if json {
+                // allow 的协议输出（2026-10-22）：界面通过 cli_json 调它，必须有 JSON。
+                let v = envelope(
+                    State::Yes,
+                    format!("已允许 {host}（{}，到点自动失效）", until_text(ttl)),
+                    vec![
+                        Evidence::file(&path.display().to_string(), "允许表：只记 net:<域名> 与到期时刻"),
+                        Evidence::command("jingwei net status", "看当前允许了什么"),
+                    ],
+                    Coverage::full(1, "只放行这一个域名"),
+                    serde_json::json!({ "host": host, "hours": hours, "until": now() + ttl }),
+                );
+                print_protocol(&v);
+                return 0;
+            }
             println!(
                 "\n  {} 已允许 {}（{}，到点自动失效）\n",
                 c(GREEN, "✓"),
@@ -145,13 +160,28 @@ pub(crate) fn cmd_net(rest: &[String], json: bool) -> i32 {
                 return 2;
             };
             let host = sandbox_allow::host_of(raw).unwrap_or_else(|| raw.to_ascii_lowercase());
-            if sandbox_allow::remove_allow(&path, &format!("net:{host}"), now()) {
+            let removed = sandbox_allow::remove_allow(&path, &format!("net:{host}"), now());
+            if json {
+                let v = envelope(
+                    State::Yes,
+                    if removed {
+                        format!("已收回 {host} 的临时允许")
+                    } else {
+                        format!("{host} 本来就没有临时允许")
+                    },
+                    vec![Evidence::file(&path.display().to_string(), "允许表")],
+                    Coverage::full(1, "只动这一条"),
+                    serde_json::json!({ "host": host, "removed": removed }),
+                );
+                print_protocol(&v);
+                return 0;
+            }
+            if removed {
                 println!("\n  {} 已收回 {} 的临时允许\n", c(GREEN, "✓"), host);
-                0
             } else {
                 println!("\n  {} {} 本来就没有临时允许\n", c(YELLOW, "·"), host);
-                0
             }
+            0
         }
         other => {
             eprintln!("net 的子命令只有 status / allow / deny（不认识 `{other}`）");

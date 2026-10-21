@@ -280,6 +280,12 @@
           <input class="sw" type="checkbox" id="setSound"></div>
         <div class="hint" style="margin-top:8px">试运行会真的把项目跑起来：长期服务会占住端口和进程，
         所以它默认只对「一次性脚本」生效（契约里写了退出码判定的那种）。</div>
+        <div class="setGroup">网络（默认拒绝，只放行包仓库）</div>
+        <div class="opt"><div class="lbl"><b>临时放行一个域名</b>
+          <span>装依赖要用的仓库；最多 24 小时，到点自动失效，随时可以收回。</span></div>
+          <input id="netHost" placeholder="例如 mirrors.aliyun.com" style="width:180px">
+          <button class="btn sm" id="netAllow">允许 24 小时</button></div>
+        <div id="netList" class="hint" style="margin-top:4px">读一下当前允许了什么…</div>
         <div class="setGroup">范围</div>
         <div class="setrow">
           <label>扫描深度 <select id="setScanDepth">

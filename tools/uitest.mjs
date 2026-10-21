@@ -68,6 +68,25 @@ function stubTauri() {
               env: { id: 'y', state: 'done', name: '环境探测', started_at: 1, ended_at: 2, detail: '探到 3 项' },
             } };
           case 'cli_json': {
+            // **net 的桩**（2026-10-22）：status 给一条临时允许；allow/deny 记账后返回成功。
+            const na = (args && args.args) || [];
+            if (na[0] === 'net') {
+              globalThis.__netCalls = globalThis.__netCalls || [];
+              globalThis.__netCalls.push(na.slice(1).join(' '));
+              if (na[1] === 'status') {
+                return { state: 'yes', summary: '白名单 9 个包仓库；当前额外允许 1 个',
+                  whitelist: Array(9).fill('pypi.org'),
+                  allowed: [{ host: 'evil.example', until: 1, left: 3600 }],
+                  evidence: [], coverage: { read: 1, total: null, partial: false, note: '' } };
+              }
+              if (na[1] === 'allow') {
+                return { state: 'yes', summary: '已允许 ' + na[2], host: na[2], hours: 24 };
+              }
+              if (na[1] === 'deny') {
+                return { state: 'yes', summary: '已收回 ' + na[2], host: na[2], removed: true };
+              }
+            }
+
             // **协议桥的桩**（2026-10-21）：界面只消费 CLI 的 JSON，桩给一份最小协议对象。
             return { state: 'unknown', summary: '暂无法探知：桩数据', reason: '暂无法探知：桩数据',
               evidence: [{ kind: 'command', ref: 'jingwei handover', note: '桩' }],
@@ -516,6 +535,18 @@ try {
       moved: document.querySelector('#edText').selectionStart !== before };
   });
   check('编辑器：行号上有诊断标记', gd.n === 2, JSON.stringify(gd));
+  // 网络允许（2026-10-22）：列表来自 CLI 的 net status；点 × 走 net deny。
+  const netSt = await page.evaluate(async () => {
+    globalThis.__netCalls = [];
+    await netRefresh();
+    const chips = Array.from(document.querySelectorAll('#netList .net-chip'));
+    const html = document.getElementById('netList').innerHTML;
+    if (chips[0]) chips[0].querySelector('[data-deny]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    return { n: chips.length, html, calls: globalThis.__netCalls || [] };
+  });
+  check('网络：列出临时允许（带剩余时间）', netSt.n === 1 && /小时后过期|分钟后过期/.test(netSt.html), netSt.html);
+  check('网络：点 × 走 net deny', netSt.calls.some((c) => c.startsWith('deny')), JSON.stringify(netSt.calls));
   check('编辑器：标记分得出 error 与 warn', gd.lv === 'error,warn', gd.lv);
   check('编辑器：点标记跳到那一行', gd.lncol.includes('第 2 行'), gd.lncol);
 

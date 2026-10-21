@@ -1989,3 +1989,10 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 #edNums .ed-diag { cursor: pointer; border-bottom: 2px solid #d05a5a; font-weight: 600; }
 #edNums .ed-diag[data-lv="warn"] { border-bottom-color: #d8a13a; }
 #edNums .ed-diag:hover { background: rgba(200,80,80,0.18); }
+
+/* 临时放行的域名（2026-10-22）：一条一个 chip，× 收回。 */
+.net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; margin: 2px 4px 2px 0;
+  border-radius: 10px; background: rgba(127,127,127,0.16); font-size: 12px; }
+.net-chip i { opacity: 0.65; font-style: normal; }
+.net-chip b { cursor: pointer; opacity: 0.7; font-weight: 400; }
+.net-chip b:hover { opacity: 1; color: #ff8a8a; }

@@ -299,6 +299,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       p.hidden = !p.hidden;
       if (!p.hidden) {
         paintSettingChanges();
+        // 打开设置就拉一次网络允许（2026-10-22）：界面只消费 CLI 的 net status。
+        if (typeof netRefresh === 'function') netRefresh();
         ['scan', 'analyze', 'contract', 'verify', 'trial'].forEach((k) => {
           const el = $('#set' + k[0].toUpperCase() + k.slice(1));
           if (el) el.checked = !!SET[k];

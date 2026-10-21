@@ -1,4 +1,4 @@
-﻿// 外壳那一圈：右侧诊断栏、四角信息卡策略、底部活动带、顶部项目切换器、项目列表。
+// 外壳那一圈：右侧诊断栏、四角信息卡策略、底部活动带、顶部项目切换器、项目列表。
 //
 // 这些是"任何页面都在场"的东西，所以跟具体某一页分开放——它们是壳，不是页。
 // ── 右侧诊断栏（常驻）：任何页面都能看到"现在有没有挡路的问题" ──
@@ -777,6 +777,8 @@ async function analyzeRange(from, to) {
         run: d.runCommand || null,
         todo: todo.length,
         first: todo[0] ? todo[0].title : null,
+        // 错误窗要的是**原始条目**（去重与计数交给 errGroups），这里别先压成数字。
+        findings: (d.findings || []).filter((f) => (f.severity === 'error' || f.severity === 'warn') && !f.group),
         auditHot: hy.filter((f) => f.group && f.severity !== 'info').length,
         auditAll: hy.filter((f) => f.group).length,
       };
@@ -956,6 +958,8 @@ function renderDetail() {
     + (info.auditAll != null ? ' · 项目检查 ' + info.auditAll + ' 条（' + info.auditHot + ' 条值得处理）' : '')
     + '</div></div></div>';
   fillMetrics(p.path);
+  // 错误窗与协议条同一个数据源（details.findings），没 error 就不出现。
+  renderErrPanel(p.path, info);
 }
 
 /// **协议条**（2026-10-21）：三数字 + 三态 + 依据，全部来自 CLI 的 --json。
@@ -984,6 +988,62 @@ function lifeText(s) {
 }
 // **更新窗**（2026-10-21）：项目变了才弹，**弹一次就记住**——不重复抢注意力。
 // 比对的两边都是真数：上次看到的手交三数字 vs 这次 handover 的三数字。
+// **错误窗的聚合**（2026-10-21）：同一处同一个错只占一行并计数——
+// 一次索引失败能刷出几十条一样的行，按条显示等于把用户的眼睛当垃圾桶。
+// 纯函数：只吃 findings，不碰 DOM，好在测试里直接喂数据。
+function errGroups(findings) {
+  const list = (findings || []).filter(
+    (f) => (f.severity === 'error' || f.severity === 'warn') && !f.group,
+  );
+  const rows = new Map();
+  for (const f of list) {
+    const k = [f.code || f.message || '问题', f.file || '', f.line || 0].join('|');
+    const r = rows.get(k) || {
+      code: f.code || f.message || '问题',
+      message: f.message || '',
+      file: f.file || '',
+      line: f.line || 0,
+      severity: f.severity,
+      count: 0,
+    };
+    r.count += 1;
+    if (f.severity === 'error') r.severity = 'error';
+    rows.set(k, r);
+  }
+  const rank = { error: 0, warn: 1 };
+  return Array.from(rows.values()).sort(
+    (a, b) => (rank[a.severity] ?? 2) - (rank[b.severity] ?? 2) || b.count - a.count,
+  );
+}
+
+// **错误窗**：有 error 才自己出来（warn 已经在"待办"里，不抢注意力）。
+function renderErrPanel(path, d) {
+  let box = document.getElementById('errPanel');
+  const rows = errGroups(d && d.findings);
+  const errs = rows.filter((r) => r.severity === 'error');
+  if (!errs.length) {
+    if (box) box.remove();
+    return;
+  }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'errPanel';
+    box.className = 'err-panel';
+    document.body.appendChild(box);
+  }
+  box.innerHTML = '<div class="ep-head">要处理的 ' + rows.length + ' 条'
+    + '<span class="ep-x" data-close="1">收起</span></div>'
+    + rows.slice(0, 6).map((r) =>
+      '<div class="ep-row" data-sev="' + esc(r.severity) + '">'
+      + '<b>' + esc(r.code) + '</b>'
+      + (r.count > 1 ? '<span class="ep-n">×' + r.count + '</span>' : '')
+      + '<span class="ep-msg">' + esc(r.message)
+      + (r.file ? ' · ' + esc(r.file) + (r.line ? ':' + r.line : '') : '') + '</span></div>',
+    ).join('');
+  const x = box.querySelector('[data-close]');
+  if (x) x.onclick = () => box.remove();
+}
+
 function updateSeenKey(path) { return 'jw.seen.files.' + path; }
 
 function maybeUpdateWindow(path, metrics) {

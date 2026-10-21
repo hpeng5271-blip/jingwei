@@ -411,6 +411,36 @@ try {
   await page.evaluate(() => fillMetrics(PS.sel));
   await new Promise((r) => setTimeout(r, 400));
   const hasUpd = await page.evaluate(() => !!document.getElementById('updatePanel'));
+  // 错误窗（2026-10-21）：同一个错只占一行并计数；error 排在 warn 前；不抢注意力（没有 error 就不出现）。
+  const eg = await page.evaluate(() => {
+    const rows = errGroups([
+      { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
+      { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
+      { severity: 'warn', code: 'deps.missing', message: '缺依赖', file: 'Cargo.toml', line: 1 },
+      { severity: 'info', code: 'noise', message: '不该算进来' },
+      { severity: 'error', code: 'grouped', message: '已归组', group: 'x' },
+    ]);
+    return rows.map((r) => r.severity + ':' + r.code + ':' + r.count);
+  });
+  check('错误窗：同一个错合并成一行并计数', eg.length === 2 && eg[0] === 'error:index.fail:2', JSON.stringify(eg));
+  check('错误窗：error 排在 warn 前', eg.length === 2 && eg[1] === 'warn:deps.missing:1', JSON.stringify(eg));
+  const noErr = await page.evaluate(() => errGroups([{ severity: 'warn', code: 'w', message: '只有警告' }]).filter((r) => r.severity === 'error').length);
+  check('错误窗：只有警告时不抢注意力', noErr === 0, String(noErr));
+  const ep = await page.evaluate(() => {
+    renderErrPanel('x', { findings: [
+      { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
+      { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
+    ] });
+    const box = document.getElementById('errPanel');
+    const head = box ? box.querySelector('.ep-head').textContent : '';
+    const rows = box ? box.querySelectorAll('.ep-row').length : 0;
+    renderErrPanel('x', { findings: [{ severity: 'warn', code: 'w', message: '只有警告' }] });
+    const after = !!document.getElementById('errPanel');
+    return { head, rows, after };
+  });
+  check('错误窗：有 error 才自己出来', ep.rows === 1 && ep.head.indexOf('1 条') >= 0, JSON.stringify(ep));
+  check('错误窗：只有警告就自己收走', ep.after === false, JSON.stringify(ep));
+
   check('更新窗：有旧快照时弹一次', hasUpd === true, String(hasUpd));
   await page.evaluate(() => {
     const x = document.querySelector('#updatePanel [data-close]');

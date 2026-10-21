@@ -1970,3 +1970,14 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .upd-row { margin: 2px 0; }
 .upd-d { margin-left: 6px; color: #7ad17a; }
 .upd-why { margin-top: 6px; opacity: 0.6; line-height: 1.4; }
+
+/* 错误窗（2026-10-21）：左上，只放 error/warn 的去重行。 */
+.err-panel { position: fixed; left: 14px; bottom: 14px; width: 300px; max-height: 40vh; overflow: auto;
+  padding: 10px 12px; border-radius: 10px; background: rgba(30,30,30,0.92); color: #f2f2f2; font-size: 12px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 41; }
+.err-panel .ep-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 6px; }
+.err-panel .ep-x { cursor: pointer; opacity: 0.75; font-weight: 400; }
+.err-panel .ep-row { margin: 3px 0; line-height: 1.45; }
+.err-panel .ep-row[data-sev="error"] b { color: #ff8a8a; }
+.err-panel .ep-n { margin-left: 6px; opacity: 0.8; }
+.err-panel .ep-msg { display: block; opacity: 0.7; }

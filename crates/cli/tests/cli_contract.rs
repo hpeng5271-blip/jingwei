@@ -65,7 +65,8 @@ fn stdout(o: &Output) -> String {
 #[test]
 fn help_列出全部命令并成功退出() {
     let Some(_) = bin() else { return };
-    let o = run(&["--help"]);
+    // 2026-10-21：默认 `--help` 只列主路径 8 个，全表用 `--more --help`。
+    let o = run(&["--more", "--help"]);
     assert_eq!(code(&o), 0, "`--help` 该成功退出");
     let s = stdout(&o);
     for cmd in ["index", "graph", "guide", "doctor", "inspect", "run", "scan"] {
@@ -1074,11 +1075,15 @@ fn next_的弱提示只在_一手不到一半_时出现() {
 #[test]
 fn help_主路径在最前且只有八个() {
     let Some(_) = bin() else { return };
+    // 默认 help：只有主路径段 + 一句"其余 N 个按需用"
     let s = stdout(&run(&["--help"]));
-    let main_at = s.find("【主路径】").expect("要有【主路径】段");
-    let rest_at = s.find("【其余·按需用】").expect("要有【其余·按需用】段");
-    assert!(main_at < rest_at, "主路径段必须在前：\n{s}");
-    let seg = &s[main_at..rest_at];
+    assert!(s.contains("【主路径】"), "要有【主路径】段：\n{s}");
+    assert!(
+        !s.contains("【其余·按需用】"),
+        "默认 help 不该列其余命令：\n{s}"
+    );
+    assert!(s.contains("--more --help"), "要指路 --more：\n{s}");
+    let seg = s.as_str();
     let want = [
         "next", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
     ];
@@ -1086,12 +1091,11 @@ fn help_主路径在最前且只有八个() {
         assert!(seg.contains(v), "主路径段里缺 `{v}`：\n{seg}");
     }
     // 主路径段里的命令数 = 8（每行一个命令，行首两空格 + 名字）
-    let n = seg
-        .lines()
-        .filter(|l| l.starts_with("  ") && !l.trim().is_empty())
-        .filter(|l| !l.contains('【'))
-        .count();
-    assert_eq!(n, want.len(), "主路径只该有 8 个命令，实际 {n}：\n{seg}");
+    // 默认 help 里**不该出现**主路径外的命令（用 `new` 当哨兵）
+    assert!(
+        !s.lines().any(|l| l.starts_with("  new ")),
+        "默认 help 不该列 `new`（它已降级为按需用）：\n{s}"
+    );
 }
 
 /// **主路径 `next` 的端到端冒烟：三层都在**（2026-10-21，阶段 0）。
@@ -1129,3 +1133,7 @@ fn next_一屏三层都在() {
     assert!(s.contains("边界："), "缺边界层：\n{s}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+
+
+

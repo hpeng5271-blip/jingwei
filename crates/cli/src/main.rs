@@ -656,11 +656,12 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
 /// 而这条测试要断言的是"每个子命令都出现在帮助里"。拆出可测的纯函数，
 /// 判据才能真的落在**渲染出来的那一份**上，而不是落在"我以为它会渲染什么"上。
 fn render_help() -> String {
-    // 子命令那段**从 `COMMANDS` 生成**，不手写。
-    // 手写的那一版漏了四个能跑的命令（`inspect` / `graph` / `spec` / `machine`），
-    // 而说明书是准的——两份清单各写各的必然漂移。见 `COMMANDS` 的注释。
-    // **主路径在前**（2026-10-21）：36 个命令平铺 = 用户每天重新选一次"从哪开始"。
-    // 判据仍是"唯一真源"：两段都从 `COMMANDS` 来，**一个都不删**——只是排序表达了优先级。
+    render_help_with(MORE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// **默认只列主路径 8 个**（2026-10-21）；`jingwei --more --help` 才列全部。
+/// 两部分都从 `COMMANDS` 生成——**一个都不删**，只是默认不展示。
+fn render_help_with(all: bool) -> String {
     let mut subs = String::new();
     subs.push_str("  【主路径】\n");
     for (name, _aliases, desc) in COMMANDS {
@@ -668,14 +669,19 @@ fn render_help() -> String {
             subs.push_str(&format!("  {:<12} {}\n", name, desc));
         }
     }
-    subs.push_str("\n  【其余·按需用】\n");
-    for (name, _aliases, desc) in COMMANDS {
-        if !MAIN_VERBS.contains(name) {
-            subs.push_str(&format!("  {:<12} {}\n", name, desc));
+    if all {
+        subs.push_str("\n  【其余·按需用】\n");
+        for (name, _aliases, desc) in COMMANDS {
+            if !MAIN_VERBS.contains(name) {
+                subs.push_str(&format!("  {:<12} {}\n", name, desc));
+            }
         }
+    } else {
+        let hidden = COMMANDS.len() - MAIN_VERBS.len();
+        subs.push_str(&format!("\n  其余 {hidden} 个按需用：jingwei --more --help\n"));
     }
     format!(
-        "{}  ·  项目环境体检 / 启动 / 清理\n\
+        "{}  ·  项目状态解释器（主路径 8 个，其余按需）\n\
          \n\
          用法：  jingwei <子命令> [选项]\n\
          \n\
@@ -851,7 +857,8 @@ mod tests {
         // 把 `--help` 真的渲染一遍来断言——**不靠"这句断言恒真"蒙过去**。
         // （第一版这里写过一条 `COMMANDS.iter().any(...)` 的占位断言，它永远为真；
         //  那正是这个仓库在防的"恒真断言"，当场删了。）
-        let rendered = render_help();
+        // 2026-10-21：默认 `--help` 只列主路径，全表要看 `--more`。这里断言**全表那一份**。
+        let rendered = render_help_with(true);
         for (name, aliases, desc) in COMMANDS {
             assert!(
                 !desc.is_empty(),
@@ -988,6 +995,8 @@ mod tests {
         );
     }
 }
+
+
 
 
 

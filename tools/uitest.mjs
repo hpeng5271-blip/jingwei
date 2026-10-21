@@ -616,6 +616,23 @@ try {
     return { n, marks: document.querySelectorAll('#edNums .ed-diag').length };
   });
   check('测试失败定位：认识的路径标一行', tl.n === 1 && tl.marks === 1, JSON.stringify(tl));
+  // 最近一次结果（2026-10-22）：一行说清检查/测试各剩多少，并能跳到第一处。
+  const rl = await page.evaluate(() => {
+    const f = ED.path;
+    DOCK.diags = [
+      { level: 'error', file: f, line: 2, col: 1, message: '错一行', src: 'check' },
+      { level: 'warn', file: f, line: 3, col: 1, message: '警告一行', src: 'check' },
+      { level: 'error', file: f, line: 4, col: 1, message: '测试在这行挂了', src: 'test' },
+    ];
+    DOCK.testLocs = [{ loc: { file: f, line: 4, col: 1 }, text: '测试在这行挂了' }];
+    dockProblems({ findings: [] });
+    const el = document.getElementById('resultLine');
+    const txt = el.textContent.replace(/\s+/g, ' ').trim();
+    const jump = el.querySelector('[data-jump-file]');
+    return { txt, hasJump: !!jump, sev: el.querySelector('.result-line')?.dataset.sev || '' };
+  });
+  check('最近结果：检查与测试分开计数', /检查 2 处/.test(rl.txt) && /测试 1 处定位/.test(rl.txt), rl.txt);
+  check('最近结果：error 时标红并给跳转', rl.sev === 'error' && rl.hasJump === true, JSON.stringify(rl));
   const tl2 = await page.evaluate(() => {
     DOCK.testLocs = [{ loc: testLocOf('nope/missing.rs:99:1'), text: '未知文件的失败' }];
     const n = mergeTestLocs();

@@ -2008,3 +2008,12 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .ed-rn-row { padding: 1px 0; opacity: 0.85; }
 .ed-rn-row i { opacity: 0.7; font-style: normal; }
 .ed-rn-row.warn { color: #d8a13a; }
+
+/* 最近一次结果（2026-10-22）：一行，error 红、warn 黄，右边一个"跳到第一处"。 */
+.result-line-wrap { padding: 0 10px; }
+.result-line { display: flex; align-items: center; gap: 10px; padding: 5px 8px; margin: 6px 0;
+  border-radius: 8px; background: rgba(127,127,127,0.12); font-size: 12px; }
+.result-line[data-sev="error"] { border-left: 3px solid #d05a5a; }
+.result-line[data-sev="warn"] { border-left: 3px solid #d8a13a; }
+.result-line .rl-n { opacity: 0.7; }
+.result-line .rl-jump { margin-left: auto; cursor: pointer; text-decoration: underline; opacity: 0.85; }

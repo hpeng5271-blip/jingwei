@@ -143,7 +143,37 @@ function dockBadges() {
 
 /// 把一次检查的结论摊到「问题」栏。severity 只用两档：要修 / 注意。
 /// 顺序不按严重度排，按排查链的层排——先确认「用的是哪个」，再谈「缺什么」。
+/// **最近一次结果**（2026-10-22）：一行说清"检查/测试各剩多少、第一处点哪"。
+///
+/// 数据只有两个来源：`DOCK.diags`（编译器检查 + 测试定位，带 `src` 区分）与 `DOCK.testLocs`。
+/// 不新增采集——**同一份结果不给两种说法**。
+function resultLineHtml() {
+  const diags = DOCK.diags || [];
+  const check = diags.filter((d) => (d.src || 'check') === 'check');
+  const test = diags.filter((d) => d.src === 'test');
+  const errs = diags.filter((d) => d.level === 'error').length;
+  const warns = diags.filter((d) => d.level !== 'error').length;
+  if (!diags.length && !(DOCK.testLocs || []).length) return '';
+  const first = diags.find((d) => d.level === 'error') || diags[0];
+  const parts = [];
+  if (check.length) parts.push('检查 ' + check.length + ' 处');
+  if (test.length) parts.push('测试 ' + test.length + ' 处定位');
+  else if ((DOCK.testLocs || []).length && !test.length) parts.push('测试失败 ' + DOCK.testLocs.length + ' 行（位置认不出，没标）');
+  const sev = errs ? 'error' : 'warn';
+  const jump = first && first.file
+    ? '<a class="rl-jump" data-jump-file="' + esc(first.file) + '" data-jump-line="'
+      + esc(String(first.line || 1)) + '">跳到第一处</a>'
+    : '';
+  return '<div class="result-line" data-sev="' + sev + '">'
+    + '<b>' + esc(parts.join(' · ')) + '</b>'
+    + '<span class="rl-n">error ' + errs + ' / warn ' + warns + '</span>'
+    + jump
+    + '</div>';
+}
+
 function dockProblems(d) {
+  const rl = document.getElementById('resultLine');
+  if (rl) rl.innerHTML = resultLineHtml();
   const out = [];
   const push = (f, group) => out.push({
     severity: f.severity === 'error' ? 'error' : (f.severity === 'warn' ? 'warn' : 'info'),
@@ -1382,3 +1412,11 @@ function renderClean() {
   $('#cleanList').innerHTML = html;
 }
 
+
+// 点"跳到第一处"→ 复用 gotoDiag（切页、定位、提示都在那一处）。
+document.addEventListener('click', (e) => {
+  const a = e.target && e.target.closest ? e.target.closest('[data-jump-file]') : null;
+  if (!a) return;
+  e.preventDefault();
+  gotoDiag(a.dataset.jumpFile, parseInt(a.dataset.jumpLine, 10) || 1, 1);
+});

@@ -260,6 +260,8 @@ async function runCheck() {
       d.level + (d.code ? ' ' + d.code : '') + ' ' + d.file + ':' + d.line + ':' + d.col
       + ' — ' + d.message, d.level === 'error' ? 'e' : ''));
     dockProblems(S.data || {});
+    // 检查结果一出来就挂到行号上（编辑器开着同一个文件时用户能立刻看到）。
+    if (typeof edPaintGutter === 'function' && ED && ED.path) edPaintGutter(true);
     const errs = list.filter((d) => d.level === 'error').length;
     feedback(list.length ? (errs ? 'block' : 'warn') : 'info',
       list.length ? '检查出 ' + list.length + ' 条（' + errs + ' 个错误）' : '编译检查干净',

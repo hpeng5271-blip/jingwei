@@ -529,6 +529,37 @@ function edMarkDirty() {
   edPaintHeavySoon();
 }
 
+/// **行号旁的诊断标记**（2026-10-22）：编译器检查完的结果按文件挂到行号上，
+/// 点一下跳到那一行——不用回「问题」栏里找。
+///
+/// 数据来自 `DOCK.diags`（`check_project` 的 `diagnostics`），**不另算一份**；
+/// 路径可能是绝对也可能是相对，所以按"相等或以 /path 结尾"匹配。
+function edDiagsFor(path) {
+  const out = new Map();
+  const list = (typeof DOCK !== 'undefined' && DOCK.diags) || [];
+  if (!path) return out;
+  const norm = String(path).replace(/\\/g, '/');
+  for (const d of list) {
+    if (!d || !d.file || !d.line) continue;
+    const f = String(d.file).replace(/\\/g, '/');
+    if (f !== norm && !f.endsWith('/' + norm) && !norm.endsWith('/' + f)) continue;
+    const prev = out.get(d.line);
+    // 同一行有 error 也有 warn：留更严重的那个
+    if (!prev || (prev.level !== 'error' && d.level === 'error')) {
+      out.set(d.line, { level: d.level || 'warn', message: d.message || '' });
+    }
+  }
+  return out;
+}
+
+// 点行号上的诊断标记就跳过去（复用 gotoDiag：切页、定位、提示都在那一处）。
+document.addEventListener('click', (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('#edNums .ed-diag') : null;
+  if (!b || !ED.path) return;
+  e.preventDefault();
+  gotoDiag(ED.path, parseInt(b.dataset.line, 10) || 1, 1);
+});
+
 function edPaintGutter(force) {
   const g = $('#edNums');
   const wrap = $('#edGutter');
@@ -537,8 +568,16 @@ function edPaintGutter(force) {
   // 行数没变就不要重画行号：3000 行拼 innerHTML 要 130ms，
   // 而打字时绝大多数按键都不改变行数（只有回车才会）。
   if (force || ED.gutterLines !== lines) {
+    const diags = edDiagsFor(ED.path);
     let h = '';
-    for (let i = 1; i <= lines; i++) h += i + '<br>';
+    for (let i = 1; i <= lines; i++) {
+      const d = diags.get(i);
+      const num = d
+        ? '<b class="ed-diag" data-line="' + i + '" title="' + esc(d.message) + '" data-lv="'
+          + esc(d.level) + '">' + i + '</b>'
+        : String(i);
+      h += num + '<br>';
+    }
     g.innerHTML = h;
     ED.gutterLines = lines;
   }

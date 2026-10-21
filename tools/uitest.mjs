@@ -499,6 +499,25 @@ try {
   check('编辑器：显示编码与换行', st.enc.includes('GBK') && st.enc.includes('CRLF'), st.enc);
   check('编辑器：面包屑有内容', st.crumb.length > 3, st.crumb);
   check('编辑器：行列号在', /第 \d+ 行/.test(st.lncol), st.lncol);
+  // 行号旁的诊断标记（2026-10-22）：检查结果按文件挂到行号上，点一下跳到那一行。
+  const gd = await page.evaluate(async () => {
+    const f = ED.path;
+    DOCK.diags = [
+      { level: 'error', code: 'E1', file: f, line: 2, col: 1, message: '这行有错' },
+      { level: 'warn', code: 'W1', file: f, line: 3, col: 1, message: '这行是警告' },
+    ];
+    edPaintGutter(true);
+    const marks = Array.from(document.querySelectorAll('#edNums .ed-diag'));
+    const before = document.querySelector('#edText').selectionStart;
+    marks[0].click();
+    await new Promise((r) => setTimeout(r, 200));
+    const lncol = (document.getElementById('edLnCol') || {}).textContent || '';
+    return { n: marks.length, lv: marks.map((m) => m.dataset.lv).join(','), lncol,
+      moved: document.querySelector('#edText').selectionStart !== before };
+  });
+  check('编辑器：行号上有诊断标记', gd.n === 2, JSON.stringify(gd));
+  check('编辑器：标记分得出 error 与 warn', gd.lv === 'error,warn', gd.lv);
+  check('编辑器：点标记跳到那一行', gd.lncol.includes('第 2 行'), gd.lncol);
 
   // 2.5 依赖：点一行要能"点开看详情"（不是只有 tooltip）
   await page.evaluate(() => { const r = document.querySelector('#railBody .dep-row'); if (r) r.click(); });

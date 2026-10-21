@@ -1020,3 +1020,49 @@ fn handover_没有主张时不打印知识层() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **「弱」提示只在"一手不到一半"时出现**（2026-10-21）。
+///
+/// 这条提示是分寸感的落点：一手来源占多数时不必唠叨；一旦不到一半，就必须提醒
+/// "转写/二手当线索看，别当判据"。它是隐式约定（`一手 × 2 < 已过筛`），容易被"顺手改改"弄丢。
+#[test]
+fn next_的弱提示只在_一手不到一半_时出现() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("next-weak");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let kdir = d.join("docs").join("knowledge");
+    std::fs::create_dir_all(&kdir).unwrap();
+    let entry = |level: &str, i: usize| {
+        format!("---\nclaim: 主张 {i}\nsource: https://example.com/{i}\nlevel: {level}\ncheck: 只是想清楚\n---\n")
+    };
+    let p = d.to_str().unwrap().to_string();
+
+    // 三条里只有 1 条一手 → 1×2 = 2 < 3 → 该提示。
+    for (i, lv) in ["一手", "转写", "二手"].iter().enumerate() {
+        std::fs::write(kdir.join(format!("w{i}.md")), entry(lv, i)).unwrap();
+    }
+    assert_eq!(code(&run(&["index", "--root", &p])), 0);
+    let weak = stdout(&run(&["next", "--root", &p]));
+    assert!(
+        weak.contains("弱") && weak.contains("不到一半"),
+        "一手不到一半时应提示，实际：{weak}"
+    );
+
+    // 全是一手 → 不该提示。
+    for i in 0..3 {
+        std::fs::write(kdir.join(format!("w{i}.md")), entry("一手", i)).unwrap();
+    }
+    assert_eq!(code(&run(&["index", "--root", &p])), 0);
+    let strong = stdout(&run(&["next", "--root", &p]));
+    assert!(
+        !strong.contains("不到一半"),
+        "全是一手时不该提示，实际：{strong}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

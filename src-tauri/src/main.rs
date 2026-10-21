@@ -17,6 +17,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod payload;
 mod cli;
+mod notify;
 mod tasks;
 use payload::{hygiene_value, inspect_payload};
 
@@ -946,6 +947,7 @@ fn main() {
             graph::graph_runs,
             cli::cli_json,
             tasks::tasks_state,
+            notify::notify_gate,
             initial_project,
             scan::scan_start,
             scan::scan_status,

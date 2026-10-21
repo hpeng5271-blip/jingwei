@@ -57,6 +57,10 @@ function stubTauri() {
               { name: 'demo-parent', path: 'D:/projects/demo-parent', age_days: 0,
                 markers: [], kinds: ['认不出类型'] },
             ] };
+          case 'notify_gate':
+            // 闸门桩（2026-10-21）：默认允许；测试里把 globalThis.__gateDeny 置真即可模拟"静音中"。
+            if (globalThis.__gateDeny) return { allow: false, silence: 120, why: '静音中' };
+            return { allow: true, silence: 30, why: '第一次提示' };
           case 'tasks_state':
             // 任务角标的桩（2026-10-21）：一类在跑、一类刚完成、一类没任务源。
             return { running: 1, latest: {
@@ -426,20 +430,29 @@ try {
   check('错误窗：error 排在 warn 前', eg.length === 2 && eg[1] === 'warn:deps.missing:1', JSON.stringify(eg));
   const noErr = await page.evaluate(() => errGroups([{ severity: 'warn', code: 'w', message: '只有警告' }]).filter((r) => r.severity === 'error').length);
   check('错误窗：只有警告时不抢注意力', noErr === 0, String(noErr));
-  const ep = await page.evaluate(() => {
-    renderErrPanel('x', { findings: [
+  const ep = await page.evaluate(async () => {
+    localStorage.removeItem('jw.err.seen.x');
+    const f = [
       { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
       { severity: 'error', code: 'index.fail', message: '解析失败', file: 'src/a.rs', line: 3 },
-    ] });
+    ];
+    await renderErrPanel('x', { findings: f });
     const box = document.getElementById('errPanel');
     const head = box ? box.querySelector('.ep-head').textContent : '';
     const rows = box ? box.querySelectorAll('.ep-row').length : 0;
-    renderErrPanel('x', { findings: [{ severity: 'warn', code: 'w', message: '只有警告' }] });
+    await renderErrPanel('x', { findings: [{ severity: 'warn', code: 'w', message: '只有警告' }] });
     const after = !!document.getElementById('errPanel');
-    return { head, rows, after };
+    // 静音中：同一个错不该再自己跳出来（内容仍在"待办"里）
+    globalThis.__gateDeny = true;
+    localStorage.removeItem('jw.err.seen.x');
+    await renderErrPanel('x', { findings: f });
+    const denied = !!document.getElementById('errPanel');
+    globalThis.__gateDeny = false;
+    return { head, rows, after, denied };
   });
   check('错误窗：有 error 才自己出来', ep.rows === 1 && ep.head.indexOf('1 条') >= 0, JSON.stringify(ep));
   check('错误窗：只有警告就自己收走', ep.after === false, JSON.stringify(ep));
+  check('错误窗：静音期内不自己跳出来', ep.denied === false, JSON.stringify(ep));
 
   check('更新窗：有旧快照时弹一次', hasUpd === true, String(hasUpd));
   await page.evaluate(() => {

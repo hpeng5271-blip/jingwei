@@ -1981,3 +1981,6 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .err-panel .ep-row[data-sev="error"] b { color: #ff8a8a; }
 .err-panel .ep-n { margin-left: 6px; opacity: 0.8; }
 .err-panel .ep-msg { display: block; opacity: 0.7; }
+
+/* 静音时只留一个不打扰的小标记（有错但不跳出来）。 */
+.err-panel .ep-min { opacity: 0.7; font-size: 11px; }

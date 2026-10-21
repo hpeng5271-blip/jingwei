@@ -1016,12 +1016,50 @@ function errGroups(findings) {
   );
 }
 
-// **错误窗**：有 error 才自己出来（warn 已经在"待办"里，不抢注意力）。
-function renderErrPanel(path, d) {
+// **弹不弹，问引擎**（2026-10-21）：静音公式只在 Rust 里有一份，界面只负责"记住上次"。
+function errGateKey(path) { return 'jw.err.seen.' + path; }
+
+function errSig(rows) {
+  return rows.map((r) => r.code + '@' + r.file + ':' + r.line).join(',');
+}
+
+/// 上一次同类提示：{ sig, at, repeats }。换了一类错就重置重犯计数。
+function errSeen(path, sig) {
+  let prev = null;
+  try { prev = JSON.parse(localStorage.getItem(errGateKey(path)) || 'null'); } catch (_) { prev = null; }
+  if (!prev || prev.sig !== sig) return { lastAt: null, repeats: 0 };
+  return { lastAt: prev.at || null, repeats: prev.repeats || 0 };
+}
+
+/// **错误窗**：有 error 才自己出来（warn 已经在"待办"里，不抢注意力）。
+/// 同类错误连着出现时会被静音——**内容还在**，只是不再自己跳出来抢注意力。
+
+async function renderErrPanel(path, d) {
   let box = document.getElementById('errPanel');
   const rows = errGroups(d && d.findings);
   const errs = rows.filter((r) => r.severity === 'error');
   if (!errs.length) {
+    if (box) box.remove();
+    return;
+  }
+  // 同一个（或同一类）错误：**静音期内不自己跳出来**；用户点开详细里仍能看到全文。
+  const sig = errSig(rows);
+  const seen = errSeen(path, sig);
+  let allow = true;
+  let repeats = seen.repeats;
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    repeats = seen.lastAt ? seen.repeats + 1 : 0;
+    const g = await invoke('notify_gate', { lastAt: seen.lastAt, now, freq: 0, repeats });
+    allow = !!(g && g.allow);
+    if (allow) {
+      localStorage.setItem(errGateKey(path), JSON.stringify({ sig, at: now, repeats }));
+    }
+  } catch (_) {
+    /* 闸门问不到就当可以弹：宁可多提示一次，也不许把真问题藏起来 */
+    allow = true;
+  }
+  if (!allow) {
     if (box) box.remove();
     return;
   }

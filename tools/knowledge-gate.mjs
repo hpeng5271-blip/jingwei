@@ -12,9 +12,17 @@
 //   `knowledge check` —— 条目缺来源/等级、候选来源失效 → 红
 //   `knowledge stale` —— 条目引用了图谱里查不到的符号（该重编了）→ N>0 红
 //   没有图谱时 stale 会打印「查不了」并 exit 0（干净克隆不该因为还没 index 而红）。
+//
+// **为什么要把 usage 记录指到临时文件**（2026-10-21 抓到）：门禁每跑一次就 `cargo run` 两次真 CLI，
+// 于是 `~/.jingwei/usage.jsonl` 里会多出两行 `knowledge`——那是**门禁在跑**，不是人敲的。
+// 这份日志是用来"按真实调用数删命令"的，掺进机器噪声就等于把判据废掉（和测试夹子同一个理由）。
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const root = process.cwd();
+// 门禁自己的调用落到临时文件（进程退出就没人看它，不会无限长也不需要轮转）
+const usageLog = join(tmpdir(), `jingwei-gate-usage-${process.pid}.jsonl`);
 
 function run(args) {
   try {
@@ -24,6 +32,7 @@ function run(args) {
         cwd: root,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, JINGWEI_USAGE_FILE: usageLog },
       }),
     };
   } catch (e) {

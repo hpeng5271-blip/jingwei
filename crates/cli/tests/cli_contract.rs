@@ -516,3 +516,65 @@ fn 没索引时所有读命令都不建库() {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// **"说了 N 条，就得列出 N 行"**（2026-10-21）。
+///
+/// 由来：`explain` 曾打 "被调用：3 处"，下面却列了 5 行（边数 vs 站点行数）。这种"数字与清单对不上"
+/// 是最容易骗过自己的报告 bug——读的人不会去数，写的人也以为对。这里把它变成结构断言：
+/// 报出的数应等于明细行数；超过 5 行时明细只给前 5 行且必须能看出来被截断。
+#[test]
+fn explain_报出的数与列出的行数一致() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("count-invariant");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("src").join("a.rs"),
+        "fn helper() -> i32 { 1 }\nfn run() -> i32 { helper() + helper() }\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let _ = run(&["index", "--root", &p]);
+    let out = run(&["explain", "helper", "--root", &p]);
+    let text = stdout(&out);
+
+    // `被调用：A 个符号 / B 个调用点`
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("被调用："))
+        .unwrap_or_else(|| panic!("没有'被调用'行：{text}"));
+    let nums: Vec<usize> = line
+        .chars()
+        .collect::<String>()
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    assert_eq!(nums.len(), 2, "应报两个数（符号数 / 调用点数）：{line}");
+    let (symbols, sites) = (nums[0], nums[1]);
+
+    let details: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.starts_with("被调用："))
+        .skip(1)
+        .take_while(|l| !l.starts_with("被引用："))
+        .filter(|l| l.trim_start().starts_with("src/"))
+        .collect();
+    let shown = if sites > 5 { 5 } else { sites };
+    assert_eq!(
+        details.len(),
+        shown,
+        "报 {sites} 个调用点，却列了 {} 行：{text}",
+        details.len()
+    );
+    let distinct: std::collections::BTreeSet<&str> = details
+        .iter()
+        .filter_map(|l| l.split(" ← ").nth(1))
+        .collect();
+    assert!(
+        distinct.len() <= symbols,
+        "报 {symbols} 个符号，明细里却有 {} 个不同调用者：{text}",
+        distinct.len()
+    );
+
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -93,7 +93,14 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
             .push((e.line, e.col, e.byte, e.new.clone()));
     }
     for (file, mut edits) in by_file {
-        let path = root.join(&file);
+        // **沙箱边界**（2026-10-21）：写只许落在项目内、`.git` 不碰——图库里的路径也可能过期/脏
+        let path = match crate::sandbox::ensure_within(root, &root.join(&file)) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                return 2;
+            }
+        };
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
@@ -128,7 +135,8 @@ pub fn cmd_rename(root: &Path, name: &str, to: &str, write: bool, json: bool) ->
             }
         }
         let out = lines.join("\n") + "\n";
-        if let Err(e) = std::fs::write(&path, out) {
+        // 原子写：失败时原文件不动（不留半个文件）；回读仍然是最终裁判。
+        if let Err(e) = crate::sandbox::write_atomic(&path, out.as_bytes()) {
             eprintln!("写不回 {file}：{e}");
             return 2;
         }

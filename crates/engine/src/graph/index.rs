@@ -345,7 +345,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@22";
+pub const EXTRACTOR_VERSION: &str = "parse@25";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -987,6 +987,7 @@ mod version_tests {
         assert!(extractor_changed(Some("parse@1")), "老版本 = 必须重解析");
     }
 }
+
 
 
 

@@ -839,7 +839,10 @@ fn short_name(id: &str) -> &str {
 /// 类型文本里最后一个"看起来像类型"的标识符：`&Store` → `Store`，`Vec<Foo>` → `Foo`。
 /// 首字母不是大写的就当没有（`&mut self`、生命周期那种不该进这张表）。
 fn last_type_ident(text: &str) -> Option<String> {
-    text.rsplit(|c: char| !(c.is_alphanumeric() || c == '_'))
+    // **取"基类型"（第一段大写标识符），不是最后一个**（2026-10-21 实测）：按 rsplit 取最后一段时，
+    // `Channel<TSend>` 会取到泛型参数 `TSend`，于是连出指向不存在节点的边、整次索引失败。
+    // `&Store` / `Vec<Foo>` / `dyn Trait` 都该取**前段**。
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .find(|s| {
             !s.is_empty()
                 && s.chars()
@@ -1163,6 +1166,7 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
 
 
 

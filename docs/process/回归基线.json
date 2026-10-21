@@ -1,5 +1,5 @@
 {
-  "note": "研究对象回归基线（2026-10-20 实测；2026-10-21 tauri calls 1258→1302→1315：先修 mod::item，再修 crate::/self::/super:: 前缀（同后缀多候选时放弃），抽检各 1-3 处与源码行号逐一对得上；再加一条：`let x = T::new(…)` / `x: T` 形参的方法调用连到 `T::m`（tauri +33）；再补 `self.field.m()` 与 `?`/`unwrap`/`ok` 包装的初始化（tauri 1348→1367））。calls 的口径 = edges 表里 calls 边的总数（含跨文件解析），不是 index 那行\"直接解析的调用数\"。改完跑 node tools/regress.mjs 对一遍。",
+  "note": "研究对象回归基线（2026-10-20 实测；2026-10-21 tauri calls 1258→1302→1315：先修 mod::item，再修 crate::/self::/super:: 前缀（同后缀多候选时放弃），抽检各 1-3 处与源码行号逐一对得上；再加一条：`let x = T::new(…)` / `x: T` 形参的方法调用连到 `T::m`（tauri +33）；再补 `self.field.m()` 与 `?`/`unwrap`/`ok` 包装的初始化（tauri 1348→1367→1366：泛型参数曾被当成类型、连出指向不存在节点的边，改为取基类型后 -1））。calls 的口径 = edges 表里 calls 边的总数（含跨文件解析），不是 index 那行\"直接解析的调用数\"。改完跑 node tools/regress.mjs 对一遍。",
   "objects": [
     {
       "name": "flask",
@@ -18,7 +18,7 @@
       "expect": {
         "files": 329,
         "symbols": 5916,
-        "calls": 1367,
+        "calls": 1366,
         "positions_bad": 0,
         "references": 0
       }

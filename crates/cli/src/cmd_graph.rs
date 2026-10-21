@@ -583,13 +583,27 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             return 1;
         }
     };
+    // **真任务源**（2026-10-21）：界面那三个图标只认真任务。开跑写一条 running，收尾改 done/failed。
+    let task_log = jingwei_engine::understand::tasks::tasks_path();
+    let task_id = jingwei_engine::understand::tasks::start(
+        &task_log,
+        jingwei_engine::understand::tasks::TaskKind::Index,
+        "jingwei index",
+    );
     let rep = match jingwei_engine::graph::index::index_source(root, &mut store) {
         Ok(r) => r,
         Err(e) => {
+            jingwei_engine::understand::tasks::finish(&task_log, &task_id, false, Some(&format!("索引失败：{e}")));
             eprintln!("索引失败：{e}");
             return 1;
         }
-    };    // **扫到 0 个文件时报清楚，并且必须非 0 退出。**
+    };
+    jingwei_engine::understand::tasks::finish(
+        &task_log,
+        &task_id,
+        true,
+        Some(&format!("扫到 {} 个文件 / {} 个符号", rep.scanned, rep.symbols)),
+    );    // **扫到 0 个文件时报清楚，并且必须非 0 退出。**
     //
     // 这是 2026-10-16 实测抓出来的：`jingwei index --root D:\projects\jingwei`
     // 报「**0 个文件 · 0 个符号**」而**退出码 0**——看起来像"索引成功，项目是空的"。

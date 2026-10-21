@@ -48,12 +48,18 @@ fn empty_dir(tag: &str) -> PathBuf {
 /// **`JINGWEI_USAGE_FILE` 指到临时文件**：入口现在会记 `~/.jingwei/usage.jsonl`，
 /// 而这份日志是用来按"一周真实调用数"删命令的——全套集成测试往里头掺几十行，
 /// 那份数据就废了。指到临时路径**不改被测行为**，只改落点。
+/// 任务日志的测试落点（**别写进用户的真实 %LOCALAPPDATA%**）。
+fn tasks_log() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("jingwei-cli-tasks-{}.json", std::process::id()))
+}
+
 fn run(args: &[&str]) -> Output {
     let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
     let log = std::env::temp_dir().join(format!("jingwei-cli-usage-{}.jsonl", std::process::id()));
     Command::new(b)
         .args(args)
         .env("JINGWEI_USAGE_FILE", log)
+        .env("JINGWEI_TASKS_FILE", tasks_log())
         .output()
         .expect("跑不起来")
 }
@@ -1518,5 +1524,47 @@ fn env_失败时带三字段() {
     for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
         assert!(s.contains(k), "环境失败必须带三字段（缺 `{k}`）：{s}");
     }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// 任务日志**每个测试一份**：共用一份会被并行测试互相覆盖（实测：读到别人留下的 running）。
+fn run_tasks(args: &[&str], tag: &str) -> (Output, std::path::PathBuf) {
+    let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
+    let log = std::env::temp_dir().join(format!("jingwei-tasks-{tag}-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let out = Command::new(b)
+        .args(args)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join(format!("jingwei-usage-{tag}-{}.jsonl", std::process::id())))
+        .env("JINGWEI_TASKS_FILE", &log)
+        .output()
+        .expect("跑不起来");
+    (out, log)
+}
+
+/// **索引要留一条真任务记录**：界面那三个图标只认真任务，不认假状态。
+/// 判据：跑完 `index` 后任务日志里有一条 kind=index、state=done、有起止时间、detail 带规模。
+#[test]
+fn index_会留下真任务记录() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("task-journal");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let (out, log) = run_tasks(&["index", "--root", &p], "journal");
+    assert_eq!(code(&out), 0, "索引应成功：{}", stdout(&out));
+    let text = std::fs::read_to_string(&log).expect("索引该留一条任务记录");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("任务日志该是 JSON 数组");
+    let rows = v.as_array().expect("该是数组");
+    let t = rows
+        .iter()
+        .find(|t| t["kind"].as_str() == Some("index"))
+        .unwrap_or_else(|| panic!("没有 kind=index 的任务：{text}"));
+    assert_eq!(t["state"].as_str(), Some("done"), "跑完该是 done：{t}");
+    assert!(t["started_at"].as_i64().unwrap_or(0) > 0, "要有开始时间：{t}");
+    assert!(t["ended_at"].as_i64().is_some(), "要有结束时间：{t}");
+    let detail = t["detail"].as_str().unwrap_or("");
+    assert!(detail.contains("个文件"), "detail 要带规模（不然图标亮过也说不清）：{detail}");
+    let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }

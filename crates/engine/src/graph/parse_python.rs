@@ -1,4 +1,4 @@
-//! Python 的语法树遍历。**第二门语言**（2026-10-16 加）。
+﻿//! Python 的语法树遍历。**第二门语言**（2026-10-16 加）。
 //!
 //! ## 为什么加它
 //!
@@ -258,6 +258,7 @@ fn walk_attr(
                                     scope: vec![caller.clone()],
                                     line: (child.start_position().row + 1) as u32,
                                     raw: format!("{recv}.{attr}"),
+                                    want_path: None,
                                 });
                             }
                         }
@@ -663,6 +664,7 @@ fn collect_calls(
                                     scope: scope.clone(),
                                     line,
                                     raw: text.clone(),
+                                    want_path: None,
                                 });
                             }
                         }
@@ -693,6 +695,7 @@ fn collect_calls(
                                 scope: scope.clone(),
                                 line,
                                 raw: text.clone(),
+                                want_path: None,
                             });
                         }
                     }
@@ -846,3 +849,4 @@ fn collect_plain(text: &str, out: &mut Vec<ImportFact>) {
 #[cfg(test)]
 #[path = "parse_python_tests.rs"]
 mod tests;
+

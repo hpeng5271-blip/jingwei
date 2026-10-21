@@ -130,3 +130,33 @@ fn 带问号或_unwrap_的初始化也能认出类型() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **跨文件**方法调用：类型在本文件可见、方法定义在另一个文件（2026-10-21）。
+#[test]
+fn 跨文件的方法调用也能连上() {
+    let d = std::env::temp_dir().join(format!("jw-method-x-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(
+        d.join("src/a.rs"),
+        "pub struct S;\nimpl S {\n    pub fn new() -> S { S }\n    pub fn save(&self) {}\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("src/b.rs"),
+        "use crate::a::S;\npub fn run() {\n    let s = S::new();\n    s.save();\n}\n",
+    )
+    .unwrap();
+    let mut st = Store::open(&d.join("g.db")).expect("开库失败");
+    index::index_source(&d, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(
+        e.calls, 1,
+        "跨文件的 `s.save()` 应连到 src/a.rs#S::save，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

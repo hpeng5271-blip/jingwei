@@ -1,4 +1,4 @@
-﻿//! 解析期：把**引用事实**变成**确定的关系**。
+//! 解析期：把**引用事实**变成**确定的关系**。
 //!
 //! ## 为什么单独一层
 //!
@@ -125,6 +125,42 @@ pub fn resolve_file(
     for r in refs {
         if r.raw.contains('.') {
             out.method_refs += 1;
+        }
+        // ⓪ **推断出的方法目标**（`T::m`）：按全图谱里"键正好是 `T::m`"的符号连（2026-10-21）。
+        //
+        // parser 只在本文件里找 `T::m`；找不到时把期望路径留在这里，由全图谱再找一次。
+        // **只认完整路径**（`A::new` 与 `B::new` 是两条不同的键）；找不到就丢掉（会算进"没连上"）。
+        if let Some(want) = r.want_path.as_deref() {
+            let short = want.rsplit("::").next().unwrap_or(want);
+            let hits: Vec<&SymbolEntry> = all
+                .get(short)
+                .map(|v| {
+                    v.iter()
+                        .filter(|e| {
+                            (e.class == "value" || e.class == "local")
+                                && e.id
+                                    .split_once('#')
+                                    .map(|(_, k)| k == want)
+                                    .unwrap_or(false)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if hits.len() == 1 {
+                if let Some(caller) = r.scope.last() {
+                    if &hits[0].id != caller {
+                        out.sites.push((caller.clone(), hits[0].id.clone(), r.line));
+                        out.resolved.push((caller.clone(), hits[0].id.clone()));
+                    }
+                } else {
+                    out.module_level += 1;
+                }
+                continue;
+            }
+            if hits.len() > 1 {
+                out.ambiguous.push(format!("{}:{}", rel, r.line));
+                continue;
+            }
         }
         // ⓪− **Python 的模块属性**（债 0.28 / D-04）：`mod.CONST` / `pkg.mod.CONST`。
         //      前缀必须正好是本文件的某条 import（不许全图按名猜）；
@@ -580,6 +616,7 @@ mod tests {
             scope: scope.iter().map(|s| s.to_string()).collect(),
             line: 1,
             raw: name.into(),
+            want_path: None,
         }
     }
 
@@ -990,6 +1027,7 @@ mod tests {
         assert_eq!(r.namespace_mismatch.len(), 1);
     }
 }
+
 
 
 

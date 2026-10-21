@@ -100,6 +100,9 @@ pub struct RefFact {
     /// 原始文本。`self.m()` / `Type::m()` 这种形状**原样留着**——
     /// 以后要做接收者类型推断时，需要看到完整的写法，而不是被我压扁的名字。
     pub raw: String,
+    /// **推断出的期望路径**（`T::m`）：接收者类型在本文件里可见时填上（2026-10-21）。
+    /// 有它的话，resolve 可以按"全图谱里键正好是 `T::m` 的符号"去连——跨文件方法调用靠它。
+    pub want_path: Option<String>,
 }
 
 /// 解析一段 Rust 源码。`rel` 是项目内的相对路径（用 / 分隔），`now` 是毫秒时间戳。
@@ -411,7 +414,16 @@ fn collect_calls(
             // **变量名 → 类型名**（2026-10-21）：方法调用 `x.m()` 要靠它。
             // 只收"字面写着"的那两种：`let x: T = …` 与 `let x = T::new(…)` / `let x = T { … }`。
             "let_declaration" => {
-                if let Some(pat) = child.child_by_field_name("pattern") {
+                if let Some(pat0) = child.child_by_field_name("pattern") {
+                    // `let mut s = …` 的 pattern 是 `mut_pattern`（里面才是 identifier）。
+                    // 少了这一步，`let mut store = Store::open(..)?` 之后的 `store.m()` 全连不上（2026-10-21 实测）。
+                    let pat = if pat0.kind() == "mut_pattern" {
+                        pat0.child_by_field_name("pattern")
+                            .or_else(|| pat0.named_child(0))
+                            .unwrap_or(pat0)
+                    } else {
+                        pat0
+                    };
                     if pat.kind() == "identifier" {
                         if let Ok(var) = pat.utf8_text(src.as_bytes()) {
                             let declared = child
@@ -479,6 +491,19 @@ fn collect_calls(
                                 if let Some(c) = container {
                                     if let Some(ty) = fields.get(&(c.to_string(), rest.to_string())) {
                                         let path = format!("{ty}::{m}");
+                                        if !by_path.contains_key(&path) {
+                                            // 跨文件（`self.field.m()`：字段类型在本文件写着，方法在别处）
+                                            if let Some(caller) = scope.last() {
+                                                refs.push(RefFact {
+                                                    name: path.clone(),
+                                                    scope: vec![caller.clone()],
+                                                    line: call_line,
+                                                    raw: txt.clone(),
+                                                    want_path: Some(path.clone()),
+                                                });
+                                            }
+                                            continue;
+                                        }
                                         if let Some(id) = by_path.get(&path) {
                                             let mut done = false;
                                             if let Some(caller) = scope.last() {
@@ -504,6 +529,20 @@ fn collect_calls(
                         if rv != "self" {
                             if let Some(ty) = vars.get(rv) {
                                 let path = format!("{ty}::{m}");
+                                if !by_path.contains_key(&path) {
+                                    // **跨文件**：本文件里没有这个 `T::m`，但类型已经字面可见。
+                                    // 把期望路径留给 resolve（全图按路径找；找不到就丢，会被计数）。
+                                    if let Some(caller) = scope.last() {
+                                        refs.push(RefFact {
+                                            name: path.clone(),
+                                            scope: vec![caller.clone()],
+                                            line: call_line,
+                                            raw: txt.clone(),
+                                            want_path: Some(path.clone()),
+                                        });
+                                    }
+                                    continue;
+                                }
                                 if let Some(id) = by_path.get(&path) {
                                     if let Some(caller) = scope.last() {
                                         if id != caller {
@@ -544,6 +583,7 @@ fn collect_calls(
                             scope: scope.clone(),
                             line: (f.start_position().row + 1) as u32,
                             raw: txt.clone(),
+                            want_path: None,
                         }),
                     },
                     // 复杂形状（`self.m()` / `Type::m()`）：解析不了，
@@ -553,6 +593,7 @@ fn collect_calls(
                         scope: scope.clone(),
                         line: (f.start_position().row + 1) as u32,
                         raw: txt.clone(),
+                        want_path: None,
                     }),
                     // 不在函数体里（比如 `const X = compute();`）——
                     // **它仍然是个引用**，只是作用域是模块级。
@@ -562,6 +603,7 @@ fn collect_calls(
                         scope: scope.clone(),
                         line: (f.start_position().row + 1) as u32,
                         raw: txt.clone(),
+                        want_path: None,
                     }),
                 }
             }
@@ -1166,6 +1208,8 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
 
 
 

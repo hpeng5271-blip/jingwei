@@ -175,12 +175,14 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
             by_path.insert(p.to_string(), s.id.clone());
         }
     }
+    let mut vars: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     collect_calls(
         root,
         src,
         rel,
         None,
         &mut scope,
+        &mut vars,
         &by_name,
         &by_path,
         &mut calls,
@@ -231,6 +233,7 @@ fn collect_calls(
     rel: &str,
     container: Option<&str>,
     scope: &mut Vec<String>,
+    vars: &mut std::collections::BTreeMap<String, String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
@@ -254,7 +257,35 @@ fn collect_calls(
                             &symbol_key(rel, scope, container, name),
                         )
                     });
-                if let Some(body) = child.child_by_field_name("body") {
+                vars.clear();
+                // 形参上写着的类型也算（`fn run(s: &S)`）——这是"字面可见"的第二种
+                if let Some(params) = child.child_by_field_name("parameters") {
+                    let mut pc = params.walk();
+                    for p in params.children(&mut pc) {
+                        if p.kind() != "parameter" {
+                            continue;
+                        }
+                        let (Some(pat), Some(ty)) = (
+                            p.child_by_field_name("pattern"),
+                            p.child_by_field_name("type"),
+                        ) else {
+                            continue;
+                        };
+                        if pat.kind() != "identifier" {
+                            continue;
+                        }
+                        let (Ok(v), Ok(t)) = (
+                            pat.utf8_text(src.as_bytes()),
+                            ty.utf8_text(src.as_bytes()),
+                        ) else {
+                            continue;
+                        };
+                        if let Some(t) = last_type_ident(t) {
+                            vars.insert(v.trim().to_string(), t);
+                        }
+                    }
+                }
+                    if let Some(body) = child.child_by_field_name("body") {
                     if let Some(o) = &own {
                         scope.push(o.clone());
                     }
@@ -264,6 +295,7 @@ fn collect_calls(
                         rel,
                         container,
                         scope,
+                        vars,
                         by_name,
                         by_path,
                         out,
@@ -283,7 +315,7 @@ fn collect_calls(
                     .map(|s| s.trim().to_string());
                 if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
                     // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
-                    collect_calls(body, src, rel, Some(&tname), scope, by_name, by_path, out, refs, sites);
+                    collect_calls(body, src, rel, Some(&tname), scope, vars, by_name, by_path, out, refs, sites);
                 }
             }
             "impl_item" => {
@@ -299,6 +331,7 @@ fn collect_calls(
                         rel,
                         ty.as_deref(),
                         scope,
+                        vars,
                         by_name,
                         by_path,
                         out,
@@ -310,9 +343,32 @@ fn collect_calls(
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
                     collect_calls(
-                        body, src, rel, container, scope, by_name, by_path, out, refs, sites,
+                        body, src, rel, container, scope, vars, by_name, by_path, out, refs, sites,
                     );
                 }
+            }
+            // **变量名 → 类型名**（2026-10-21）：方法调用 `x.m()` 要靠它。
+            // 只收"字面写着"的那两种：`let x: T = …` 与 `let x = T::new(…)` / `let x = T { … }`。
+            "let_declaration" => {
+                if let Some(pat) = child.child_by_field_name("pattern") {
+                    if pat.kind() == "identifier" {
+                        if let Ok(var) = pat.utf8_text(src.as_bytes()) {
+                            let declared = child
+                                .child_by_field_name("type")
+                                .and_then(|t| t.utf8_text(src.as_bytes()).ok())
+                                .and_then(last_type_ident);
+                            let inferred = child
+                                .child_by_field_name("value")
+                                .and_then(|v| ty_of_initializer(v, src));
+                            if let Some(ty) = declared.or(inferred) {
+                                vars.insert(var.trim().to_string(), ty);
+                            }
+                        }
+                    }
+                }
+                collect_calls(
+                    child, src, rel, container, scope, vars, by_name, by_path, out, refs, sites,
+                );
             }
             "call_expression" => {
                 let Some(f) = child.child_by_field_name("function") else {
@@ -339,7 +395,7 @@ fn collect_calls(
                         .child_by_field_name("field")
                         .and_then(|v| v.utf8_text(src.as_bytes()).ok())
                         .map(|s| s.trim().to_string());
-                    if let (Some("self"), Some(m), Some(c)) = (recv.as_deref(), field, container) {
+                    if let (Some("self"), Some(m), Some(c)) = (recv.as_deref(), field.as_deref(), container) {
                         let path = format!("{c}::{m}");
                         if let Some(id) = by_path.get(&path) {
                             if let Some(caller) = scope.last() {
@@ -349,6 +405,31 @@ fn collect_calls(
                                 }
                             }
                             continue;
+                        }
+                    }
+                    // ①b **`x.m()`，而 `x` 的类型在本函数里看得到**（2026-10-21）：
+                    //     `let x = Store::open()` / `let x: Store = …` / 形参 `x: Store`。
+                    //     **只认"字面写着"的类型**：不看 import、不做跨文件推断——
+                    //     看不懂就退回"引用"，让统计把它算进"没连上"，绝不猜。
+                    if let (Some(rv), Some(m)) = (recv.as_deref(), field.as_deref()) {
+                        if rv != "self" {
+                            if let Some(ty) = vars.get(rv) {
+                                let path = format!("{ty}::{m}");
+                                if let Some(id) = by_path.get(&path) {
+                                    if let Some(caller) = scope.last() {
+                                        if id != caller {
+                                            out.push((caller.clone(), id.clone()));
+                                            sites.push((
+                                                caller.clone(),
+                                                id.clone(),
+                                                call_line,
+                                                call_byte,
+                                            ));
+                                        }
+                                    }
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
@@ -402,7 +483,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, by_name, by_path, out, refs, sites);
+                collect_calls(child, src, rel, container, scope, vars, by_name, by_path, out, refs, sites);
             }
         }
     }
@@ -666,6 +747,40 @@ fn short_name(id: &str) -> &str {
     id.split_once('#').map(|(_, rest)| rest).unwrap_or(id)
 }
 
+/// 类型文本里最后一个"看起来像类型"的标识符：`&Store` → `Store`，`Vec<Foo>` → `Foo`。
+/// 首字母不是大写的就当没有（`&mut self`、生命周期那种不该进这张表）。
+fn last_type_ident(text: &str) -> Option<String> {
+    text.rsplit(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .find(|s| {
+            !s.is_empty()
+                && s.chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+        })
+        .map(|s| s.to_string())
+}
+
+/// 初始化表达式推出类型：`T::new(…)` / `T { … }`；别的形状一律不猜。
+fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
+    match v.kind() {
+        "struct_expression" => v
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(src.as_bytes()).ok())
+            .map(|s| s.trim().to_string()),
+        "call_expression" => {
+            let f = v.child_by_field_name("function")?;
+            let t = f.utf8_text(src.as_bytes()).ok()?;
+            let first = t.split("::").next()?.trim();
+            if first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                Some(first.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,3 +1044,8 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
+
+
+

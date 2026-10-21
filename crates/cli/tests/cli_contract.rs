@@ -1066,3 +1066,30 @@ fn next_的弱提示只在_一手不到一半_时出现() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **主路径必须排在最前面，而且只有那 8 个**（2026-10-21）。
+///
+/// 由来：36 个命令平铺 = 用户每天重新选一次"从哪开始"。修法不是删命令，
+/// 而是**让帮助表的排序表达优先级**——主路径固定，其余收进"按需用"。
+#[test]
+fn help_主路径在最前且只有八个() {
+    let Some(_) = bin() else { return };
+    let s = stdout(&run(&["--help"]));
+    let main_at = s.find("【主路径】").expect("要有【主路径】段");
+    let rest_at = s.find("【其余·按需用】").expect("要有【其余·按需用】段");
+    assert!(main_at < rest_at, "主路径段必须在前：\n{s}");
+    let seg = &s[main_at..rest_at];
+    let want = [
+        "next", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
+    ];
+    for v in want {
+        assert!(seg.contains(v), "主路径段里缺 `{v}`：\n{seg}");
+    }
+    // 主路径段里的命令数 = 8（每行一个命令，行首两空格 + 名字）
+    let n = seg
+        .lines()
+        .filter(|l| l.starts_with("  ") && !l.trim().is_empty())
+        .filter(|l| !l.contains('【'))
+        .count();
+    assert_eq!(n, want.len(), "主路径只该有 8 个命令，实际 {n}：\n{seg}");
+}

@@ -533,6 +533,12 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
 ///
 /// 每项是 `(名字, 别名, 说明)`。名字是**主名**（`--help` 里显示的那个），
 /// 别名只记在这里、供分派用。
+/// **主路径 8 个**（2026-10-21）：只在这 8 个里选，其余是"按需用"。
+/// 判据来自审计：36 个入口 = 没有默认动作；主路径固定后，`--help` 的排序就是优先级。
+pub(crate) const MAIN_VERBS: &[&str] = &[
+    "next", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
+];
+
 pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     ("new", &[], "从模板建一个能立刻跑起来的项目"),
     (
@@ -653,9 +659,20 @@ fn render_help() -> String {
     // 子命令那段**从 `COMMANDS` 生成**，不手写。
     // 手写的那一版漏了四个能跑的命令（`inspect` / `graph` / `spec` / `machine`），
     // 而说明书是准的——两份清单各写各的必然漂移。见 `COMMANDS` 的注释。
+    // **主路径在前**（2026-10-21）：36 个命令平铺 = 用户每天重新选一次"从哪开始"。
+    // 判据仍是"唯一真源"：两段都从 `COMMANDS` 来，**一个都不删**——只是排序表达了优先级。
     let mut subs = String::new();
+    subs.push_str("  【主路径】\n");
     for (name, _aliases, desc) in COMMANDS {
-        subs.push_str(&format!("  {:<12} {}\n", name, desc));
+        if MAIN_VERBS.contains(name) {
+            subs.push_str(&format!("  {:<12} {}\n", name, desc));
+        }
+    }
+    subs.push_str("\n  【其余·按需用】\n");
+    for (name, _aliases, desc) in COMMANDS {
+        if !MAIN_VERBS.contains(name) {
+            subs.push_str(&format!("  {:<12} {}\n", name, desc));
+        }
     }
     format!(
         "{}  ·  项目环境体检 / 启动 / 清理\n\
@@ -971,5 +988,6 @@ mod tests {
         );
     }
 }
+
 
 

@@ -578,3 +578,97 @@ fn explain_报出的数与列出的行数一致() {
 
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`impact` 的层计数必须等于列出的行数**（2026-10-21，与 explain 那条同一类不变量）。
+///
+/// 触发点是"第 N 层（K 个）:"后面只列前 6 个——如果 `K` 是"总数"而明细是"全部"（或反之），
+/// 读的人会以为看全了。这里用「列出的行数 + 是否给出"等 N 个"」还原真实条数，必须等于 K。
+#[test]
+fn impact_每层报的个数与列出的行数一致() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("impact-count");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("src").join("a.rs"),
+        "fn helper() -> i32 { 1 }\nfn mid1() -> i32 { helper() }\nfn mid2() -> i32 { helper() }\nfn top() -> i32 { mid1() + mid2() }\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let _ = run(&["index", "--root", &p]);
+    let out = run(&["impact", "helper", "--root", &p]);
+    let text = stdout(&out);
+
+    let lines: Vec<&str> = text.lines().collect();
+    let mut checked = 0;
+    for (i, l) in lines.iter().enumerate() {
+        let Some(rest) = l.trim_start().strip_prefix("第 ") else {
+            continue;
+        };
+        let Some((n, tail)) = rest.split_once(" 层（") else {
+            continue;
+        };
+        let Some(k) = tail.split(" 个）").next().and_then(|s| s.trim().parse::<usize>().ok()) else {
+            continue;
+        };
+        let mut listed = 0usize;
+        let mut truncated = false;
+        for nxt in lines.iter().skip(i + 1) {
+            if nxt.trim_start().starts_with("第 ") || nxt.trim_start().starts_with("知识层") || nxt.trim_start().starts_with("边界") {
+                break;
+            }
+            if nxt.trim_start().starts_with("被 ") {
+                listed += 1;
+            } else if nxt.contains("…等 ") {
+                truncated = true;
+            }
+        }
+        let shown = if k > 6 { 6 } else { k };
+        assert_eq!(
+            listed, shown,
+            "第 {n} 层报 {k} 个，却列了 {listed} 行（截断标记 {truncated}）：{text}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 1, "一条层都没有，测试没量到东西：{text}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **`knowledge check` 的"文本态 N 条"必须等于列出的名字数**（2026-10-21）。
+///
+/// 这一行同时干两件事：报数 + 列名字（超过 5 个时截断并写"等 N 条"）。
+/// 数字和清单必须是同一个来源，否则"3 条"下面列 2 个名字都不会有人发现。
+#[test]
+fn check_文本态的个数与列出的名字一致() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("check-unmapped");
+    let kdir = d.join("docs").join("knowledge");
+    std::fs::create_dir_all(&kdir).unwrap();
+    for i in 1..=3 {
+        std::fs::write(
+            kdir.join(format!("e{i}.md")),
+            format!("---\nclaim: 第 {i} 条主张\nsource: https://example.com/{i}\nlevel: 一手\ncheck: 只是想清楚\n---\n"),
+        )
+        .unwrap();
+    }
+    let p = d.to_str().unwrap().to_string();
+    let out = run(&["knowledge", "check", "--root", &p]);
+    let text = stdout(&out);
+    let line = text
+        .lines()
+        .find(|l| l.contains("文本态"))
+        .unwrap_or_else(|| panic!("没有'文本态'行：{text}"));
+    let n: usize = line
+        .split("文本态 ")
+        .nth(1)
+        .and_then(|s| s.split(" 条").next())
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or_else(|| panic!("这行没有可解析的条数：{line}"));
+    let listed = line
+        .split("）：")
+        .nth(1)
+        .map(|rest| rest.split(" / ").count())
+        .unwrap_or(0);
+    let shown = if n > 5 { 5 } else { n };
+    assert_eq!(listed, shown, "报 {n} 条，却列了 {listed} 个名字：{line}");
+    let _ = std::fs::remove_dir_all(&d);
+}

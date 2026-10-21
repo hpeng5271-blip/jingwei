@@ -3,15 +3,15 @@
   "facts": {
     "engine_unit": 385,
     "engine_ignored": 1,
-    "integration": 83,
+    "integration": 85,
     "model": 11,
-    "tests_total": 511,
+    "tests_total": 513,
     "shell_tests": 79,
     "gates": 4,
     "graph_files": 153,
-    "graph_symbols": 2136,
-    "graph_nodes": 2299,
-    "graph_edges": 3853,
+    "graph_symbols": 2138,
+    "graph_nodes": 2301,
+    "graph_edges": 3863,
     "motives_landed": 19,
     "motives_pending": 6
   }

@@ -1405,3 +1405,28 @@ fn rename_写之前要过动作声明() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`graph --json` 也走协议**：没建过图谱是 `no`（查过了确实没有），不是空对象；
+/// 建过之后 `runs` 与四件套一起给。判据：四件套齐全 + `state` 是三态。
+#[test]
+fn graph_的_json_也带协议() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("graph-protocol");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["graph", "--root", &p, "--json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("`graph --json` 该是 JSON");
+    for k in ["state", "summary", "evidence", "coverage"] {
+        assert!(v.get(k).is_some(), "`graph --json` 缺 `{k}`：{v}");
+    }
+    assert_eq!(v["state"].as_str(), Some("no"), "没建过图谱该是 no（不是 unknown）：{v}");
+    assert!(
+        v["evidence"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "依据不许为空：{v}"
+    );
+    assert!(
+        v["coverage"]["partial"].as_bool().unwrap_or(false),
+        "没读到图谱时必须 partial=true：{v}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

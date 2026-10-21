@@ -60,7 +60,18 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
             let db = jingwei_engine::graph_db_path(root);
             if !db.is_file() {
                 if json {
-                    println!("{}", json!({ "state": "no", "reason": "这个项目还没建过图谱" }));
+                    // **协议**（2026-10-21）：`no` 是"查过了，确实没有"——这里确实还没建过图谱。
+                    let v = envelope(
+                        State::No,
+                        "还没建过图谱：在界面里点「索引一次」，或跑 jingwei index",
+                        vec![
+                            Evidence::command("jingwei index", "建完图谱，这条就有内容"),
+                            Evidence::file(".jingwei/graph.db", "库还不存在"),
+                        ],
+                        Coverage::partial(0, None, "没有可读的图谱（不是 0 次运行）"),
+                        json!({"runs": []}),
+                    );
+                    print_protocol(&v);
                 } else {
                     println!();
                     println!("  {} 这个项目还没建过图谱。", c(DIM, "·"));
@@ -73,15 +84,21 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                 return 0;
             }
             if json {
-                println!(
-                    "{}",
-                    json!({
-                        "state": "unknown",
-                        "why": "our_gap",
-                        "reason": format!("图谱库在，但读不到：{e}"),
-                        "whatToDo": jingwei_engine::Unknown::OurGap.what_to_do(),
-                    })
+                // 库在、读不到 = **我们的失败**，不是"你没建过"：三字段要说清，并带上原始错误。
+                let summary = format!(
+                    "暂无法探知：图谱库在，但读不到｜缺：可读的图谱库｜为什么：{e}｜怎么补：关掉可能占用它的进程，或删掉 .jingwei/graph.db 后重新 jingwei index"
                 );
+                let v = envelope(
+                    State::Unknown,
+                    summary,
+                    vec![
+                        Evidence::file(".jingwei/graph.db", "库文件在，但这次没打开"),
+                        Evidence::command("jingwei index", "重建一次；重建前先确认没有别的进程占着库"),
+                    ],
+                    Coverage::partial(0, None, "没有读到任何图谱内容（不是 0 个节点）"),
+                    json!({"runs": []}),
+                );
+                print_protocol(&v);
             } else {
                 println!();
                 println!("  {} 图谱库在，但读不到。", c(YELLOW, "?"));
@@ -115,7 +132,26 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
         let counts = jingwei_engine::graph::roles::annotate(&mut nodes, &edges);
         let dirs = jingwei_engine::graph::roles::dir_roles(&nodes, &edges);
         if json {
-            println!("{}", json!({ "state": "yes", "roles": counts, "dirs": dirs }));
+            // 协议：角色也要能回答"凭什么 / 覆盖多少"。覆盖度 = 参与判断的文件数。
+            let files_n = counts["rows"].as_array().map(|a| a.len()).unwrap_or(0);
+            let summary = format!(
+                "角色（只算跨文件调用）：入口 {} / 公共底层 {} / 中间层 {} / 还没连上 {}（共 {files_n} 个文件）",
+                counts["entry"].as_i64().unwrap_or(0),
+                counts["foundation"].as_i64().unwrap_or(0),
+                counts["middle"].as_i64().unwrap_or(0),
+                counts["isolated"].as_i64().unwrap_or(0),
+            );
+            let v = envelope(
+                State::Yes,
+                summary,
+                vec![
+                    Evidence::graph(root, "角色由 calls / references 边算出来"),
+                    Evidence::command("jingwei graph roles", "同一条命令可复跑"),
+                ],
+                Coverage::full(files_n, "七格之和应等于参与判断的文件数（不等要报警）"),
+                json!({ "roles": counts, "dirs": dirs }),
+            );
+            print_protocol(&v);
             return 0;
         }
         println!();
@@ -304,9 +340,16 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
         "" => match query::recent_runs(&store, 20) {
             Ok(list) => {
                 if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&json!({
+                    let n = list.len();
+                    let v = envelope(
+                        State::Yes,
+                        format!("最近 {n} 次运行（含退出码与诊断数）"),
+                        vec![
+                            Evidence::graph(root, "运行历史来自图库"),
+                            Evidence::command("jingwei graph runs <id>", "看某一次的明细"),
+                        ],
+                        Coverage::full(n, "只列最近 20 次——有上限是设计，不是漏了"),
+                        json!({
                             "runs": list.iter().map(|r| json!({
                                 "runId": r.run_id,
                                 "command": r.command,
@@ -314,9 +357,9 @@ pub(crate) fn cmd_graph(root: &Path, json: bool, rest: &[String]) -> i32 {
                                 "at": r.at,
                                 "diagnostics": r.diagnostics,
                             })).collect::<Vec<_>>(),
-                        }))
-                        .unwrap_or_default()
+                        }),
                     );
+                    print_protocol(&v);
                     return 0;
                 }
                 print_runs(&list);

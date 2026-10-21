@@ -288,6 +288,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   if ($('#btnEdApply')) $('#btnEdApply').addEventListener('click', edApply);
   if ($('#btnEdMore')) $('#btnEdMore').addEventListener('click', (e) => edMoreMenu(e.currentTarget));
   if ($('#btnEdBuild')) $('#btnEdBuild').addEventListener('click', () => { switchTab('run'); doRun('build'); });
+  // 编辑器里直接跑一次检查（2026-10-22）：复用「问题」栏那条通道，结果按行挂到行号上。
+  if ($('#btnEdCheck')) {
+    $('#btnEdCheck').addEventListener('click', async () => {
+      if (typeof runCheck !== 'function') return;
+      await runCheck();
+      if (typeof edPaintGutter === 'function' && ED && ED.path) edPaintGutter(true);
+    });
+  }
   if ($('#btnEdTest')) $('#btnEdTest').addEventListener('click', () => { switchTab('run'); doRun('test'); });
   if ($('#btnEdRun')) $('#btnEdRun').addEventListener('click', () => { switchTab('run'); doRun('run'); });
   // 设置按钮在底部状态栏上：什么时候想改「自动到什么程度」都够得着

@@ -588,6 +588,21 @@ try {
     return { rows, applyVisible, calls: globalThis.__rnCalls || [] };
   });
   check('改名：先看清单再改（逐处列出）', rn.rows.length === 2 && /src\/a\.rs:3:9/.test(rn.rows[0]), JSON.stringify(rn.rows));
+  // 编辑器里跑检查（2026-10-22）：复用「问题」栏通道，结果按行挂到行号上。
+  const eck = await page.evaluate(async () => {
+    document.getElementById('edNums').innerHTML = '';
+    DOCK.diags = [];
+    edPaintGutter(true);
+    const before = document.querySelectorAll('#edNums .ed-diag').length;
+    const btn = document.getElementById('btnEdCheck');
+    const present = !!btn;
+    if (btn) btn.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const after = document.querySelectorAll('#edNums .ed-diag').length;
+    return { present, before, after };
+  });
+  check('编辑器：有检查按钮', eck.present === true, JSON.stringify(eck));
+  check('编辑器：检查完行号上有标记', eck.before === 0 && eck.after > 0, JSON.stringify(eck));
   check('改名：确认后才带 --write', rn.applyVisible === true && rn.calls.some((c) => c.includes('--write')), JSON.stringify(rn.calls));
   check('点它就真的调了 net allow', ta.calls.some((c) => c.startsWith('allow evil.example')), JSON.stringify(ta.calls));
   check('编辑器：标记分得出 error 与 warn', gd.lv === 'error,warn', gd.lv);

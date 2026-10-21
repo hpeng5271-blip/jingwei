@@ -382,7 +382,7 @@ async function edOpen(path) {
     t.disabled = !o.readable;
     t.placeholder = o.readable ? '改动先留在内存里，点「应用」才写回磁盘。' : (o.note || '这个文件不能编辑');
     $('#edPath').textContent = path;
-    ['#btnEdApply', '#btnEdMore', '#btnEdBuild', '#btnEdTest', '#btnEdRun', '#btnEdRename']
+    ['#btnEdApply', '#btnEdMore', '#btnEdBuild', '#btnEdTest', '#btnEdRun', '#btnEdRename', '#btnEdCheck']
       .forEach((s) => { const el = $(s); if (el) el.disabled = !o.readable; });
     edPaintGutter();
     edPaintStat();

@@ -58,6 +58,9 @@ pub struct IndexReport {
     pub removed: usize,
     pub nodes_written: usize,
     pub edges_written: usize,
+    /// **悬空边**：端点不在图谱里的边——写之前筛掉并计数（2026-10-21）。
+    /// 一条脏边不该让整次索引失败：宁可少一条，也不要半张图。
+    pub dangling_edges: usize,
     /// 这次更新里被标成失效的旧关系条数。
     pub edges_expired: usize,
     /// **解析期连上的跨文件关系**（含就近遮蔽命中的）。
@@ -345,7 +348,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@25";
+pub const EXTRACTOR_VERSION: &str = "parse@26";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -429,7 +432,8 @@ pub fn index_source(
         }
     }
     let t_prep = std::time::Instant::now();
-    let prepared = crate::graph::parse_pool::prepare(files, &states, version_changed, now);
+    // `files` 后面还要用（筛悬空边时要拿它拼 `file:` 节点 id），所以 clone 一份进并行准备
+    let prepared = crate::graph::parse_pool::prepare(files.clone(), &states, version_changed, now);
     timing.add_parse(t_prep);
 
     for p in prepared {
@@ -763,7 +767,22 @@ pub fn index_source(
         }
 
         // 只写边不写节点——节点在上面的循环里已经落库了。
-        // 外键会在这一句把关：指向不存在节点的边进不去。
+        // **先筛掉端点不在图谱里的边**（2026-10-21）：外键会拦，而**一条坏边会让整次索引失败**。
+        // 实测：一条指向 `Channel<TSend>::send`（不存在）的边把 tauri 索引进度打回半张图（1367→961）。
+        // 所以宁可少一条并**报出来**，也不要半张图。
+        if !extra.is_empty() {
+            let mut known: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for v in all_names.values() {
+                for e in v {
+                    known.insert(e.id.clone());
+                }
+            }
+            for (rel, _) in &files {
+                known.insert(format!("file:{rel}"));
+            }
+            let skipped = retain_known_edges(&mut extra, &known);
+            rep.dangling_edges += skipped;
+        }
         if !extra.is_empty() {
             let w = store.upsert(&[], &extra)?;
             rep.edges_written += w.edges;
@@ -892,6 +911,18 @@ pub fn foreign_sources(root: &Path) -> Vec<(String, usize)> {
     v
 }
 
+/// **把端点不在图谱里的边剔掉**，返回剔掉几条（2026-10-21）。
+///
+/// 为什么不在 `upsert` 里兜底：外键会在写入时拦，但那时**整次索引已经失败**。
+fn retain_known_edges(
+    edges: &mut Vec<jingwei_model::Edge>,
+    known: &std::collections::BTreeSet<String>,
+) -> usize {
+    let before = edges.len();
+    edges.retain(|e| known.contains(&e.src) && known.contains(&e.dst));
+    before - edges.len()
+}
+
 #[cfg(test)]
 mod to_json_tests {
     use super::IndexReport;
@@ -999,4 +1030,45 @@ mod version_tests {
 
 
 
+
+
+#[cfg(test)]
+mod dangling_edge_tests {
+    use super::*;
+    use jingwei_model::{Confidence, Edge, EdgeKind, NodeKind, Source};
+
+    fn edge(src: &str, dst: &str) -> Edge {
+        Edge::new(
+            src,
+            dst,
+            EdgeKind::Calls,
+            NodeKind::Symbol,
+            NodeKind::Symbol,
+            Source::TreeSitter,
+            Confidence::Certain,
+            0,
+        )
+        .expect("合法边")
+    }
+
+    /// **端点不在图谱里的边要被剔掉并计数**（2026-10-21）。
+    ///
+    /// 由来：一条指向 `Channel<TSend>::send`（不存在）的边让整次 tauri 索引失败，
+    /// 图谱只剩半张（calls 1367→961）。宁可少一条，也不要半张图。
+    #[test]
+    fn 悬空边被剔掉且计数正确() {
+        let known: std::collections::BTreeSet<String> =
+            ["symbol:a.rs#f".to_string(), "symbol:a.rs#g".to_string()]
+                .into_iter()
+                .collect();
+        let mut edges = vec![
+            edge("symbol:a.rs#f", "symbol:a.rs#g"), // 好边
+            edge("symbol:a.rs#f", "symbol:x.rs#nope"), // dst 不存在
+            edge("symbol:y.rs#nope", "symbol:a.rs#g"), // src 不存在
+        ];
+        let skipped = retain_known_edges(&mut edges, &known);
+        assert_eq!(skipped, 2, "应剔掉两条");
+        assert_eq!(edges.len(), 1, "只剩那条好边：{edges:?}");
+    }
+}
 

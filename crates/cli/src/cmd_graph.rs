@@ -621,6 +621,12 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             rep.files, rep.symbols, rep.calls, ms
         );
     }
+    if rep.dangling_edges > 0 {
+        println!(
+            "    跳过 {} 条悬空边（端点不在图谱里）——一条脏边不该让整次索引失败",
+            rep.dangling_edges
+        );
+    }
     if rep.skipped_same_result > 0 {
         println!(
             "    {} 个文件内容变了但解析结果没变——图没重写（早期截断）",
@@ -689,6 +695,7 @@ fn truncate(s: &str, max: usize) -> String {
 fn sites(store: &Store) -> std::collections::BTreeMap<String, i64> {
     jingwei_engine::graph::query::site_counts(store).unwrap_or_default()
 }
+
 
 
 

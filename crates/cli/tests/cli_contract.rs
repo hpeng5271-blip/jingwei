@@ -776,3 +776,49 @@ fn index_后知识层自动重建() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **泛型容器的方法：说"查不了"时要补一句"不等于没人用"**（2026-10-21）。
+///
+/// 接收者类型是 `Type<..>` 时，调用点写的是 `x.m()` 而 `x` 的类型推不出来——
+/// 那类调用静态连就是猜。不解释的话，用户会把"查不了"读成"这个方法没人调用"。
+#[test]
+fn explain_泛型方法会解释查不了的含义() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("explain-generic");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("src/a.rs"),
+        "pub struct G<T> { pub x: T }\nimpl<T> G<T> {\n    pub fn m(&self) {}\n}\npub struct P;\nimpl P {\n    pub fn m(&self) {}\n}\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let idx = run(&["index", "--root", &p]);
+    assert_eq!(code(&idx), 0, "索引应成功：{}", stdout(&idx));
+
+    // 泛型容器：应带那句解释。
+    let g = run(&[
+        "explain",
+        "symbol:src/a.rs#G<T>::m",
+        "--root",
+        &p,
+    ]);
+    let gtext = stdout(&g);
+    assert!(
+        gtext.contains("不等于「没人用」"),
+        "泛型方法应解释'查不了'的含义，实际：{gtext}"
+    );
+
+    // 具体类型：不该多这句（否则这句话就失去信息量）。
+    let s = run(&["explain", "symbol:src/a.rs#P::m", "--root", &p]);
+    let stext = stdout(&s);
+    assert!(
+        !stext.contains("不等于「没人用」"),
+        "具体类型不该带这句解释，实际：{stext}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

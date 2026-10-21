@@ -1,4 +1,4 @@
-//! `jingwei explain <名字|symbol:id>`（2026-10-20）：一个符号**到底是什么**。
+﻿//! `jingwei explain <名字|symbol:id>`（2026-10-20）：一个符号**到底是什么**。
 //!
 //! 为什么要它：图谱页能看到形状，但"这个函数是谁在调、被谁引用"以前只能靠编辑器
 //! 的 LSP 或翻 SQL。理解层的第一个动词应该是"解释"，不是"看图"。
@@ -87,6 +87,14 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
     println!("被引用：{} 个符号 / {} 个引用点", ex.refs, ex.references.len());
     if ex.calls == 0 && ex.refs == 0 {
         println!("判定依据：查不了（这个符号在库里没有任何边；可能没解析到，也可能真没人用）");
+        // **别把"静态连不准"读成"没人用"**（2026-10-21）：接收者类型是泛型参数时，
+        // 调用点写的是 `x.m()` 而 `x` 的类型推不出来；那类调用**静态连就是猜**，宁可不连。
+        // 不解释的话，用户会以为这个方法真的没人调用。
+        if id.contains('<') {
+            println!(
+                "  注：这个符号的类型带泛型参数（`Type<..>::m`）——它的调用方多半是泛型派发，静态连不准；说「查不了」不等于「没人用」"
+            );
+        }
     } else {
         println!("判定依据：图谱的 calls {} / references {} 条边（可用 jingwei graph stats 复核）", ex.calls, ex.refs);
     }
@@ -157,3 +165,4 @@ fn knowledge_names(store: &Store, symbol_id: &str) -> Vec<String> {
     });
     claims.into_iter().map(|c| short_name(&c.id)).collect()
 }
+

@@ -382,7 +382,7 @@ async function edOpen(path) {
     t.disabled = !o.readable;
     t.placeholder = o.readable ? '改动先留在内存里，点「应用」才写回磁盘。' : (o.note || '这个文件不能编辑');
     $('#edPath').textContent = path;
-    ['#btnEdApply', '#btnEdMore', '#btnEdBuild', '#btnEdTest', '#btnEdRun']
+    ['#btnEdApply', '#btnEdMore', '#btnEdBuild', '#btnEdTest', '#btnEdRun', '#btnEdRename']
       .forEach((s) => { const el = $(s); if (el) el.disabled = !o.readable; });
     edPaintGutter();
     edPaintStat();
@@ -784,3 +784,101 @@ function paintProjectBanners() {
 }
 
 
+
+// **改名清单**（2026-10-22）：改名前先把"将改哪几处"摆出来，确认后再写。
+//
+// 判据全在 CLI：`rename --json` 给 state/summary/plan（判不准时 state=no、整次拒绝）。
+// 界面只负责把 plan 摆出来并让人点一下——**不自己算能改几处**。
+function edRenameOpen() {
+  const box = document.getElementById('edRenameBox');
+  if (!box) return;
+  box.hidden = !box.hidden;
+  if (box.hidden) return;
+  const t = document.getElementById('edText');
+  const old = document.getElementById('edRnOld');
+  if (t && old && !old.value) {
+    const v = t.value || '';
+    const a = t.selectionStart || 0;
+    const b = t.selectionEnd || 0;
+    const sel = b > a ? v.slice(a, b) : '';
+    const word = /[A-Za-z_][A-Za-z0-9_]*/.exec(v.slice(Math.max(0, a - 40), a + 40)) || [];
+    old.value = (sel || word[0] || '').trim();
+  }
+  const list = document.getElementById('edRnList');
+  if (list && !list.dataset.kept) list.innerHTML = '';
+}
+
+function edRnFail(msg) {
+  const m = document.getElementById('edRnMsg');
+  if (m) m.textContent = msg;
+  const apply = document.getElementById('edRnApply');
+  if (apply) apply.hidden = true;
+}
+
+async function edRenamePreview() {
+  const old = (document.getElementById('edRnOld').value || '').trim();
+  const to = (document.getElementById('edRnNew').value || '').trim();
+  if (!old || !to) {
+    toast('旧名和新名都要填', true);
+    return;
+  }
+  try {
+    const v = await invoke('cli_json', { root: S.root, args: ['rename', old, '--to', to] });
+    const plan = (v && v.plan) || {};
+    const edits = plan.edits || [];
+    const amb = plan.ambiguous || [];
+    const list = document.getElementById('edRnList');
+    if (v && v.state !== 'yes') {
+      edRnFail((v && v.summary) || '这次改不了');
+      if (list) list.innerHTML = '';
+      return;
+    }
+    edRnFail(v.summary || '');
+    if (list) {
+      list.dataset.kept = '1';
+      list.innerHTML = edits.map((e) =>
+        '<div class="ed-rn-row">' + esc(e.file) + ':' + e.line + ':' + e.col
+        + ' <i>' + esc(e.old) + ' → ' + esc(e.new) + '</i></div>').join('')
+        + (amb.length
+          ? '<div class="ed-rn-row warn">' + amb.length + ' 处判不准（整次不会改）</div>'
+          : '');
+    }
+    const apply = document.getElementById('edRnApply');
+    if (apply) apply.hidden = edits.length === 0 || amb.length > 0;
+    ED.renamePlan = { old, to };
+  } catch (e) {
+    edRnFail('预演失败：' + (e && e.message ? e.message : e));
+  }
+}
+
+async function edRenameApply() {
+  const p = ED.renamePlan;
+  if (!p) {
+    toast('先看一次清单', true);
+    return;
+  }
+  try {
+    const v = await invoke('cli_json', {
+      root: S.root,
+      args: ['rename', p.old, '--to', p.to, '--write'],
+    });
+    if (v && v.state === 'yes') {
+      toast((v.summary || '改完了') + '；回读通过才算数');
+      if (typeof edLoadFiles === 'function') edLoadFiles();
+      const m = document.getElementById('edRnMsg');
+      if (m) m.textContent = v.summary || '';
+    } else {
+      toast((v && v.summary) || '没改成', true);
+    }
+  } catch (e) {
+    toast('没改成：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t || !t.closest) return;
+  if (t.closest('#btnEdRename')) { e.preventDefault(); edRenameOpen(); return; }
+  if (t.closest('#edRnPreview')) { e.preventDefault(); edRenamePreview(); return; }
+  if (t.closest('#edRnApply')) { e.preventDefault(); edRenameApply(); }
+});

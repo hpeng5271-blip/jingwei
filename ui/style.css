@@ -1999,3 +1999,12 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 
 /* 终端里的「允许 24 小时」条（2026-10-22）。 */
 .term-allow { display: flex; align-items: center; gap: 6px; }
+
+/* 改名清单（2026-10-22）：一条一行，判不准用黄字提醒。 */
+.ed-rename { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px;
+  border-top: 1px solid rgba(127,127,127,0.22); font-size: 12px; }
+.ed-rename input { width: 120px; }
+.ed-rn-list { flex-basis: 100%; max-height: 120px; overflow: auto; }
+.ed-rn-row { padding: 1px 0; opacity: 0.85; }
+.ed-rn-row i { opacity: 0.7; font-style: normal; }
+.ed-rn-row.warn { color: #d8a13a; }

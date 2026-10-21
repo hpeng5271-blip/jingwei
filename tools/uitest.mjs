@@ -70,6 +70,19 @@ function stubTauri() {
           case 'cli_json': {
             // **net 的桩**（2026-10-22）：status 给一条临时允许；allow/deny 记账后返回成功。
             const na = (args && args.args) || [];
+            if (na[0] === 'rename') {
+              // rename 的桩：给两份 plan，--write 时返回 done。
+              globalThis.__rnCalls = globalThis.__rnCalls || [];
+              globalThis.__rnCalls.push(na.join(' '));
+              if (na.includes('--write')) {
+                return { state: 'yes', summary: '已改 2 处并回读通过', plan: { edits: [] } };
+              }
+              return { state: 'yes', summary: '预演：将改 2 处（1 个文件）',
+                plan: { edits: [
+                  { file: 'src/a.rs', line: 3, col: 9, old: 'greet', new: 'welcome' },
+                  { file: 'src/a.rs', line: 5, col: 14, old: 'greet', new: 'welcome' },
+                ], ambiguous: [] } };
+            }
             if (na[0] === 'net') {
               globalThis.__netCalls = globalThis.__netCalls || [];
               globalThis.__netCalls.push(na.slice(1).join(' '));
@@ -559,6 +572,23 @@ try {
     return { before, label: after ? after.textContent : '', calls: globalThis.__netCalls || [] };
   });
   check('终端里网络被拒时给可点的允许按钮', ta.before === true, JSON.stringify(ta));
+  // 改名清单（2026-10-22）：预演摆出逐处改动，确认后才 --write。
+  const rn = await page.evaluate(async () => {
+    globalThis.__rnCalls = [];
+    const box = document.getElementById('edRenameBox');
+    box.hidden = false;
+    document.getElementById('edRnOld').value = 'greet';
+    document.getElementById('edRnNew').value = 'welcome';
+    await edRenamePreview();
+    const rows = Array.from(document.querySelectorAll('#edRnList .ed-rn-row')).map((r) => r.textContent.trim());
+    const apply = document.getElementById('edRnApply');
+    const applyVisible = apply && !apply.hidden;
+    if (applyVisible) apply.click();
+    await new Promise((r) => setTimeout(r, 200));
+    return { rows, applyVisible, calls: globalThis.__rnCalls || [] };
+  });
+  check('改名：先看清单再改（逐处列出）', rn.rows.length === 2 && /src\/a\.rs:3:9/.test(rn.rows[0]), JSON.stringify(rn.rows));
+  check('改名：确认后才带 --write', rn.applyVisible === true && rn.calls.some((c) => c.includes('--write')), JSON.stringify(rn.calls));
   check('点它就真的调了 net allow', ta.calls.some((c) => c.startsWith('allow evil.example')), JSON.stringify(ta.calls));
   check('编辑器：标记分得出 error 与 warn', gd.lv === 'error,warn', gd.lv);
   check('编辑器：点标记跳到那一行', gd.lncol.includes('第 2 行'), gd.lncol);

@@ -365,7 +365,15 @@
   <!-- ───── 笔记 ───── -->
   <!-- ───── 编辑器（工作副本：改了先不落盘）───── -->
   <section id="view-editor" class="view">
-    <div class="ed-wrap">
+            <div id="edRenameBox" class="ed-rename" hidden>
+          <label>旧名 <input id="edRnOld" size="14" placeholder="符号名"></label>
+          <label>新名 <input id="edRnNew" size="14" placeholder="改成什么"></label>
+          <button class="btn ghost sm" id="edRnPreview">先看清单</button>
+          <button class="btn sm" id="edRnApply" hidden>按清单改</button>
+          <span id="edRnMsg" class="hint"></span>
+          <div id="edRnList" class="ed-rn-list"></div>
+        </div>
+<div class="ed-wrap">
       <div class="ed-side">
         <div class="ed-tools">
           <input id="edFilter" placeholder="筛选文件…">
@@ -379,6 +387,7 @@
           <b id="edPath">还没有打开文件</b>
           <span class="dirty" id="edDirty" hidden>未应用</span>
           <span class="grow"></span>
+          <button class="btn ghost sm" id="btnEdRename" disabled title="改名前先看清单">改名</button>
           <button class="btn sm" id="btnEdApply" disabled><svg class="ic"><use href="#i-check"/></svg>应用</button>
           <button class="btn ghost sm" id="btnEdMore" disabled title="版本与格式">更多 ▾</button>
           <span class="sep"></span>

@@ -1,4 +1,4 @@
-//! jingwei 命令行外壳：所有逻辑都在 engine 里，这里只负责排版和参数。
+﻿//! jingwei 命令行外壳：所有逻辑都在 engine 里，这里只负责排版和参数。
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -153,6 +153,8 @@ fn run() -> i32 {
             "--deep" => deep = true,
             // **knowledge verify 用**：允许在脏工作区跑（会检测命令有没有动工作区）
             "--allow-dirty" => rest.push("--allow-dirty".to_string()),
+            // **impact --file 用**：按文件问影响面
+            "--file" => rest.push("--file".to_string()),
             // **harvest --from-git 用**：从提交记录发现候选（顶层 `--git` 是另一个开关，别混）
             "--from-git" => rest.push("--from-git".to_string()),
             "--all" => show_all = true,
@@ -969,4 +971,5 @@ mod tests {
         );
     }
 }
+
 

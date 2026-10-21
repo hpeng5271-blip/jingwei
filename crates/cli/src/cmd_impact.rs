@@ -93,7 +93,7 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
         return 0;
     }
 
-    println!("改动影响面：{key}（往上游看 {depth} 层，只看静态 calls 边）");
+    println!("改动影响面：{key}（往上游看 {depth} 层，只看静态 calls 边；同层按被调用次数降序）");
     if total == 0 {
         println!(
             "  查不了：静态 calls 边里没有谁调用它——可能是入口/回调/死代码，也可能调用关系是动态的"
@@ -102,7 +102,7 @@ pub fn cmd_impact(root: &Path, rest: &[String], json: bool) -> i32 {
         print_known(&store, std::slice::from_ref(&key));
         return 0;
     }
-    print_layers(&by_depth);
+    print_layers(&store, &by_depth);
     let mut all_ids: Vec<String> = vec![key.clone()];
     for ids in by_depth.values() {
         all_ids.extend(ids.iter().cloned());
@@ -147,12 +147,30 @@ fn file_mode(store: &Store, raw: &str, depth: usize, json: bool) -> i32 {
         .into_iter()
         .partition(|(id, _)| id.starts_with(&format!("symbol:{rel}#")));
 
+    // **排序**（2026-10-21，规则可复跑）：层数近的在前；同层按"被多少人调用"降序
+    // （全局 calls 入边数——被调得越多，改它越容易伤到别处）；再同名。
+    let mut ranked: Vec<(String, usize, usize)> = other
+        .iter()
+        .map(|(id, d)| {
+            let indeg = store
+                .neighbors(id, EdgeKind::Calls, Dir::In)
+                .map(|v| v.len())
+                .unwrap_or(0);
+            (id.clone(), *d, indeg)
+        })
+        .collect();
+    ranked.sort_by(|a, b| a.1.cmp(&b.1).then(b.2.cmp(&a.2)).then_with(|| a.0.cmp(&b.0)));
+
     if json {
+        let v: Vec<_> = ranked
+            .iter()
+            .map(|(id, d, indeg)| serde_json::json!({"symbol": id, "depth": d, "in_degree": indeg}))
+            .collect();
         println!(
             "{}",
             serde_json::json!({
                 "file": rel, "symbols": symbols.len(),
-                "affected": other.len(), "same_file": same_file.len(),
+                "affected": v, "same_file": same_file.len(),
             })
         );
         return 0;
@@ -164,15 +182,16 @@ fn file_mode(store: &Store, raw: &str, depth: usize, json: bool) -> i32 {
         other.len(),
         same_file.len()
     );
-    if !other.is_empty() {
+    if !ranked.is_empty() {
+        println!("  先看谁（排序：层数近的在前，同层按被调用次数降序）：");
         let mut files: BTreeSet<String> = BTreeSet::new();
-        for (id, _) in other.iter().take(8) {
+        for (id, d, indeg) in ranked.iter().take(8) {
             let (f, name) = split_id(id);
             files.insert(f.clone());
-            println!("    {name}（{f}）");
+            println!("    第 {d} 层 · 被 {indeg} 处调用　{name}（{f}）");
         }
-        if other.len() > 8 {
-            println!("    …等 {} 个", other.len());
+        if ranked.len() > 8 {
+            println!("    …等 {} 个", ranked.len());
         }
         println!("  牵动文件 {} 个：", files.len());
         for f in files.iter().take(8) {
@@ -216,12 +235,24 @@ fn upstream(store: &Store, key: &str, depth: usize) -> BTreeMap<usize, Vec<Strin
     by_depth
 }
 
-fn print_layers(by_depth: &BTreeMap<usize, Vec<String>>) {
+fn print_layers(store: &Store, by_depth: &BTreeMap<usize, Vec<String>>) {
     for (d, ids) in by_depth {
+        // 同层内按"被多少人调用"降序（规则与文件模式一致）：被调得越多，改它越容易伤到别处
+        let mut ranked: Vec<(&String, usize)> = ids
+            .iter()
+            .map(|id| {
+                let indeg = store
+                    .neighbors(id, EdgeKind::Calls, Dir::In)
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                (id, indeg)
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
         println!("  第 {d} 层（{} 个）:", ids.len());
-        for id in ids.iter().take(6) {
+        for (id, indeg) in ranked.iter().take(6) {
             let (file, name) = split_id(id);
-            println!("    {name}（{file}）");
+            println!("    被 {indeg} 处调用　{name}（{file}）");
         }
         if ids.len() > 6 {
             println!("    …等 {} 个", ids.len());
@@ -267,4 +298,6 @@ fn split_id(id: &str) -> (String, String) {
         None => (rest.to_string(), rest.to_string()),
     }
 }
+
+
 

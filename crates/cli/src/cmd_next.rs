@@ -61,6 +61,19 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
         .iter()
         .filter(|e| e.symbols.is_empty() && crate::cmd_knowledge::why_rejected(root, e).is_none())
         .count();
+    // 分级提醒：一手不到一半时，说明大半结论是转写/二手——学的时候要打折。
+    let mut passed = 0usize;
+    let mut first_hand = 0usize;
+    for e in &entries {
+        if crate::cmd_knowledge::why_rejected(root, e).is_some() {
+            continue;
+        }
+        passed += 1;
+        if e.fields.get("level").map(|l| l == "一手").unwrap_or(false) {
+            first_hand += 1;
+        }
+    }
+    let weak = passed > 0 && first_hand * 2 < passed;
 
     if json {
         println!(
@@ -91,6 +104,11 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
     }
     if unmapped > 0 {
         println!("  挂　文本态 {unmapped} 条没挂符号（只能按主题学，不能按符号反查）");
+    }
+    if weak {
+        println!(
+            "  弱　一手 {first_hand}/{passed} 不到一半：转写/二手的结论当「线索」看，别当判据（jingwei knowledge check 看分级）"
+        );
     }
     if stale == 0 && inbox == 0 && unmapped == 0 {
         println!("  干净：没有待回收、没有待确认、没有文本态");

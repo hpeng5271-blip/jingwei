@@ -1,4 +1,4 @@
-//! `jingwei knowledge check`：**知识条目的严筛**——双头漏斗最细的那道颈（2026-10-20，pro 任务卡 A）。
+﻿//! `jingwei knowledge check`：**知识条目的严筛**——双头漏斗最细的那道颈（2026-10-20，pro 任务卡 A）。
 //!
 //! 为什么要有它：采集与二次编制如果只靠文档自觉，条目会越写越像"感觉"，
 //! 而这道颈的判据只有一句话：**没有来源、没有等级、没有判据的条目，不算过筛**；
@@ -48,6 +48,9 @@ pub struct Report {
     pub gaps: Vec<String>,
     /// **文本态**：过筛了但没挂任何符号（按符号遍历不到）。只列名字，不算红。
     pub unmapped: Vec<String>,
+    /// 等级分布（按过筛条目数）：一手 / 转写 / 二手 / 查不了。
+    /// 这是"过滤分级"本身的可见性——只报"过筛 16"看不出这 16 条有多硬。
+    pub levels: std::collections::BTreeMap<String, usize>,
     pub no_graph: bool,
     /// 待确认区（`_inbox/`）的候选数——**不计入 total**（候选不是条目）。
     pub inbox: usize,
@@ -309,6 +312,10 @@ pub fn evaluate(root: &Path, store: Option<&Store>) -> Report {
             continue;
         }
         r.passed += 1;
+        // 等级分布：只统计**过筛**的条目（红的不算进"分级"里，免得把没资格的分级也算进来）
+        if let Some(lv) = e.fields.get("level") {
+            *r.levels.entry(lv.clone()).or_insert(0) += 1;
+        }
 
         if e.symbols.is_empty() {
             // **文本态**（没挂符号）的要能看见名字，不能只看到一个数字：
@@ -613,7 +620,7 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
             "total": r.total, "passed": r.passed, "linked": r.linked,
             "problems": r.problems, "gaps": r.gaps, "no_graph": r.no_graph,
             "inbox": r.inbox, "bad_candidates": r.bad_candidates,
-            "unmapped": r.unmapped,
+            "unmapped": r.unmapped, "levels": r.levels,
         });
         println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
     } else {
@@ -645,6 +652,35 @@ pub fn cmd_knowledge(root: &Path, rest: &[String], json: bool) -> i32 {
         }
         if r.total == 0 {
             println!("  · docs/knowledge/ 里还没有条目（先写一条再跑）");
+        }
+        if r.passed > 0 {
+            // **过滤分级本身**（2026-10-21）：只报"过筛 16"看不出这 16 条有多硬。
+            let order = ["一手", "转写", "二手", "查不了"];
+            let parts: Vec<String> = order
+                .iter()
+                .filter_map(|lv| {
+                    r.levels
+                        .get(*lv)
+                        .map(|n| format!("{lv} {n}"))
+                })
+                .collect();
+            let other: usize = r
+                .levels
+                .iter()
+                .filter(|(k, _)| !order.contains(&k.as_str()))
+                .map(|(_, v)| *v)
+                .sum();
+            let more = if other > 0 {
+                format!(" / 其它 {other}")
+            } else {
+                String::new()
+            };
+            println!("  · 等级（过筛 {} 条）：{}{more}", r.passed, parts.join(" / "));
+            // 硬判据：一手占比低的主题，学的时候要打折——只提示，不置红。
+            let first_hand = r.levels.get("一手").copied().unwrap_or(0);
+            if first_hand * 2 < r.passed {
+                println!("  · 一手不到一半：转写/二手的结论当「线索」看，别当判据");
+            }
         }
         if r.inbox > 0 || !r.bad_candidates.is_empty() {
             println!(
@@ -884,3 +920,4 @@ mod tests {
         _ = std::fs::remove_dir_all(&root);
     }
 }
+

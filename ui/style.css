@@ -2021,3 +2021,15 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 /* 错误角标（2026-10-22）：有 error 才亮，红底白字。 */
 .task-icons .ti-err { background: rgba(200,40,40,0.9); color: #fff; font-weight: 600; cursor: pointer; }
 .task-icons .ti-err[hidden] { display: none; }
+
+/* 消息阵列（2026-10-22）：一条一个 key，右边 ×N 与归档。 */
+.msg-feed { padding: 0 10px; }
+.msg-feed:empty { display: none; }
+.msg-head { display: flex; gap: 8px; font-size: 12px; opacity: 0.8; margin: 2px 0 4px; }
+.msg-clear { margin-left: auto; cursor: pointer; text-decoration: underline; }
+.msg-row { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+.msg-row[data-lv="error"] .msg-t { color: #ff9a9a; }
+.msg-row[data-lv="status"] .msg-t { color: #9ad1ff; }
+.msg-n { opacity: 0.7; }
+.msg-x { margin-left: auto; cursor: pointer; opacity: 0.6; }
+.msg-x:hover { opacity: 1; color: #ff8a8a; }

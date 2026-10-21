@@ -25,3 +25,54 @@ pub(crate) fn notify_gate(last_at: Option<i64>, now: i64, freq: f64, repeats: u3
     };
     json!({ "allow": allow, "silence": silence, "why": why })
 }
+
+// ── 消息阵列（2026-10-22）────────────────────────────────────────────────
+//
+// **判据仍在引擎**（去重键、计数、New→Shown→Read→Archived）；这里只持有那份状态，
+// 让界面能"记一条 / 标记已读 / 归档"而不用把生命周期逻辑抄到 JS 里（失效模式 #17）。
+
+use std::sync::{Mutex, OnceLock};
+
+fn msgs() -> &'static Mutex<Vec<jingwei_engine::understand::notify::Message>> {
+    static M: OnceLock<Mutex<Vec<jingwei_engine::understand::notify::Message>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn level_of(s: &str) -> jingwei_engine::understand::notify::Level {
+    use jingwei_engine::understand::notify::Level;
+    match s {
+        "error" => Level::Error,
+        "status" => Level::Status,
+        "progress" => Level::Progress,
+        _ => Level::Info,
+    }
+}
+
+/// 记一条消息（同 key 只占一槽并计数），返回当前整张表。
+#[tauri::command]
+pub(crate) fn msg_ingest(key: String, level: String, text: String, at: i64) -> Value {
+    let mut g = msgs().lock().unwrap_or_else(|e| e.into_inner());
+    jingwei_engine::understand::notify::ingest(&mut g, &key, level_of(&level), &text, at);
+    json!(g.iter().map(|m| json!({
+        "key": m.key, "level": format!("{:?}", m.level).to_lowercase(), "text": m.text,
+        "count": m.count, "state": format!("{:?}", m.state).to_lowercase(),
+        "first_at": m.first_at, "last_at": m.last_at,
+    })).collect::<Vec<_>>())
+}
+
+/// 标记状态；非法转移返回 Err（界面据此提示，而不是悄悄当成成功）。
+#[tauri::command]
+pub(crate) fn msg_mark(key: String, to: String) -> Result<Value, String> {
+    use jingwei_engine::understand::notify::MsgState;
+    let target = match to.as_str() {
+        "shown" => MsgState::Shown,
+        "read" => MsgState::Read,
+        "archived" => MsgState::Archived,
+        _ => MsgState::New,
+    };
+    let mut g = msgs().lock().unwrap_or_else(|e| e.into_inner());
+    jingwei_engine::understand::notify::mark(&mut g, &key, target)?;
+    Ok(json!(g.iter().map(|m| json!({
+        "key": m.key, "count": m.count, "state": format!("{:?}", m.state).to_lowercase(),
+    })).collect::<Vec<_>>()))
+}

@@ -292,6 +292,12 @@ async function runCheck() {
     dockProblems(S.data || {});
     // 检查结果一出来就挂到行号上（编辑器开着同一个文件时用户能立刻看到）。
     if (typeof edPaintGutter === 'function' && ED && ED.path) edPaintGutter(true);
+    const errCount = (DOCK.diags || []).filter((d) => d.level === 'error').length;
+    const warnCount = (DOCK.diags || []).filter((d) => d.level !== 'error').length;
+    if (typeof msgIngest === 'function') {
+      msgIngest('check:' + (S.root || ''), errCount ? 'error' : 'status',
+        '检查：' + (errCount + warnCount) + ' 处（error ' + errCount + ' / warn ' + warnCount + '）');
+    }
     const errs = list.filter((d) => d.level === 'error').length;
     feedback(list.length ? (errs ? 'block' : 'warn') : 'info',
       list.length ? '检查出 ' + list.length + ' 条（' + errs + ' 个错误）' : '编译检查干净',
@@ -399,6 +405,7 @@ function termLine(text, kind) {
     bar.innerHTML = '<button class="btn sm" data-allow-host="' + esc(host) + '">允许 ' + esc(host) + ' 24 小时</button>'
       + '<span class="hint" style="margin-left:6px">只对这台机器、最多 24 小时；随时能在设置里收回。</span>';
     out.appendChild(bar);
+    if (typeof msgIngest === 'function') msgIngest('net:' + host, 'error', '网络被拒：' + host + '（不在白名单）');
   }
   out.parentElement.scrollTop = out.parentElement.scrollHeight;
 }
@@ -1284,6 +1291,10 @@ async function doRun(kind) {
     // 你手动点过「运行」= 你为这个项目点过头。之后它才允许自动试运行。
     if (kind === 'run') trust(S.root);
     if (kind === 'test') mergeTestLocs();
+    if (kind === 'test' && typeof msgIngest === 'function') {
+      msgIngest('test:' + (S.root || ''), out.exit_code === 0 ? 'status' : 'error',
+        '测试：' + (out.exit_code === 0 ? '通过' : '失败（退出码 ' + out.exit_code + '）'));
+    }
     paintPipeline(kind, out.exit_code === 0 ? 'done' : 'fail');
     bandFinish(out, null);
     if (kind !== 'run') { await load(S.root); return; }
@@ -1419,4 +1430,55 @@ document.addEventListener('click', (e) => {
   if (!a) return;
   e.preventDefault();
   gotoDiag(a.dataset.jumpFile, parseInt(a.dataset.jumpLine, 10) || 1, 1);
+});
+
+// **消息阵列**（2026-10-22）：最近发生过什么，一条一个 key、显示 ×N。
+//
+// 去重计数与状态（New→Shown→Read→Archived）**都在引擎**（`engine::understand::notify`），
+// 界面只调 `msg_ingest` / `msg_mark`——不在这里抄第二份生命周期（失效模式 #17）。
+function msgFeedHtml(list) {
+  const rows = (list || []).filter((m) => m.state !== 'archived');
+  if (!rows.length) return '';
+  const rank = { error: 0, status: 1, info: 2, progress: 3 };
+  rows.sort((a, b) => (rank[a.level] ?? 9) - (rank[b.level] ?? 9) || b.count - a.count);
+  return '<div class="msg-head">最近 <b>' + rows.length + '</b> 条'
+    + '<span class="msg-clear" data-msg-archive-all="1">全部归档</span></div>'
+    + rows.slice(0, 8).map((m) =>
+      '<div class="msg-row" data-lv="' + esc(m.level) + '">'
+      + '<span class="msg-t">' + esc(m.text) + '</span>'
+      + (m.count > 1 ? '<span class="msg-n">×' + m.count + '</span>' : '')
+      + '<span class="msg-x" data-msg-archive="' + esc(m.key) + '" title="归档">×</span></div>').join('');
+}
+
+async function msgIngest(key, level, text) {
+  try {
+    const list = await invoke('msg_ingest', { key, level, text, at: Math.floor(Date.now() / 1000) });
+    const box = document.getElementById('msgFeed');
+    if (box) box.innerHTML = msgFeedHtml(list);
+    return list;
+  } catch (e) {
+    /* 消息阵列坏了不该拖累主流程：静默即可 */
+    return null;
+  }
+}
+
+async function msgArchive(key) {
+  try {
+    await invoke('msg_mark', { key, to: 'archived' });
+    const el = document.querySelector('#msgFeed');
+    if (el) el.innerHTML = '';
+    // 归档后重新拉一遍太贵；直接把这一行移除，其他行保持。
+  } catch (e) {
+    toast('归档失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t || !t.closest) return;
+  const a = t.closest('[data-msg-archive]');
+  if (a) {
+    e.preventDefault();
+    msgArchive(a.dataset.msgArchive);
+  }
 });

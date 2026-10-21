@@ -948,6 +948,8 @@ fn main() {
             cli::cli_json,
             tasks::tasks_state,
             notify::notify_gate,
+            notify::msg_ingest,
+            notify::msg_mark,
             initial_project,
             scan::scan_start,
             scan::scan_status,

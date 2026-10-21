@@ -67,6 +67,22 @@ function stubTauri() {
               index: { id: 'x', state: 'running', name: 'jingwei index', started_at: 1, ended_at: null, detail: '正在索引' },
               env: { id: 'y', state: 'done', name: '环境探测', started_at: 1, ended_at: 2, detail: '探到 3 项' },
             } };
+          case 'msg_ingest': {
+            // 引擎语义的简化版：同 key 只占一槽并计数（真实去重在引擎里）。
+            globalThis.__msgs = globalThis.__msgs || [];
+            const k = args.key;
+            const hit = globalThis.__msgs.find((x) => x.key === k);
+            if (hit) { hit.count++; hit.text = args.text; }
+            else globalThis.__msgs.push({ key: k, level: args.level, text: args.text, count: 1, state: 'new' });
+            return globalThis.__msgs.map((x) => ({ ...x }));
+          }
+          case 'msg_mark': {
+            globalThis.__msgs = globalThis.__msgs || [];
+            const hit = globalThis.__msgs.find((x) => x.key === args.key);
+            if (!hit) throw new Error('没有这条消息：' + args.key);
+            hit.state = args.to;
+            return globalThis.__msgs.map((x) => ({ ...x }));
+          }
           case 'cli_json': {
             // **net 的桩**（2026-10-22）：status 给一条临时允许；allow/deny 记账后返回成功。
             const na = (args && args.args) || [];
@@ -654,6 +670,25 @@ try {
     return { shown, txt, opened, hiddenAfter };
   });
   check('错误角标：有 error 才亮并显示数量', eb.shown === true && eb.txt === '2', JSON.stringify(eb));
+  // 消息阵列（2026-10-22）：同 key 只占一槽并计数；归档走引擎判据。
+  const mf = await page.evaluate(async () => {
+    globalThis.__msgs = [];
+    await msgIngest('net:evil.example', 'error', '网络被拒：evil.example（不在白名单）');
+    await msgIngest('net:evil.example', 'error', '网络被拒：evil.example（不在白名单）');
+    const box = document.getElementById('msgFeed');
+    const rows = Array.from(box.querySelectorAll('.msg-row'));
+    const txt = rows.map((r) => r.textContent.replace(/\s+/g, ' ').trim());
+    let marked = '';
+    try {
+      await msgArchive('net:evil.example');
+      marked = 'ok';
+    } catch (e) {
+      marked = String(e && e.message ? e.message : e);
+    }
+    return { n: rows.length, txt, marked, state: (globalThis.__msgs[0] || {}).state };
+  });
+  check('消息阵列：同 key 只占一槽并计数', mf.n === 1 && /×2/.test(mf.txt[0] || ''), JSON.stringify(mf));
+  check('消息阵列：归档走引擎判据（状态变成 archived）', mf.marked === 'ok' && mf.state === 'archived', JSON.stringify(mf));
   check('错误角标：点它打开问题栏，没 error 就收走', eb.opened === true && eb.hiddenAfter === true, JSON.stringify(eb));
   check('最近结果：error 时标红并给跳转', rl.sev === 'error' && rl.hasJump === true, JSON.stringify(rl));
   const tl2 = await page.evaluate(() => {

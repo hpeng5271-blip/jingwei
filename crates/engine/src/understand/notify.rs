@@ -7,9 +7,12 @@
 //! 4. 现在该不该提示（静音期内不重复，从没提示过就提示）。
 //!
 //! GUI 只消费结果：**判据在这里只有一份**，界面不另算一套。
+use serde::{Deserialize, Serialize};
+
 
 /// 消息的优先级（P0 最高）。与界面的"槽位预算"对齐：P0/P1 不许被挤掉。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Level {
     /// 阻塞/报错：必须看见，可抢占任何槽。
     Error,
@@ -22,7 +25,8 @@ pub enum Level {
 }
 
 /// 一条消息的生命周期。**只有一条合法链**。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MsgState {
     New,
     Shown,
@@ -31,7 +35,7 @@ pub enum MsgState {
 }
 
 /// 一条消息。`key` 是去重键（例如 `错误码:场景:项目`）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub key: String,
     pub level: Level,

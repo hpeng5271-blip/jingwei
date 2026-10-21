@@ -1568,3 +1568,22 @@ fn index_会留下真任务记录() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **装依赖先过网络闸门**：仓库不在白名单就**先拒后跑**，且带三字段。
+/// 用不存在的程序名做命令，测试里不会真的去连网（拒在启动之前）。
+#[test]
+fn 装依赖时名单外的仓库先拒后跑() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("net-gate");
+    let contract = r#"{"schema_version":1,"name":"demo","runtime":{},"deps":{},"commands":{"install":"jw-not-a-real-cmd install --registry https://evil.example/x"},"log_files":[],"manual":["install"]}"#;
+    std::fs::write(d.join("env.contract.json"), contract).unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["env", "install", "--root", &p]);
+    let s = stdout(&o);
+    assert_eq!(code(&o), 2, "名单外该先拒（退出码 2）：{s}");
+    assert!(s.contains("evil.example"), "要点名是哪个域名：{s}");
+    for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+        assert!(s.contains(k), "拒绝必须带三字段（缺 `{k}`）：{s}");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

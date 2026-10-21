@@ -374,6 +374,27 @@ pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -
     // **Node 项目不走这一段**：它的 test / dev / build 都写在 package.json 的
     // scripts 里，由 `launch` 那层去挑。在这里报"契约里没声明"是答非所问——
     // 一个 Vue 项目本来就不该有 env.contract.json。
+    // **网络闸门**（2026-10-21 第二轮）：装依赖会碰仓库。白名单（pypi / npm / crates / maven）之外
+    // 一律**先拒后跑**；允许只给本次会话 / 24 小时（见 sandbox_allow），可随时收回。
+    if let Some(cmd) = command.as_deref() {
+        let looks_install = cmd.contains(" install") || cmd.contains("--index-url") || cmd.contains("--registry");
+        if looks_install {
+            let allow = crate::sandbox_allow::allow_path();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if let Err(host) = crate::sandbox_allow::net_gate(&allow, cmd, now) {
+                println!();
+                println!(
+                    "  {} 暂无法探知：这条安装命令要访问 {host}，它不在白名单里｜缺：该仓库域名的允许｜为什么：网络默认拒绝，只放行包仓库（pypi / npm / crates / maven）｜怎么补：确认可信后把它加进允许表（24 小时），或去掉命令里的自定义仓库地址、改用默认源",
+                    c(RED, "✗")
+                );
+                println!();
+                return 2;
+            }
+        }
+    }
     let node_project = jingwei_engine::web::is_node_project(root);
     if command.is_none() && !node_project {
         println!();

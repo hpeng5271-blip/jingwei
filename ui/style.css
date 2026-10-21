@@ -1961,3 +1961,12 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .task-icons .ti[data-state="done"] { opacity: 1; }
 .task-icons .ti[data-state="failed"] { opacity: 1; background: rgba(200,40,40,0.85); color: #fff; }
 @keyframes ti-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+
+/* 更新窗（2026-10-21）：右下上方，一次一条，看过即收。 */
+.upd-panel { position: fixed; right: 14px; bottom: 52px; width: 260px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(30,30,30,0.92); color: #f2f2f2; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 41; }
+.upd-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 6px; }
+.upd-x { cursor: pointer; opacity: 0.75; font-weight: 400; }
+.upd-row { margin: 2px 0; }
+.upd-d { margin-left: 6px; color: #7ad17a; }
+.upd-why { margin-top: 6px; opacity: 0.6; line-height: 1.4; }

@@ -403,6 +403,26 @@ try {
 
   check('概览协议条：文件数 / 体积 / 生命周期都在', /文件/.test(st) && /体积/.test(st) && /生命周期/.test(st), st.slice(0, 160));
 
+  // 更新窗（2026-10-21）：有旧快照才弹；点"知道了"收起；同一次变化不重复弹。
+  await page.evaluate(() => {
+    const k = 'jw.seen.files.' + PS.sel;
+    localStorage.setItem(k, JSON.stringify({ files: 1, bytes: 1 }));
+  });
+  await page.evaluate(() => fillMetrics(PS.sel));
+  await new Promise((r) => setTimeout(r, 400));
+  const hasUpd = await page.evaluate(() => !!document.getElementById('updatePanel'));
+  check('更新窗：有旧快照时弹一次', hasUpd === true, String(hasUpd));
+  await page.evaluate(() => {
+    const x = document.querySelector('#updatePanel [data-close]');
+    if (x) x.click();
+  });
+  const goneUpd = await page.evaluate(() => !document.getElementById('updatePanel'));
+  check('更新窗：点知道了就收起', goneUpd === true, String(goneUpd));
+  await page.evaluate(() => fillMetrics(PS.sel));
+  await new Promise((r) => setTimeout(r, 400));
+  const againUpd = await page.evaluate(() => !document.getElementById('updatePanel'));
+  check('更新窗：同一次变化不重复弹', againUpd === true, String(againUpd));
+
   // 1.5 **两张卡必须说同一件事**（2026-10-16 加）。
   //
   //   这是拿真项目跑出来的：`#guideCard` 写「✗ 现在跑不起来 · 2 个依赖没装」，

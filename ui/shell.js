@@ -982,6 +982,40 @@ function lifeText(s) {
   };
   return m[s] || s || '判断不了';
 }
+// **更新窗**（2026-10-21）：项目变了才弹，**弹一次就记住**——不重复抢注意力。
+// 比对的两边都是真数：上次看到的手交三数字 vs 这次 handover 的三数字。
+function updateSeenKey(path) { return 'jw.seen.files.' + path; }
+
+function maybeUpdateWindow(path, metrics) {
+  if (!metrics || metrics.files == null) return;
+  const cur = { files: metrics.files, bytes: metrics.volume_bytes || 0 };
+  let prev = null;
+  try { prev = JSON.parse(localStorage.getItem(updateSeenKey(path)) || 'null'); } catch (_) { prev = null; }
+  if (prev && (prev.files !== cur.files || prev.bytes !== cur.bytes)) {
+    showUpdateWindow(path, prev, cur);
+  }
+  try { localStorage.setItem(updateSeenKey(path), JSON.stringify(cur)); } catch (_) {}
+}
+
+function showUpdateWindow(path, prev, cur) {
+  let box = document.getElementById('updatePanel');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'updatePanel';
+    box.className = 'upd-panel';
+    document.body.appendChild(box);
+  }
+  const dFiles = (cur.files || 0) - (prev.files || 0);
+  const sign = dFiles > 0 ? '+' + dFiles : String(dFiles);
+  box.innerHTML = '<div class="upd-head">项目有变化<span class="upd-x" data-close="1">知道了</span></div>'
+    + '<div class="upd-row">文件 <b>' + esc(String(prev.files)) + ' → ' + esc(String(cur.files)) + '</b>'
+    + '<span class="upd-d">' + esc(sign) + '</span></div>'
+    + '<div class="upd-row">体积 <b>' + esc(fmtBytes(prev.bytes)) + ' → ' + esc(fmtBytes(cur.bytes)) + '</b></div>'
+    + '<div class="upd-why">同一个项目，上一次看到的三数字和这次不一样；看过就收起，不重复弹。</div>';
+  const x = box.querySelector('[data-close]');
+  if (x) x.onclick = () => box.remove();
+}
+
 async function fillMetrics(root) {
   const el = document.getElementById('pdMetrics');
   if (!el) return;
@@ -990,6 +1024,7 @@ async function fillMetrics(root) {
     const m = (v && v.metrics) || {};
     const st = (v && v.state) || 'unknown';
     const life = (m.lifecycle && m.lifecycle.state) || 'unknown';
+    maybeUpdateWindow(root, m);
     el.innerHTML = '<span class="pm-pill pm-' + esc(st) + '">' + esc(stateText(st)) + '</span>'
       + '<span class="pm">文件 <b>' + (m.files == null ? '—' : esc(String(m.files))) + '</b></span>'
       + '<span class="pm">体积 <b>' + esc(fmtBytes(m.volume_bytes)) + '</b>'

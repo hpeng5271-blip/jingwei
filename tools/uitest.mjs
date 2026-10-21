@@ -602,6 +602,26 @@ try {
     return { present, before, after };
   });
   check('编辑器：有检查按钮', eck.present === true, JSON.stringify(eck));
+  // 测试失败定位（D-20261022-01）：认识的路径才标行，不认识的绝不猜。
+  const tl = await page.evaluate(() => {
+    const f = ED.path;
+    document.getElementById('edNums').innerHTML = '';
+    DOCK.diags = [];
+    DOCK.testLocs = [
+      { loc: testLocOf('  --> ' + f + ':2:5'), text: 'test_parse 失败' },
+      { loc: testLocOf('nope/missing.rs:99:1'), text: '未知文件的失败' },
+    ];
+    const n = mergeTestLocs();
+    edPaintGutter(true);
+    return { n, marks: document.querySelectorAll('#edNums .ed-diag').length };
+  });
+  check('测试失败定位：认识的路径标一行', tl.n === 1 && tl.marks === 1, JSON.stringify(tl));
+  const tl2 = await page.evaluate(() => {
+    DOCK.testLocs = [{ loc: testLocOf('nope/missing.rs:99:1'), text: '未知文件的失败' }];
+    const n = mergeTestLocs();
+    return { n, marks: document.querySelectorAll('#edNums .ed-diag').length };
+  });
+  check('测试失败定位：不认识的路径不标（不猜行号）', tl2.n === 0, JSON.stringify(tl2));
   check('编辑器：检查完行号上有标记', eck.before === 0 && eck.after > 0, JSON.stringify(eck));
   check('改名：确认后才带 --write', rn.applyVisible === true && rn.calls.some((c) => c.includes('--write')), JSON.stringify(rn.calls));
   check('点它就真的调了 net allow', ta.calls.some((c) => c.startsWith('allow evil.example')), JSON.stringify(ta.calls));

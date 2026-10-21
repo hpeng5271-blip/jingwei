@@ -76,7 +76,7 @@ async function load(root) {
 // 学 IDEA 的形状：报错、跑起来的东西、系统说的话，都在底部这一处，
 // 不在屏幕四角各飘各的。密度靠的是「一行一条 + 列对齐 + 等宽数字」，
 // 不是靠把字缩小。左边一列是清单，右边写清这一条「为什么、怎么自己验证」。
-const DOCK = { tab: 'problems', open: false, msgs: [], term: [], probs: [], filter: 'all' };
+const DOCK = { tab: 'problems', open: false, msgs: [], term: [], probs: [], filter: 'all', testLocs: [] };
 
 function dockSetTab(tab) {
   DOCK.tab = tab;
@@ -311,6 +311,43 @@ function dockMsg(level, title, detail) {
 }
 
 /// 终端：跑起来的输出都往这儿流。stderr 红、系统话灰、我们自己的阶段提示暖色。
+// **测试失败定位**（2026-10-22，见 docs/decisions/D-20261022-01）：
+// 只认 `path:line[:col]` 这种**能证明**的位置，并且路径要对得上项目里的真实文件；
+// 对不上就不标——宁可少一条标记，不许把人指到错的行。
+function testLocOf(text) {
+  const m = /([A-Za-z0-9_./\\-]+\.(?:rs|py|ts|tsx|js|jsx|go|java|kt|c|cc|cpp|h))[:：](\d+)(?::(\d+))?/.exec(text || '');
+  if (!m) return null;
+  return { file: m[1].replace(/\\/g, '/'), line: parseInt(m[2], 10) || 0, col: parseInt(m[3] || '1', 10) };
+}
+
+function knownProjectFile(file) {
+  const list = (ED && ED.files) || [];
+  const norm = String(file).replace(/\\/g, '/');
+  return list.some((f) => {
+    const s = String(f).replace(/\\/g, '/');
+    return s === norm || s.endsWith('/' + norm) || norm.endsWith('/' + s);
+  });
+}
+
+/// 把这一轮收集到的测试位置并进 DOCK.diags（覆盖上一轮测试的，编译器诊断不动）。
+function mergeTestLocs() {
+  const locs = DOCK.testLocs || [];
+  const keep = ((DOCK.diags || []).filter((d) => d.level && d.src === 'check'));
+  const seen = new Set();
+  const added = [];
+  for (const it of locs) {
+    if (!it || !it.loc || !knownProjectFile(it.loc.file)) continue;
+    const k = it.loc.file + ':' + it.loc.line;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    added.push({ level: 'error', file: it.loc.file, line: it.loc.line, col: it.loc.col,
+      message: it.text || '测试在这一行失败', src: 'test' });
+  }
+  DOCK.diags = keep.concat(added);
+  if (added.length && typeof edPaintGutter === 'function' && ED && ED.path) edPaintGutter(true);
+  return added.length;
+}
+
 function termLine(text, kind) {
   DOCK.term.push({ text, kind: kind || '' });
   if (DOCK.term.length > 4000) DOCK.term.splice(0, 1000);
@@ -1186,6 +1223,7 @@ async function doRun(kind) {
     .filter(Boolean);
   btns.forEach((b) => { b.disabled = true; });
   paintPipeline(kind, 'busy');
+  if (kind === 'test') DOCK.testLocs = [];   // 同一类结果互相覆盖（D-20261022-01）
   const plan = kind === 'run' ? PLAN_RUN : PLAN_TASK;
   const rec = { at: new Date().toISOString(), kind, command: '准备中…', exit_code: 0, stages: [], tail: [] };
   S.live = rec;
@@ -1215,6 +1253,7 @@ async function doRun(kind) {
     S.live = null;
     // 你手动点过「运行」= 你为这个项目点过头。之后它才允许自动试运行。
     if (kind === 'run') trust(S.root);
+    if (kind === 'test') mergeTestLocs();
     paintPipeline(kind, out.exit_code === 0 ? 'done' : 'fail');
     bandFinish(out, null);
     if (kind !== 'run') { await load(S.root); return; }
@@ -1264,6 +1303,10 @@ function applyEvent(ev) {
   } else if (ev.type === 'line') {
     if (rec.tail.length < 400) rec.tail.push(ev.text);
     termLine(ev.text, ev.source === 'stderr' ? 'e' : (ev.source === 'log' ? 'l' : ''));
+    if (rec.kind === 'test') {
+      const loc = testLocOf(ev.text);
+      if (loc) DOCK.testLocs.push({ loc, text: String(ev.text).trim() });
+    }
     streamLine(ev.text, ev.source);
     const c = card.querySelector('.console');
     const d = document.createElement('div');

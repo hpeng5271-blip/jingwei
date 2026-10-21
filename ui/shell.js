@@ -1066,3 +1066,32 @@ async function scanInit() {
   if (parent) await scanProjects(parent, depth);
 }
 
+
+// **角落任务角标**（2026-10-21）：只认真任务源（engine 的任务日志），不认假状态。
+// 没有任务源的种类显示"还没接"——不许假装空闲。
+async function renderTaskIcons() {
+  let box = document.getElementById('taskIcons');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'taskIcons';
+    box.className = 'task-icons';
+    box.innerHTML = '<span class="ti" data-kind="index" data-state="idle" title="索引">索</span>'
+      + '<span class="ti" data-kind="env" data-state="idle" title="环境探测">环</span>'
+      + '<span class="ti" data-kind="deep_graph" data-state="idle" title="深度绘制">绘</span>';
+    document.body.appendChild(box);
+  }
+  try {
+    const r = await invoke('tasks_state');
+    const latest = (r && r.latest) || {};
+    for (const el of box.querySelectorAll('.ti')) {
+      const k = el.dataset.kind;
+      const t = latest[k];
+      el.dataset.state = t ? (t.state || 'idle') : 'idle';
+      el.title = t ? (k + '：' + (t.detail || t.state)) : (k + '：还没接任务源');
+    }
+  } catch (e) {
+    /* 没有任务源不算错：图标保持 idle */
+  }
+}
+setInterval(renderTaskIcons, 3000);
+window.addEventListener('load', renderTaskIcons);

@@ -1,4 +1,4 @@
-﻿// 外壳不做决定，只做转接：所有判断都在 jingwei-engine 里。
+// 外壳不做决定，只做转接：所有判断都在 jingwei-engine 里。
 // 这里唯一的职责是把引擎的返回值摊平成前端好用的形状，外加把启动事件推出去。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -17,6 +17,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod payload;
 mod cli;
+mod tasks;
 use payload::{hygiene_value, inspect_payload};
 
 // 开发工具：`--report <路径>` 把界面状态写进文件（见模块头）。
@@ -944,6 +945,7 @@ fn main() {
             graph::graph_dump,
             graph::graph_runs,
             cli::cli_json,
+            tasks::tasks_state,
             initial_project,
             scan::scan_start,
             scan::scan_status,

@@ -1950,3 +1950,14 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .pd-metrics .pm-yes { color: #2e7d32; }
 .pd-metrics .pm-no { color: #b26a00; }
 .pd-metrics .pm-unknown { color: #6b6b6b; }
+
+/* 角落任务角标（2026-10-21）：运行中转、完成打勾、失败红点、没任务源灰。 */
+.task-icons { position: fixed; right: 14px; bottom: 14px; display: flex; gap: 8px; z-index: 40; }
+.task-icons .ti {
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; background: rgba(127,127,127,0.15); color: inherit; opacity: 0.65;
+}
+.task-icons .ti[data-state="running"] { opacity: 1; animation: ti-pulse 1.2s ease-in-out infinite; }
+.task-icons .ti[data-state="done"] { opacity: 1; }
+.task-icons .ti[data-state="failed"] { opacity: 1; background: rgba(200,40,40,0.85); color: #fff; }
+@keyframes ti-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }

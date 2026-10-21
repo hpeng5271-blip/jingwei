@@ -822,3 +822,41 @@ fn explain_泛型方法会解释查不了的含义() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`impact` 对泛型方法也要说清"查不了不等于没上游"**（2026-10-21，与 `explain` 同一句话）。
+///
+/// "0 个上游"最危险的读法是"改它很安全"。泛型派发的调用点静态连不准，所以这句话必须出现。
+#[test]
+fn impact_泛型方法会提醒不要当成没有上游() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("impact-generic");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("src/a.rs"),
+        "pub struct G<T> { pub x: T }\nimpl<T> G<T> {\n    pub fn m(&self) {}\n}\npub struct P;\nimpl P {\n    pub fn m(&self) {}\n}\n",
+    )
+    .unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let idx = run(&["index", "--root", &p]);
+    assert_eq!(code(&idx), 0, "索引应成功：{}", stdout(&idx));
+
+    let g = run(&["impact", "symbol:src/a.rs#G<T>::m", "--root", &p]);
+    let gtext = stdout(&g);
+    assert!(
+        gtext.contains("不等于「没有上游」"),
+        "泛型方法应提醒别当成没有上游，实际：{gtext}"
+    );
+
+    let s = run(&["impact", "symbol:src/a.rs#P::m", "--root", &p]);
+    let stext = stdout(&s);
+    assert!(
+        !stext.contains("不等于「没有上游」"),
+        "具体类型不该带这句提醒，实际：{stext}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

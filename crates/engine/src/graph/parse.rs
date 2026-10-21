@@ -1,4 +1,4 @@
-//! 把源码变成符号。M3 的落点。
+﻿//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -176,6 +176,63 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         }
     }
     let mut vars: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        // **`结构体.字段 → 类型`**（2026-10-21）：`self.field.m()` 要靠它。
+    // 只看本文件里 `struct S { f: T }` 这种**字面写着**的字段；别的一律不猜。
+    let mut fields: std::collections::BTreeMap<(String, String), String> =
+        std::collections::BTreeMap::new();
+    {
+        let mut c = root.walk();
+        let all: Vec<TsNode> = {
+            let mut stack = vec![root];
+            let mut v = Vec::new();
+            while let Some(n) = stack.pop() {
+                v.push(n);
+                let mut cc = n.walk();
+                for ch in n.children(&mut cc) {
+                    stack.push(ch);
+                }
+            }
+            v
+        };
+        let _ = &mut c;
+        for n in all {
+            if n.kind() != "struct_item" {
+                continue;
+            }
+            let Some(sname) = n
+                .child_by_field_name("name")
+                .and_then(|x| x.utf8_text(src.as_bytes()).ok())
+                .map(|s| s.trim().to_string())
+            else {
+                continue;
+            };
+            let Some(list) = n.child_by_field_name("body") else {
+                continue;
+            };
+            let mut lc = list.walk();
+            for f in list.children(&mut lc) {
+                if f.kind() != "field_declaration" {
+                    continue;
+                }
+                let (Some(fname), Some(fty)) = (
+                    f.child_by_field_name("name"),
+                    f.child_by_field_name("type"),
+                ) else {
+                    continue;
+                };
+                let (Ok(fname), Ok(fty)) = (
+                    fname.utf8_text(src.as_bytes()),
+                    fty.utf8_text(src.as_bytes()),
+                ) else {
+                    continue;
+                };
+                if let Some(t) = last_type_ident(fty) {
+                                        fields.insert((sname.clone(), fname.trim().to_string()), t);
+                    
+                }
+                                }
+        }
+    }
     collect_calls(
         root,
         src,
@@ -183,6 +240,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         None,
         &mut scope,
         &mut vars,
+        &fields,
         &by_name,
         &by_path,
         &mut calls,
@@ -234,6 +292,7 @@ fn collect_calls(
     container: Option<&str>,
     scope: &mut Vec<String>,
     vars: &mut std::collections::BTreeMap<String, String>,
+    fields: &std::collections::BTreeMap<(String, String), String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
@@ -296,6 +355,7 @@ fn collect_calls(
                         container,
                         scope,
                         vars,
+                        fields,
                         by_name,
                         by_path,
                         out,
@@ -315,7 +375,7 @@ fn collect_calls(
                     .map(|s| s.trim().to_string());
                 if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
                     // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
-                    collect_calls(body, src, rel, Some(&tname), scope, vars, by_name, by_path, out, refs, sites);
+                    collect_calls(body, src, rel, Some(&tname), scope, vars, fields, by_name, by_path, out, refs, sites);
                 }
             }
             "impl_item" => {
@@ -332,6 +392,7 @@ fn collect_calls(
                         ty.as_deref(),
                         scope,
                         vars,
+                        fields,
                         by_name,
                         by_path,
                         out,
@@ -343,7 +404,7 @@ fn collect_calls(
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
                     collect_calls(
-                        body, src, rel, container, scope, vars, by_name, by_path, out, refs, sites,
+                        body, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites,
                     );
                 }
             }
@@ -367,7 +428,7 @@ fn collect_calls(
                     }
                 }
                 collect_calls(
-                    child, src, rel, container, scope, vars, by_name, by_path, out, refs, sites,
+                    child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites,
                 );
             }
             "call_expression" => {
@@ -412,6 +473,34 @@ fn collect_calls(
                     //     **只认"字面写着"的类型**：不看 import、不做跨文件推断——
                     //     看不懂就退回"引用"，让统计把它算进"没连上"，绝不猜。
                     if let (Some(rv), Some(m)) = (recv.as_deref(), field.as_deref()) {
+                        // ①b-0 `self.field.m()`：字段类型在同一个 `struct` 定义里写着
+                        if let Some(rest) = rv.strip_prefix("self.") {
+                            if !rest.contains('.') {
+                                if let Some(c) = container {
+                                    if let Some(ty) = fields.get(&(c.to_string(), rest.to_string())) {
+                                        let path = format!("{ty}::{m}");
+                                        if let Some(id) = by_path.get(&path) {
+                                            let mut done = false;
+                                            if let Some(caller) = scope.last() {
+                                                if id != caller {
+                                                    out.push((caller.clone(), id.clone()));
+                                                    sites.push((
+                                                        caller.clone(),
+                                                        id.clone(),
+                                                        call_line,
+                                                        call_byte,
+                                                    ));
+                                                    done = true;
+                                                }
+                                            }
+                                            if done {
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if rv != "self" {
                             if let Some(ty) = vars.get(rv) {
                                 let path = format!("{ty}::{m}");
@@ -483,7 +572,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, vars, by_name, by_path, out, refs, sites);
+                collect_calls(child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites);
             }
         }
     }
@@ -762,14 +851,44 @@ fn last_type_ident(text: &str) -> Option<String> {
 }
 
 /// 初始化表达式推出类型：`T::new(…)` / `T { … }`；别的形状一律不猜。
+///
+/// 2026-10-21 补一层**包装**：`T::open(p).ok()?`、`x.unwrap()`、`x.await` 这些在外层套了
+/// `?`/`unwrap`/`await`，里头的类型没变——不拆掉的话，`let s = Store::open(p).ok()?`
+/// 之后的 `s.save()` 就永远连不上（实测：自己仓库里 `store.sync_claims(...)` 就是这个形状）。
 fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
     match v.kind() {
         "struct_expression" => v
             .child_by_field_name("name")
             .and_then(|n| n.utf8_text(src.as_bytes()).ok())
             .map(|s| s.trim().to_string()),
+        // `expr?`：类型不变
+        "try_expression" => v
+            .child_by_field_name("value")
+            .or_else(|| v.named_child(0))
+            .and_then(|inner| ty_of_initializer(inner, src)),
+        // `expr.await`：类型不变（外层是 Future，这里取被 await 的那层）
+        "await_expression" => v
+            .child_by_field_name("value")
+            .or_else(|| v.named_child(0))
+            .and_then(|inner| ty_of_initializer(inner, src)),
         "call_expression" => {
             let f = v.child_by_field_name("function")?;
+            // `.unwrap()` / `.expect(..)` / `.unwrap_or(..)` 这类：剥掉，看接收者
+            if f.kind() == "field_expression" {
+                let name = f
+                    .child_by_field_name("field")
+                    .and_then(|n| n.utf8_text(src.as_bytes()).ok())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if matches!(
+                    name.as_str(),
+                    "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default" | "ok"
+                ) {
+                    let recv = f.child_by_field_name("value")?;
+                    return ty_of_initializer(recv, src);
+                }
+            }
             let t = f.utf8_text(src.as_bytes()).ok()?;
             let first = t.split("::").next()?.trim();
             if first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
@@ -1044,6 +1163,15 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
+
+
+
+
+
+
+
 
 
 

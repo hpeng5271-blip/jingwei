@@ -70,3 +70,63 @@ fn 类型看不出来时不乱连() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn self_字段的方法调用能连上() {
+    let root = fixture(
+        "field",
+        "pub struct Inner;\nimpl Inner {\n    pub fn touch(&self) {}\n}\npub struct Outer {\n    inner: Inner,\n}\nimpl Outer {\n    pub fn go(&self) {\n        self.inner.touch();\n    }\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#Inner::touch")
+        .expect("查询失败")
+        .expect("Inner::touch 应在图谱里");
+    assert_eq!(e.calls, 1, "self.inner.touch() 应连上，实际 {:?}", e.callers);
+    assert!(
+        e.callers.iter().all(|(_, _, s)| s.contains("Outer::go")),
+        "调用者应是 Outer::go，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// **负向**：字段类型没在本文件 `struct` 里写着 → 不连。
+#[test]
+fn 字段类型看不出来时不乱连() {
+    let root = fixture(
+        "field-unknown",
+        "pub struct Inner;\nimpl Inner {\n    pub fn touch(&self) {}\n}\npub struct Outer {\n    inner: Inner,\n}\nimpl Outer {\n    pub fn go(&self, other: &Outer2) {\n        other.inner.touch();\n    }\n}\npub struct Outer2 { inner: Inner }\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#Inner::touch")
+        .expect("查询失败")
+        .expect("Inner::touch 应在图谱里");
+    assert_eq!(
+        e.calls, 0,
+        "`other.inner.touch()` 里 other 是形参，字段类型没在本文件 struct 里写着，不该连，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `let s = Store::open(p).ok()?` 这种**带 `?`/`unwrap` 包装**的也要认出类型。
+#[test]
+fn 带问号或_unwrap_的初始化也能认出类型() {
+    let root = fixture(
+        "wrapped",
+        "pub struct S;\nimpl S {\n    pub fn open() -> Option<S> { Some(S) }\n    pub fn save(&self) {}\n}\npub fn use_it() -> Option<()> {\n    let s = S::open()?;\n    s.save();\n    let t = S::open().unwrap();\n    t.save();\n    Some(())\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert!(
+        e.calls >= 1,
+        "`S::open()?` / `.unwrap()` 之后的方法调用应连上，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

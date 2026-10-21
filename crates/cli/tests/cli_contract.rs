@@ -53,6 +53,20 @@ fn tasks_log() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("jingwei-cli-tasks-{}.json", std::process::id()))
 }
 
+/// 带额外环境变量的跑法（用于"本次会话放行"这类前缀）。
+fn run_env(args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
+    let log = std::env::temp_dir().join(format!("jingwei-usage-env-{}.jsonl", std::process::id()));
+    let mut c = Command::new(b);
+    c.args(args)
+        .env("JINGWEI_USAGE_FILE", log)
+        .env("JINGWEI_TASKS_FILE", tasks_log());
+    for (k, v) in envs {
+        c.env(k, v);
+    }
+    c.output().expect("跑不起来")
+}
+
 fn run(args: &[&str]) -> Output {
     let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
     let log = std::env::temp_dir().join(format!("jingwei-cli-usage-{}.jsonl", std::process::id()));
@@ -1585,5 +1599,22 @@ fn 装依赖时名单外的仓库先拒后跑() {
     for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
         assert!(s.contains(k), "拒绝必须带三字段（缺 `{k}`）：{s}");
     }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+
+/// **本次会话放行**：`JINGWEI_ALLOW_NET` 里列出的主机，这一条命令就不该被网络闸门拒。
+/// 判据：退出码不再是 2（放行后由程序本身决定成败），且不再打"暂无法探知"。
+#[test]
+fn 本次会话放行后网络闸门不再拒() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("net-gate-allow");
+    let contract = r#"{"schema_version":1,"name":"demo","runtime":{},"deps":{},"commands":{"install":"jw-not-a-real-cmd install --registry https://evil.example/x"},"log_files":[],"manual":["install"]}"#;
+    std::fs::write(d.join("env.contract.json"), contract).unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let o = run_env(&["env", "install", "--root", &p], &[("JINGWEI_ALLOW_NET", "evil.example")]);
+    let s = stdout(&o);
+    assert_ne!(code(&o), 2, "放行后不该再被闸门拒：{s}");
+    assert!(!s.contains("暂无法探知"), "放行后不该再打拒绝话术：{s}");
     let _ = std::fs::remove_dir_all(&d);
 }

@@ -347,3 +347,52 @@ mod net_tests {
         std::fs::remove_dir_all(&d).ok();
     }
 }
+
+// ===== 人手放行入口（2026-10-21 第二轮收尾）=====
+//
+// 两种时长、两个入口：
+// - **本次会话**：``JINGWEI_ALLOW_NET=evil.example,other.host`` 前缀跑一次（不落盘，进程结束即失效）；
+// - **24 小时**：写允许表（``allow_24h``，到点失效）。
+// 不给"永久关闭"——那等于把沙箱废掉。
+
+/// 解析放行清单（纯函数，不碰全局状态——**测试只测它**，否则会污染同进程的其他测试）。
+pub fn parse_allow_hosts(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in raw.split(',') {
+        let h = part.trim().trim_matches(|c| c == '"' || c == '\'');
+        if h.is_empty() {
+            continue;
+        }
+        if let Some(host) = host_of(h) {
+            if !out.contains(&host) {
+                out.push(host);
+            }
+        }
+    }
+    out
+}
+
+/// 从 `JINGWEI_ALLOW_NET`（逗号分隔）读本次会话的放行主机；读不出就不放行（**不猜**）。
+pub fn seed_session_allows_from_env() -> Vec<String> {
+    let granted = parse_allow_hosts(&std::env::var("JINGWEI_ALLOW_NET").unwrap_or_default());
+    for h in &granted {
+        allow_session(&format!("net:{h}"));
+    }
+    granted
+}
+
+#[cfg(test)]
+mod env_allow_tests {
+    use super::*;
+
+    /// 放行清单的解析（**纯函数**）：认协议/端口、去重、认不出的丢掉。
+    ///
+    /// 这里故意不测 `seed_session_allows_from_env` 的副作用：它会往**进程级**允许集合里塞东西，
+    /// 并行测试读到就变成"名单外也放行"（2026-10-21 又踩了一次 #13 共享状态）。
+    /// 真实生效由集成测试在**独立进程**里验（`本次会话放行后网络闸门不再拒`）。
+    #[test]
+    fn 解析放行清单() {
+        let hs = parse_allow_hosts("evil.example, https://other.example:8443/x, evil.example, 3.12");
+        assert_eq!(hs, vec!["evil.example".to_string(), "other.example".to_string()], "{hs:?}");
+    }
+}

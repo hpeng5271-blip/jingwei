@@ -379,6 +379,8 @@ pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -
     if let Some(cmd) = command.as_deref() {
         let looks_install = cmd.contains(" install") || cmd.contains("--index-url") || cmd.contains("--registry");
         if looks_install {
+            // 人手放行：`JINGWEI_ALLOW_NET=a,b` 只对这次会话有效（不落盘）。
+            crate::sandbox_allow::seed_session_allows_from_env();
             let allow = crate::sandbox_allow::allow_path();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -387,7 +389,7 @@ pub(crate) fn cmd_task(root: &Path, which: &str, override_cmd: Option<String>) -
             if let Err(host) = crate::sandbox_allow::net_gate(&allow, cmd, now) {
                 println!();
                 println!(
-                    "  {} 暂无法探知：这条安装命令要访问 {host}，它不在白名单里｜缺：该仓库域名的允许｜为什么：网络默认拒绝，只放行包仓库（pypi / npm / crates / maven）｜怎么补：确认可信后把它加进允许表（24 小时），或去掉命令里的自定义仓库地址、改用默认源",
+                    "  {} 暂无法探知：这条安装命令要访问 {host}，它不在白名单里｜缺：该仓库域名的允许｜为什么：网络默认拒绝，只放行包仓库（pypi / npm / crates / maven）｜怎么补：确认可信就重跑并加前缀 `JINGWEI_ALLOW_NET={host}`（只这次会话有效），或把它写进允许表（24 小时），或去掉命令里的自定义仓库地址、改用默认源",
                     c(RED, "✗")
                 );
                 println!();

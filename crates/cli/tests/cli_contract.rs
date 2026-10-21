@@ -1084,6 +1084,14 @@ fn help_主路径在最前且只有八个() {
     );
     assert!(s.contains("--more --help"), "要指路 --more：\n{s}");
     let seg = s.as_str();
+    // 主路径的第一个必须是 `next`——那是"从哪开始"的答案
+    let first = seg
+        .lines()
+        .skip_while(|l| !l.contains("【主路径】"))
+        .nth(1)
+        .unwrap_or("")
+        .trim();
+    assert!(first.starts_with("next"), "主路径第一条应是 next，实际：{first}");
     let want = [
         "next", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
     ];
@@ -1133,6 +1141,7 @@ fn next_一屏三层都在() {
     assert!(s.contains("边界："), "缺边界层：\n{s}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
 
 
 

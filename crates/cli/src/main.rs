@@ -664,8 +664,10 @@ fn render_help() -> String {
 fn render_help_with(all: bool) -> String {
     let mut subs = String::new();
     subs.push_str("  【主路径】\n");
-    for (name, _aliases, desc) in COMMANDS {
-        if MAIN_VERBS.contains(name) {
+    // **按 MAIN_VERBS 的顺序列**（2026-10-21）：主路径的意义是"从哪开始"，
+    // 所以第一个必须是 `next`——而不是 `COMMANDS` 里的书写顺序（那第一个是 graph）。
+    for want in MAIN_VERBS {
+        if let Some((name, _aliases, desc)) = COMMANDS.iter().find(|(n, _, _)| n == want) {
             subs.push_str(&format!("  {:<12} {}\n", name, desc));
         }
     }
@@ -995,6 +997,7 @@ mod tests {
         );
     }
 }
+
 
 
 

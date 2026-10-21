@@ -63,3 +63,24 @@ fn 重解析不许改变符号总数() {
     assert_eq!(before, after, "重解析后符号数变了：{before} → {after}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **字段类型在另一个文件**：`struct` 在 a.rs，`impl` 在 b.rs，`self.field.m()` 要连上（2026-10-21）。
+#[test]
+fn 跨文件的字段类型也能连上() {
+    let root = fixture(
+        "field",
+        "pub struct Inner;\nimpl Inner {\n    pub fn touch(&self) {}\n}\npub struct Outer {\n    inner: Inner,\n}\n",
+        "use crate::a::Outer;\nimpl Outer {\n    pub fn go(&self) {\n        self.inner.touch();\n    }\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#Inner::touch")
+        .expect("查询失败")
+        .expect("Inner::touch 应在图谱里");
+    assert_eq!(
+        e.calls, 1,
+        "字段类型在 a.rs、impl 在 b.rs，应连上，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

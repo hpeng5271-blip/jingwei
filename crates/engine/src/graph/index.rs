@@ -352,7 +352,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@32";
+pub const EXTRACTOR_VERSION: &str = "parse@33";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -479,7 +479,49 @@ pub fn index_source(
             .into_iter()
             .filter_map(|(k, v)| v.map(|v| (k, v)))
             .collect();
-        if !hints.is_empty() {
+        // **字段类型提示**（2026-10-21）：`(结构体, 字段) → 类型`，同样"冲突就作废"。
+        // 用途：`struct` 与 `impl` 分居两个文件时，`self.field.m()` 的字段类型要看另一个文件。
+        let mut fhints: std::collections::BTreeMap<(String, String), Option<String>> =
+            std::collections::BTreeMap::new();
+        let putf = |m: &mut std::collections::BTreeMap<(String, String), Option<String>>,
+                    k: (String, String),
+                    ty: &str| {
+            match m.get(&k) {
+                None => {
+                    m.insert(k, Some(ty.to_string()));
+                }
+                Some(Some(prev)) if prev == ty => {}
+                Some(_) => {
+                    m.insert(k, None);
+                }
+            }
+        };
+        for ((s, f), ty) in store.field_hints().unwrap_or_default() {
+            putf(&mut fhints, (s, f), &ty);
+        }
+        for p in &prepared {
+            if let Some(pr) = &p.parsed {
+                for n in &pr.symbols {
+                    if let Some(obj) = n
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.get("fields"))
+                        .and_then(|x| x.as_object())
+                    {
+                        for (f, ty) in obj {
+                            if let Some(ty) = ty.as_str() {
+                                putf(&mut fhints, (n.name.clone(), f.clone()), ty);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let field_hints: std::collections::BTreeMap<(String, String), String> = fhints
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| (k, v)))
+            .collect();
+        if !hints.is_empty() || !field_hints.is_empty() {
             for p in prepared.iter_mut() {
                 let Some(pr) = &p.parsed else { continue };
                 let needs = pr
@@ -496,7 +538,8 @@ pub fn index_source(
                 if !file.readable {
                     continue;
                 }
-                let parsed = crate::parse::parse_rust_with_hints(&p.rel, &file.text, now, &hints);
+                let parsed =
+                    crate::parse::parse_rust_with_hints(&p.rel, &file.text, now, &hints, &field_hints);
                 if parsed.symbols.len() != pr.symbols.len() {
                     rep.hint_guard_tripped += 1;
                     continue;
@@ -1143,6 +1186,9 @@ mod dangling_edge_tests {
         assert_eq!(edges.len(), 1, "只剩那条好边：{edges:?}");
     }
 }
+
+
+
 
 
 

@@ -484,6 +484,35 @@ impl Store {
     ///
     /// 为什么单独给类型而不复用 `Node`：claim 与符号是**两种东西**，
     /// 混进 `nodes` 会让"查符号"查到一个主张的名字——三态就此失真。
+    /// **字段类型提示**：`(结构体, 字段) → 类型`，从符号 `data.fields` 里取（2026-10-21）。
+    pub fn field_hints(&self) -> Result<Vec<((String, String), String)>> {
+        let mut st = self
+            .conn
+            .prepare_cached(
+                "SELECT name, data FROM nodes WHERE kind='symbol' AND data IS NOT NULL",
+            )
+            .context("准备字段提示查询失败")?;
+        let rows = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .context("查字段提示失败")?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (name, data) = r.context("读字段提示行失败")?;
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+                continue;
+            };
+            let Some(obj) = v.get("fields").and_then(|x| x.as_object()) else {
+                continue;
+            };
+            for (f, ty) in obj {
+                if let Some(ty) = ty.as_str() {
+                    out.push(((name.clone(), f.clone()), ty.to_string()));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// 图谱里有多少条主张（`claims` 投影表）。**老库没有这张表时按 0 算**——
     /// 那时确实一条投影都没有，而不是"查不了"（2026-10-21）。
     pub fn claim_count(&self) -> Result<usize> {

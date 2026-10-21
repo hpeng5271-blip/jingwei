@@ -1,4 +1,4 @@
-﻿//! 把源码变成符号。M3 的落点。
+//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -111,19 +111,26 @@ pub struct RefFact {
 /// `ParseOutcome { symbols: vec![], complete: false }`——
 /// "这次没解析成"和"这个文件没有符号"是两件事，由 `complete` 区分。
 pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
-    parse_rust_with_hints(rel, src, now, &std::collections::BTreeMap::new())
+    parse_rust_with_hints(
+        rel,
+        src,
+        now,
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
+    )
 }
 
 /// **带"全项目签名提示"再解析一遍**（2026-10-21）。
 ///
 /// 为什么需要：`let x = make();` 里 `make` 的定义可能在**另一个文件**，而解析是按文件进行的。
-/// 提示由索引层从库里（上一轮解析时落下的 `ret`）或本轮其它文件的结果里收集，**只在
-/// 有的文件里出现"接收者类型看不出来"的方法调用时才重解析这些文件**——不是全量重来。
+/// 提示由索引层从库里（上一轮解析时落下的 `ret` / `fields`）或本轮其它文件的结果里收集，
+/// **只在有的文件里出现"接收者类型看不出来"的方法调用时才重解析这些文件**——不是全量重来。
 pub fn parse_rust_with_hints(
     rel: &str,
     src: &str,
     now: i64,
     hints: &std::collections::BTreeMap<String, String>,
+    field_hints: &std::collections::BTreeMap<(String, String), String>,
 ) -> ParseOutcome {
     let mut parser = tree_sitter::Parser::new();
     if parser.set_language(&tree_sitter_rust::LANGUAGE.into()).is_err() {
@@ -248,6 +255,11 @@ pub fn parse_rust_with_hints(
                 }
             }
         }
+    }
+    // **别处定义的 `struct` 也算**（2026-10-21）：`struct` 与 `impl` 常分居两个文件，
+    // 这时 `self.field.m()` 的字段类型要看另一个文件。提示由索引层给；**本文件的优先**。
+    for (k, v) in field_hints {
+        fields.entry(k.clone()).or_insert_with(|| v.clone());
     }
     // **函数的返回类型**（2026-10-21）：`let x = make();` 之后 `x.m()` 要靠它。
     // 两张表：`returns` = 原样返回的类型（`-> S`）；`returns_unwrapped` = 拆掉 `Option`/`Result`
@@ -810,6 +822,40 @@ fn push_symbol(
                         data["ret"] = serde_json::Value::String(t);
                     }
                 }
+            }
+        }
+    }
+    // **结构体字段的类型也存下来**（2026-10-21）：`struct` 与 `impl` 常分居两个文件，
+    // 别处解析 `self.field.m()` 时要靠它。只存简单类型（无泛型），与解析期 `fields` 同口径。
+    if item.kind() == "struct_item" {
+        if let Some(list) = item.child_by_field_name("body") {
+            let mut map = serde_json::Map::new();
+            let mut lc = list.walk();
+            for f in list.children(&mut lc) {
+                if f.kind() != "field_declaration" {
+                    continue;
+                }
+                let (Some(fname), Some(fty)) = (
+                    f.child_by_field_name("name"),
+                    f.child_by_field_name("type"),
+                ) else {
+                    continue;
+                };
+                let (Ok(fname), Ok(fty)) = (
+                    fname.utf8_text(src.as_bytes()),
+                    fty.utf8_text(src.as_bytes()),
+                ) else {
+                    continue;
+                };
+                if fty.contains('<') {
+                    continue;
+                }
+                if let Some(t) = last_type_ident(fty) {
+                    map.insert(fname.trim().to_string(), serde_json::Value::String(t));
+                }
+            }
+            if !map.is_empty() {
+                data["fields"] = serde_json::Value::Object(map);
             }
         }
     }

@@ -1,4 +1,4 @@
-#![allow(clippy::let_underscore_must_use)]
+﻿#![allow(clippy::let_underscore_must_use)]
 
 //! **`x.m()` 里 x 的类型字面可见时**，把方法调用连到 `T::m`（2026-10-21）。
 //!
@@ -51,12 +51,15 @@ fn 形参标注的类型也能连上方法() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// **负向**：类型看不出来时不连（`let x = make()` 里的 `make` 不是类型）。
+/// **负向**：类型看不出来时不连。
+///
+/// 注：`let x = make()` 现在**能**推出来了（2026-10-21 加了返回值推导，见 `从函数返回值推出类型`）；
+/// 这里换成"函数不在本文件里、也没有标注"的形状——那是真的查不了，宁可少一条边。
 #[test]
 fn 类型看不出来时不乱连() {
     let root = fixture(
         "unknown",
-        "pub struct S;\nimpl S {\n    pub fn touch(&self) {}\n}\nfn make() -> S { S }\npub fn run() {\n    let x = make();\n    x.touch();\n}\n",
+        "pub struct S;\nimpl S {\n    pub fn touch(&self) {}\n}\npub fn run() {\n    let x = unknown_factory();\n    x.touch();\n}\n",
     );
     let mut st = Store::open(&root.join("g.db")).expect("开库失败");
     index::index_source(&root, &mut st).expect("索引失败");
@@ -65,7 +68,7 @@ fn 类型看不出来时不乱连() {
         .expect("S::touch 应在图谱里");
     assert_eq!(
         e.calls, 0,
-        "`let x = make()` 里 make 不是类型，不该连，实际 {:?}",
+        "`unknown_factory()` 的类型查不了，不该连，实际 {:?}",
         e.callers
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -183,3 +186,40 @@ fn 被_ok_包起来的方法调用也能连上() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **返回值推导**：`let x = make(); x.m()`——类型来自本文件那个函数的返回类型（2026-10-21）。
+#[test]
+fn 从函数返回值推出类型() {
+    let root = fixture(
+        "ret",
+        "pub struct S;\nimpl S {\n    pub fn save(&self) {}\n}\nfn make() -> S { S }\npub fn use_it() {\n    let s = make();\n    s.save();\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(e.calls, 1, "`let s = make();` 应推出 S，实际 {:?}", e.callers);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// **负向**：返回类型是泛型（`-> Option<S>`）时不猜。
+#[test]
+fn 泛型返回类型不猜() {
+    let root = fixture(
+        "ret-generic",
+        "pub struct S;\nimpl S {\n    pub fn save(&self) {}\n}\nfn make() -> Option<S> { Some(S) }\npub fn use_it() {\n    let s = make();\n    s.save();\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(
+        e.calls, 0,
+        "`-> Option<S>` 没拆包装，不该硬推成 S，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+

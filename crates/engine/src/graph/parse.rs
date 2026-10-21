@@ -230,10 +230,41 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
                     continue;
                 };
                 if let Some(t) = last_type_ident(fty) {
-                                        fields.insert((sname.clone(), fname.trim().to_string()), t);
-                    
+                    fields.insert((sname.clone(), fname.trim().to_string()), t);
                 }
-                                }
+            }
+        }
+    }
+    // **函数的返回类型**（2026-10-21）：`let x = make();` 之后 `x.m()` 要靠它。
+    // 只收**不带泛型的**返回类型（`-> S`）——`-> Option<S>` 这种要拆包装，先不猜。
+    let mut returns: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    {
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let mut c = n.walk();
+            for ch in n.children(&mut c) {
+                stack.push(ch);
+            }
+            if n.kind() != "function_item" {
+                continue;
+            }
+            let (Some(name), Some(rt)) = (
+                n.child_by_field_name("name"),
+                n.child_by_field_name("return_type"),
+            ) else {
+                continue;
+            };
+            let (Ok(name), Ok(rt)) = (name.utf8_text(src.as_bytes()), rt.utf8_text(src.as_bytes()))
+            else {
+                continue;
+            };
+            if rt.contains('<') {
+                continue; // 泛型返回不猜
+            }
+            if let Some(t) = last_type_ident(rt) {
+                returns.insert(name.trim().to_string(), t);
+            }
         }
     }
     collect_calls(
@@ -244,6 +275,7 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         &mut scope,
         &mut vars,
         &fields,
+        &returns,
         &by_name,
         &by_path,
         &mut calls,
@@ -296,6 +328,7 @@ fn collect_calls(
     scope: &mut Vec<String>,
     vars: &mut std::collections::BTreeMap<String, String>,
     fields: &std::collections::BTreeMap<(String, String), String>,
+    returns: &std::collections::BTreeMap<String, String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
@@ -359,6 +392,7 @@ fn collect_calls(
                         scope,
                         vars,
                         fields,
+                        returns,
                         by_name,
                         by_path,
                         out,
@@ -378,7 +412,7 @@ fn collect_calls(
                     .map(|s| s.trim().to_string());
                 if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
                     // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
-                    collect_calls(body, src, rel, Some(&tname), scope, vars, fields, by_name, by_path, out, refs, sites);
+                    collect_calls(body, src, rel, Some(&tname), scope, vars, fields, returns, by_name, by_path, out, refs, sites);
                 }
             }
             "impl_item" => {
@@ -396,6 +430,7 @@ fn collect_calls(
                         scope,
                         vars,
                         fields,
+                        returns,
                         by_name,
                         by_path,
                         out,
@@ -407,7 +442,7 @@ fn collect_calls(
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
                     collect_calls(
-                        body, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites,
+                        body, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites,
                     );
                 }
             }
@@ -432,7 +467,7 @@ fn collect_calls(
                                 .and_then(last_type_ident);
                             let inferred = child
                                 .child_by_field_name("value")
-                                .and_then(|v| ty_of_initializer(v, src));
+                                .and_then(|v| ty_of_initializer(v, src, returns));
                             if let Some(ty) = declared.or(inferred) {
                                 vars.insert(var.trim().to_string(), ty);
                             }
@@ -440,7 +475,7 @@ fn collect_calls(
                     }
                 }
                 collect_calls(
-                    child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites,
+                    child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites,
                 );
             }
             "call_expression" => {
@@ -611,7 +646,7 @@ fn collect_calls(
                 // 外层 `call_expression` 先处理掉，match 臂之间不会"落下继续"。
                 // 症状：`x.m()` 只要被 `.ok()`/`.unwrap()` 包一层，方法调用就整条丢。
                 collect_calls(
-                    child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs,
+                    child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs,
                     sites,
                 );
             }
@@ -622,7 +657,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs, sites);
+                collect_calls(child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites);
             }
         }
     }
@@ -908,7 +943,11 @@ fn last_type_ident(text: &str) -> Option<String> {
 /// 2026-10-21 补一层**包装**：`T::open(p).ok()?`、`x.unwrap()`、`x.await` 这些在外层套了
 /// `?`/`unwrap`/`await`，里头的类型没变——不拆掉的话，`let s = Store::open(p).ok()?`
 /// 之后的 `s.save()` 就永远连不上（实测：自己仓库里 `store.sync_claims(...)` 就是这个形状）。
-fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
+fn ty_of_initializer(
+    v: TsNode<'_>,
+    src: &str,
+    returns: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
     match v.kind() {
         "struct_expression" => v
             .child_by_field_name("name")
@@ -918,12 +957,12 @@ fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
         "try_expression" => v
             .child_by_field_name("value")
             .or_else(|| v.named_child(0))
-            .and_then(|inner| ty_of_initializer(inner, src)),
+            .and_then(|inner| ty_of_initializer(inner, src, returns)),
         // `expr.await`：类型不变（外层是 Future，这里取被 await 的那层）
         "await_expression" => v
             .child_by_field_name("value")
             .or_else(|| v.named_child(0))
-            .and_then(|inner| ty_of_initializer(inner, src)),
+            .and_then(|inner| ty_of_initializer(inner, src, returns)),
         "call_expression" => {
             let f = v.child_by_field_name("function")?;
             // `.unwrap()` / `.expect(..)` / `.unwrap_or(..)` 这类：剥掉，看接收者
@@ -939,7 +978,7 @@ fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
                     "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default" | "ok"
                 ) {
                     let recv = f.child_by_field_name("value")?;
-                    return ty_of_initializer(recv, src);
+                    return ty_of_initializer(recv, src, returns);
                 }
             }
             let t = f.utf8_text(src.as_bytes()).ok()?;
@@ -947,7 +986,9 @@ fn ty_of_initializer(v: TsNode<'_>, src: &str) -> Option<String> {
             if first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
                 Some(first.to_string())
             } else {
-                None
+                // `let x = make();` —— 类型来自**本文件里那个函数的返回类型**（2026-10-21）。
+                // 只认裸标识符的调用（`make` / `make(...)`），`obj.make()` 那种要看接收者，不猜。
+                returns.get(first).cloned()
             }
         }
         _ => None,
@@ -1216,6 +1257,8 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
 
 
 

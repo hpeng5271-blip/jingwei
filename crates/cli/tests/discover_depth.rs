@@ -17,6 +17,16 @@ fn exe() -> &'static str {
     env!("CARGO_BIN_EXE_jingwei")
 }
 
+/// 要跑的 CLI。**`JINGWEI_USAGE_FILE` 指到临时文件**：入口会记
+/// `~/.jingwei/usage.jsonl`，而那份日志是用来按真实调用数删命令的——
+/// 测试往里掺数据就废了（与 `cli_contract::run` 同一句话）。
+fn cmd() -> Command {
+    let mut c = Command::new(exe());
+    let log = std::env::temp_dir().join(format!("jingwei-depth-usage-{}.jsonl", std::process::id()));
+    c.env("JINGWEI_USAGE_FILE", log);
+    c
+}
+
 /// 铺一棵 `root/a/b/c/d/proj`（proj 有 Cargo.toml）。
 fn fixture(tag: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("jw-depth-{tag}-{}", std::process::id()));
@@ -30,7 +40,7 @@ fn fixture(tag: &str) -> PathBuf {
 
 /// 跑一次 `discover --depth N <root>`，返回找到的项目路径列表。
 fn discover(root: &PathBuf, depth: &str) -> Vec<String> {
-    let out = Command::new(exe())
+    let out = cmd()
         .args(["discover", "--depth", depth])
         .arg(root)
         .output()
@@ -67,7 +77,7 @@ fn 深度真的会改变扫描结果() {
 #[test]
 fn 深度参数非法时要能看出来() {
     let root = fixture("bad");
-    let out = Command::new(exe())
+    let out = cmd()
         .args(["discover", "--depth", "abc"])
         .arg(&root)
         .output()

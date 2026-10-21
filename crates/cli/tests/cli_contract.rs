@@ -44,9 +44,18 @@ fn empty_dir(tag: &str) -> PathBuf {
 
 /// 跑一次 CLI。**不设 cwd**：这几个命令都接 `--root`，
 /// 顺带钉住"不靠当前目录也能用"（cwd 默认是哪儿是这个仓库踩过的坑）。
+///
+/// **`JINGWEI_USAGE_FILE` 指到临时文件**：入口现在会记 `~/.jingwei/usage.jsonl`，
+/// 而这份日志是用来按"一周真实调用数"删命令的——全套集成测试往里头掺几十行，
+/// 那份数据就废了。指到临时路径**不改被测行为**，只改落点。
 fn run(args: &[&str]) -> Output {
     let b = bin().expect("CARGO_BIN_EXE_jingwei 应该由 cargo 提供");
-    Command::new(b).args(args).output().expect("跑不起来")
+    let log = std::env::temp_dir().join(format!("jingwei-cli-usage-{}.jsonl", std::process::id()));
+    Command::new(b)
+        .args(args)
+        .env("JINGWEI_USAGE_FILE", log)
+        .output()
+        .expect("跑不起来")
 }
 
 /// 退出码。**这比输出文字重要**：脚本只看它。

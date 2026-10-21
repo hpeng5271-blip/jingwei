@@ -33,6 +33,8 @@ mod cmd_project;
 mod cmd_run;
 mod cmd_verify;
 mod cmd_projects;
+// 不是子命令，是**入口的横切面**：命令调用记录（`~/.jingwei/usage.jsonl`）。
+mod usage;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};
@@ -82,13 +84,18 @@ fn main() {
     setup_console();
     jingwei_engine::dlog::install_panic_hook();
     jingwei_engine::dlog::i("1000", "app=cli");
-    let code = run();
+    // **命令调用记录**（2026-10-21）：入口统一记一次，各子命令一律不碰。
+    // 为什么在这儿：删命令要有真实调用数（普查证明"看着没人用"是错的），
+    // 而这一层之前是空的。名字由解析阶段填好——`--version` 这种还没分派就返回的也记。
+    let mut used_cmd = String::new();
+    let code = run(&mut used_cmd);
+    usage::record(&used_cmd, code);
     jingwei_engine::dlog::i("1001", &format!("exit={} buffered={}", code, jingwei_engine::dlog::buffered()));
     jingwei_engine::dlog::flush();
     std::process::exit(code);
 }
 
-fn run() -> i32 {
+fn run(used_cmd: &mut String) -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut cmd = String::new();
@@ -302,8 +309,14 @@ fn run() -> i32 {
             }
             // **为什么没扫到**：扫完按原因统计被跳过的目录
             "--why" => rest.push("--why".to_string()),
-            "--help" | "-h" => return help(),
+            // 这两条在解析阶段就返回，分派名还没定，所以在这里显式填记录用的名字
+            // （`-h`/`-V` 也归一到 `help`/`version`，不然统计里会出现 h、V 两个假命令）。
+            "--help" | "-h" => {
+                *used_cmd = "help".to_string();
+                return help();
+            }
             "--version" | "-V" => {
+                *used_cmd = "version".to_string();
                 println!("jingwei {}", env!("CARGO_PKG_VERSION"));
                 return 0;
             }
@@ -325,6 +338,13 @@ fn run() -> i32 {
         }
         i += 1;
     }
+
+    // **以分派用、且归一后的主名为准**（`check` / `inspect` 都是 `doctor`）：
+    // 别名各记一条，会把同一个命令拆成几份、每份都显得"没人用"——那正是这个功能要防的错。
+    //
+    // 解析阶段就出错返回的（`--root` 少值、未知参数）不落盘：那不是"调用了一个命令"，
+    // 记成 `root`、`depth` 这种名字只会污染统计。
+    *used_cmd = usage_name(&cmd);
 
     let root = strip_verbatim(root.canonicalize().unwrap_or(root));
 
@@ -503,6 +523,30 @@ fn run() -> i32 {
             // **"没做"不许长得像"做成了"。**
             1
         }
+    }
+}
+
+/// **记录用的命令名**：别名归一到它的主名，再按"分派臂"归一一次。
+///
+/// 为什么必须归一到主名：`usage.jsonl` 是用来按调用数删命令的。别名各记一条，
+/// 同一个命令会被拆成几份、每份都显得"没人用"——那正是这个功能要防的错。
+///
+/// 两层归一：
+/// 1. `COMMANDS` 里登记的别名 → 主名（`check` → `doctor`、`why` → `explain` …）；
+/// 2. `inspect` 在帮助表里是**独立一条**（"与 doctor 同一个入口"），分派也和
+///    `doctor` / `check` 共用一个臂——按臂记数，三者也合成 `doctor`。
+fn usage_name(cmd: &str) -> String {
+    if cmd.is_empty() {
+        return "help".to_string(); // 一个位置参数都没有时，走的就是 `help()`
+    }
+    let primary = COMMANDS
+        .iter()
+        .find(|(name, aliases, _)| *name == cmd || aliases.contains(&cmd))
+        .map(|(name, _, _)| *name)
+        .unwrap_or(cmd);
+    match primary {
+        "inspect" => "doctor".to_string(),
+        other => other.to_string(),
     }
 }
 

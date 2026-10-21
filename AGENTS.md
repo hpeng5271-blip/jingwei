@@ -1,4 +1,4 @@
-# AGENTS.md · 经纬（jingwei）
+﻿# AGENTS.md · 经纬（jingwei）
 
 > **入口，只回答两件事：现在什么状态、下一步做什么。**
 >
@@ -114,6 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 该按什么想 | `框架.md` ★ | 560+ 行 |
 | 怎么动手 | `SOP.md` ★ | 840+ 行 |
 | 我错过什么 / 教训 | `docs/process/事故账本.md` | 800+ 行 |
+| **我犯过的错，浓缩版** | `docs/reference/失效模式清单.md` | 60 行 |
 | 决策与判据 | `docs/design/设计.md` | 1400+ 行 |
 | 数据层 | `docs/design/数据层设计.md` | 545 行 |
 | 真项目实测 | `docs/process/研究对象.md` + `研究对象实测.json` | —— |

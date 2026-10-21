@@ -71,6 +71,8 @@ pub mod understand {
     pub mod decisions;
     pub mod contract;
     pub mod diag;
+    /// **消息与提示的判据**（去重计数 / 状态机 / 自适应静音）：GUI 只消费结果。
+    pub mod notify;
     /// **目录级索引**：把"采集"与"判定"拆开（见 `框架.md` §4.9）。
     ///
     /// **故意还没接线**：先用回归测试证明"同样输入给同样结果"，再接上去。

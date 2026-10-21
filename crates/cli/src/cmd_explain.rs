@@ -99,6 +99,17 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
             println!("知识层：{total} 条主张 —— {}", shown.join(" · "));
         }
     }
+    // **改动影响面**（2026-10-21）：上面给的是**直接**调用者；间接的（第 2 层往上）在 impact 里。
+    // 这里只报个数并指路——不重复打印清单，免得两个命令各说一套。
+    let up = crate::cmd_impact::upstream(&store, &ex.id, 2);
+    let indirect: usize = up.values().map(|v| v.len()).sum();
+    let direct = ex.calls.max(0) as usize;
+    if indirect > direct {
+        println!(
+            "改动影响面：往上游 2 层共 {indirect} 个符号（直接 {direct} 个）（jingwei impact {} 看清单与排序）",
+            ex.id
+        );
+    }
     0
 }
 

@@ -208,7 +208,7 @@ fn file_mode(store: &Store, raw: &str, depth: usize, json: bool) -> i32 {
 }
 
 /// 逐层往上游找 `calls` 边的入边。
-fn upstream(store: &Store, key: &str, depth: usize) -> BTreeMap<usize, Vec<String>> {
+pub(crate) fn upstream(store: &Store, key: &str, depth: usize) -> BTreeMap<usize, Vec<String>> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     seen.insert(key.to_string());
     let mut by_depth: BTreeMap<usize, Vec<String>> = BTreeMap::new();
@@ -298,6 +298,7 @@ fn split_id(id: &str) -> (String, String) {
         None => (rest.to_string(), rest.to_string()),
     }
 }
+
 
 
 

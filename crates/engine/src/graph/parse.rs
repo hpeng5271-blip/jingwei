@@ -1,4 +1,4 @@
-﻿//! 把源码变成符号。M3 的落点。
+//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -528,7 +528,7 @@ fn collect_calls(
                         }
                         if rv != "self" {
                             if let Some(ty) = vars.get(rv) {
-                                let path = format!("{ty}::{m}");
+                                                                let path = format!("{ty}::{m}");
                                 if !by_path.contains_key(&path) {
                                     // **跨文件**：本文件里没有这个 `T::m`，但类型已经字面可见。
                                     // 把期望路径留给 resolve（全图按路径找；找不到就丢，会被计数）。
@@ -606,6 +606,14 @@ fn collect_calls(
                         want_path: None,
                     }),
                 }
+                // **嵌套调用也要下钻**（2026-10-21 实测抓到的真缺口）：
+                // `store.save().ok()` / `foo(bar())` 里的内层调用**不会被看见**——
+                // 外层 `call_expression` 先处理掉，match 臂之间不会"落下继续"。
+                // 症状：`x.m()` 只要被 `.ok()`/`.unwrap()` 包一层，方法调用就整条丢。
+                collect_calls(
+                    child, src, rel, container, scope, vars, fields, by_name, by_path, out, refs,
+                    sites,
+                );
             }
             // **其余节点一律下钻**。
             //
@@ -1208,6 +1216,8 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
 
 
 

@@ -1,4 +1,4 @@
-//! 解析期：把**引用事实**变成**确定的关系**。
+﻿//! 解析期：把**引用事实**变成**确定的关系**。
 //!
 //! ## 为什么单独一层
 //!
@@ -131,7 +131,7 @@ pub fn resolve_file(
         // parser 只在本文件里找 `T::m`；找不到时把期望路径留在这里，由全图谱再找一次。
         // **只认完整路径**（`A::new` 与 `B::new` 是两条不同的键）；找不到就丢掉（会算进"没连上"）。
         if let Some(want) = r.want_path.as_deref() {
-            let short = want.rsplit("::").next().unwrap_or(want);
+                        let short = want.rsplit("::").next().unwrap_or(want);
             let hits: Vec<&SymbolEntry> = all
                 .get(short)
                 .map(|v| {
@@ -146,6 +146,7 @@ pub fn resolve_file(
                         .collect()
                 })
                 .unwrap_or_default();
+            
             if hits.len() == 1 {
                 if let Some(caller) = r.scope.last() {
                     if &hits[0].id != caller {
@@ -1027,6 +1028,9 @@ mod tests {
         assert_eq!(r.namespace_mismatch.len(), 1);
     }
 }
+
+
+
 
 
 

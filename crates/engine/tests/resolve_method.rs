@@ -160,3 +160,26 @@ fn 跨文件的方法调用也能连上() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **嵌套调用里的方法调用也要被看见**（2026-10-21 实测抓到的真缺口）。
+///
+/// `store.save().ok()` / `foo(store.save())`：外层 `call_expression` 先被处理，
+/// 而匹配臂之间不会"落下继续"，于是内层调用**整条丢**。
+#[test]
+fn 被_ok_包起来的方法调用也能连上() {
+    let root = fixture(
+        "nested",
+        "pub struct S;\nimpl S {\n    pub fn new() -> S { S }\n    pub fn save(&self) -> Option<()> { Some(()) }\n}\npub fn use_it() {\n    let s = S::new();\n    s.save().ok();\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(
+        e.calls, 1,
+        "`s.save().ok()` 里内层调用应被看见，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

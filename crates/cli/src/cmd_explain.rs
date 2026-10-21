@@ -1,4 +1,4 @@
-﻿//! `jingwei explain <名字|symbol:id>`（2026-10-20）：一个符号**到底是什么**。
+//! `jingwei explain <名字|symbol:id>`（2026-10-20）：一个符号**到底是什么**。
 //!
 //! 为什么要它：图谱页能看到形状，但"这个函数是谁在调、被谁引用"以前只能靠编辑器
 //! 的 LSP 或翻 SQL。理解层的第一个动词应该是"解释"，不是"看图"。
@@ -10,12 +10,14 @@ use std::path::Path;
 
 use jingwei_engine::graph::{query, store::Store};
 
+use crate::protocol::{envelope, print, Coverage, Evidence, State};
+
 pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
     let store: Store = match query::open_for_query(root) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("开图谱失败：{e}（先跑 jingwei index）");
-            return 2;
+            return 查不了(json, root, &format!("查不了：开不了图谱（{e}）"), 2);
         }
     };
 
@@ -26,18 +28,23 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
             Ok(v) if v.len() == 1 => v[0].clone(),
             Ok(v) if v.is_empty() => {
                 eprintln!("图谱里没有叫 `{name}` 的符号（先 index，或名字拼错了）");
-                return 2;
+                return 查不了(json, root, &format!("查不了：图谱里没有叫 `{name}` 的符号"), 2);
             }
             Ok(v) => {
                 eprintln!("有 {} 个符号叫 `{name}`，用 id 指定：", v.len());
                 for x in &v {
                     eprintln!("  {x}");
                 }
-                return 2;
+                return 查不了(
+                    json,
+                    root,
+                    &format!("查不了：有 {} 个符号叫 `{name}`，要指定 id（不替你挑）", v.len()),
+                    2,
+                );
             }
             Err(e) => {
                 eprintln!("查符号失败：{e}");
-                return 2;
+                return 查不了(json, root, &format!("查不了：查符号失败（{e}）"), 2);
             }
         }
     };
@@ -46,24 +53,42 @@ pub fn cmd_explain(root: &Path, name: &str, json: bool) -> i32 {
         Ok(v) => v,
         Err(e) => {
             eprintln!("读图谱失败：{e}");
-            return 2;
+            return 查不了(json, root, &format!("查不了：读图谱失败（{e}）"), 2);
         }
     }) else {
         eprintln!("图谱里没有这个符号：{id}");
-        return 2;
+        return 查不了(json, root, &format!("查不了：图谱里没有这个符号（{id}）"), 2);
     };
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
+        let at = match (&ex.file, ex.line) {
+            (Some(f), Some(l)) => format!("{f}:{l}"),
+            (Some(f), None) => format!("{f}（行号未知）"),
+            _ => "图谱里没记文件（查不了）".to_string(),
+        };
+        let state = if ex.file.is_some() { State::Yes } else { State::Unknown };
+        let v = envelope(
+            state,
+            format!(
+                "{}（{}）：定义在 {}，被 {} 个符号调用 / {} 处引用",
+                ex.name, ex.id, at, ex.calls, ex.refs
+            ),
+            vec![
+                Evidence::graph(root, "定义位置与调用/引用边都来自图库"),
+                Evidence::command(
+                    &format!("jingwei explain {}", ex.id),
+                    "同一条命令可复跑；符号定义行可用编辑器核对",
+                ),
+            ],
+            Coverage::full(1, "读的是这个符号在图库里的全部调用/引用边"),
+            serde_json::json!({
                 "id": ex.id, "name": ex.name, "file": ex.file, "line": ex.line,
                 "calls": ex.calls, "references": ex.refs,
                 "callers": ex.callers.iter().map(|(f, l, s)| serde_json::json!({"file": f, "line": l, "by": s})).collect::<Vec<_>>(),
                 "referenced_by": ex.references.iter().map(|(f, l, s)| serde_json::json!({"file": f, "line": l, "by": s})).collect::<Vec<_>>(),
-            }))
-            .unwrap_or_default()
+            }),
         );
+        print(&v);
         return 0;
     }
 
@@ -166,3 +191,24 @@ fn knowledge_names(store: &Store, symbol_id: &str) -> Vec<String> {
     claims.into_iter().map(|c| short_name(&c.id)).collect()
 }
 
+
+/// 「查不了」也走协议：`--json` 的用户拿到结构，`--json` 之外仍只打一句中文。
+///
+/// 以前这些分支只 `eprintln!` + 返回 2：`--json` 的调用方拿到空 stdout，
+/// 分不清"没这个符号"和"程序没跑"——两种出口两种说法，正是协议要消灭的。
+fn 查不了(json: bool, root: &Path, why: &str, code: i32) -> i32 {
+    if json {
+        let v = envelope(
+            State::Unknown,
+            why,
+            vec![
+                Evidence::graph(root, "定义与调用关系只能从图库读"),
+                Evidence::command("jingwei index", "先建图谱，才有可解释的符号"),
+            ],
+            Coverage::partial(0, None, "没有可判断的对象（不是 0，是没查到）"),
+            serde_json::json!({}),
+        );
+        print(&v);
+    }
+    code
+}

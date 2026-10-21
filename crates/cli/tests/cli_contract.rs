@@ -1195,6 +1195,45 @@ fn next_的_json_带三态依据与覆盖度() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// **`explain --json` 也要走协议**：成功时带四件套，查不到时**也是 JSON**。
+///
+/// 这条守的是"两种出口两种说法"：以前查不到只往 stderr 打一句中文，`--json` 的调用方
+/// 拿到空 stdout，分不清"没这个符号"和"程序根本没跑起来"。
+#[test]
+fn explain_的_json_带协议四字段_查不到也是_json() {
+    let Some(_) = bin() else { return };
+    // 先在一个**没索引**的目录上跑：必须是 JSON + state=unknown，不是空 stdout
+    let d = empty_dir("explain-json-nodeps");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["explain", "f", "--root", &p, "--json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("查不到时 `explain --json` 也该是 JSON");
+    assert_eq!(v["state"].as_str(), Some("unknown"), "查不到该是 unknown：{v}");
+    assert!(v["summary"].as_str().is_some(), "查不到也要有 summary：{v}");
+    assert!(
+        v["evidence"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "查不到也要有依据（先 index）：{v}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **`positions --json` 没索引时也是 JSON**：查不了不许只打一句中文。
+#[test]
+fn positions_没索引时的_json_是协议对象() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("positions-json-nodeps");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["positions", "--root", &p, "--json"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("没索引时 `positions --json` 也该是 JSON");
+    assert_eq!(v["state"].as_str(), Some("unknown"), "没索引该是 unknown：{v}");
+    assert!(
+        v["coverage"]["partial"].as_bool().unwrap_or(false),
+        "没核过必须标 partial=true（不许报成 0 个错）：{v}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 
 
 

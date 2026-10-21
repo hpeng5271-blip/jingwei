@@ -1,4 +1,4 @@
-﻿//! jingwei 命令行外壳：所有逻辑都在 engine 里，这里只负责排版和参数。
+//! jingwei 命令行外壳：所有逻辑都在 engine 里，这里只负责排版和参数。
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -35,6 +35,8 @@ mod cmd_verify;
 mod cmd_projects;
 // 不是子命令，是**入口的横切面**：命令调用记录（`~/.jingwei/usage.jsonl`）。
 mod usage;
+// **统一输出协议**（结论 + 三态 + 依据 + 覆盖度）：所有 `--json` 出口共用一份形状。
+mod protocol;
 
 use cmd_clean::{cmd_clean, cmd_scan};
 use cmd_doctor::{cmd_audit, cmd_changes, cmd_doctor, cmd_fix};

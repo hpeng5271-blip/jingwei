@@ -659,6 +659,14 @@ fn cmd_index(root: &Path, json: bool) -> i32 {
             rep.method_refs, rep.method_unresolved, rep.method_unresolved_own
         );
     }
+    // **trait 派发单独说**（2026-10-21）：这些不是"我们漏了"，是静态连不准。
+    // 不写清楚的话，`explain` 里一堆"查不了"会被读成"这个工具不行"。
+    if rep.trait_dispatch_refs > 0 {
+        println!(
+            "      其中 {} 条指向 **trait 方法**（动态派发：静态连到某个 impl 就是假边，所以不连）",
+            rep.trait_dispatch_refs
+        );
+    }
     
     // **这两类必须单独说，但不能说成"都是我们的锅"**（2026-10-18 真 Python 项目换的）。
     //

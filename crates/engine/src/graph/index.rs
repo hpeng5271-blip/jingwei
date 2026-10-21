@@ -1,4 +1,4 @@
-﻿//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
+//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
 //!
 //! 这是**第一次让图谱真的有自己的东西**——在这之前，"这个项目里有什么"每次都靠重扫；
 //! 从这一步起，它落在库里，下次可以直接查。
@@ -65,6 +65,9 @@ pub struct IndexReport {
     pub reparsed_with_hints: usize,
     /// 守卫触发次数：重解析后**符号数变了** → 不采用。
     pub hint_guard_tripped: usize,
+    /// **trait 方法调用没能连上的条数**（2026-10-21）：动态派发，静态连到某个 impl 就是假边。
+    /// 单独数出来是为了在报告里说清"这些不是漏了"。
+    pub trait_dispatch_refs: usize,
     /// 这次更新里被标成失效的旧关系条数。
     pub edges_expired: usize,
     /// **解析期连上的跨文件关系**（含就近遮蔽命中的）。
@@ -415,6 +418,9 @@ pub fn index_source(
     let mut all_names: crate::graph::resolve::SymbolTable =
         std::collections::BTreeMap::new();
     let mut pending_refs: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
+    // **trait 名字**（2026-10-21）：trait 方法调用是动态派发，静态连到某个 impl 就是假边。
+    // 解析期在符号 `data.trait` 里标了，这里收集起来，解析完据此单独计数。
+    let mut trait_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     // 跨文件模块属性（债 0.28）：解析成功建 references 边，不是 calls。
     let mut pending_attr: Vec<(String, Vec<crate::graph::parse::RefFact>)> = Vec::new();
     let mut file_imports: std::collections::BTreeMap<String, Vec<crate::graph::imports::ImportFact>> =
@@ -635,6 +641,17 @@ pub fn index_source(
         if !parsed.attr_refs.is_empty() {
             pending_attr.push((rel.clone(), parsed.attr_refs.clone()));
         }
+        // trait 名字要留下（解析完用它区分"动态派发不连"与"我们漏了"）
+        for s in &parsed.symbols {
+            if s.data
+                .as_ref()
+                .and_then(|d| d.get("trait"))
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false)
+            {
+                trait_names.insert(s.name.clone());
+            }
+        }
         // 调用关系单独取出来——`symbols` 下面会被 move 走。
         processed.push(rel.clone());
         let calls = parsed.calls.clone();
@@ -785,6 +802,27 @@ pub fn index_source(
             rep.method_unresolved += res.method_unresolved;
             rep.method_refs += res.method_refs;
             rep.method_unresolved_own += res.method_unresolved_own;
+            // **trait 派发单独数**（2026-10-21）：`want_path` 指向 `T::m`、`T` 是 trait、
+            // 而全图谱里没有 `T::m` 这个符号——那不是我们漏了，是动态派发静态连不准。
+            for r in refs {
+                if let Some(w) = r.want_path.as_deref() {
+                    let ty = w.split("::").next().unwrap_or("");
+                    if !trait_names.contains(ty) {
+                        continue;
+                    }
+                    let short = w.rsplit("::").next().unwrap_or(w);
+                    let exists = all_names.get(short).is_some_and(|v| {
+                        v.iter().any(|e| {
+                            e.id.split_once('#')
+                                .map(|(_, k)| k == w)
+                                .unwrap_or(false)
+                        })
+                    });
+                    if !exists {
+                        rep.trait_dispatch_refs += 1;
+                    }
+                }
+            }
             extra.extend(crate::graph::resolve::to_edges(&res, now));
             // **调用点**：写进小表，给 LSP 找引用用（跳到调用那一行，而不是函数定义）
             sites.extend(res.sites.iter().map(|(a, b, l)| (a.clone(), b.clone(), *l, 0u32)));
@@ -1186,6 +1224,8 @@ mod dangling_edge_tests {
         assert_eq!(edges.len(), 1, "只剩那条好边：{edges:?}");
     }
 }
+
+
 
 
 

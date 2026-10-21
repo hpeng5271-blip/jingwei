@@ -811,6 +811,11 @@ fn push_symbol(
     // 所以同名的 struct / trait / mod 根本不该进候选。
     // 不记这一条的话，46 条"拿不准"里有相当一部分是白白拿不准的。
     let mut data = serde_json::json!({ "sym": symbol_class(item.kind()) });
+    // **这是不是 trait**（2026-10-21）：trait 方法的调用是**动态派发**，静态连到某个 impl
+    // 就是假边；索引层要能把它单独数出来，好如实报"这些不是漏了，是不该连"。
+    if item.kind() == "trait_item" {
+        data["trait"] = serde_json::Value::Bool(true);
+    }
     // **函数签名里的返回类型**也存下来（2026-10-21）：下一次索引别的文件时要拿它做提示——
     // `let x = make();` 里 `make` 的定义常常在另一个文件。只存"简单返回类型"（无泛型），
     // 与解析期 `returns` 表的口径一致，避免库里存一个解析期不会用的东西。

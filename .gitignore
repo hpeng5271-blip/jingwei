@@ -1,4 +1,4 @@
-﻿/target
+/target
 /dist
 /.drydock
 /node_modules
@@ -14,3 +14,7 @@ src-tauri/icons/ios
 # 工具自己的数据目录：**别把自己算进被观察的对象**（AGENTS.md §5.1 那条账）。
 # 任何层级都可能出现（项目根、ui/、临时目录），所以用不带斜杠前缀的形式。
 .jingwei/
+# 手工备份/半成品：别进库（2026-10-22 清掉过一份 .style.css.bak）。
+*.bak
+*.orig
+*.rej

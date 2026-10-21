@@ -1,4 +1,4 @@
-//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
+﻿//! 把「一个目录」变成图谱里的一批节点与边。M3 接图谱的那一步。
 //!
 //! 这是**第一次让图谱真的有自己的东西**——在这之前，"这个项目里有什么"每次都靠重扫；
 //! 从这一步起，它落在库里，下次可以直接查。
@@ -341,7 +341,7 @@ pub fn record_run(
     Ok(out)
 }
 
-pub const EXTRACTOR_VERSION: &str = "parse@13";
+pub const EXTRACTOR_VERSION: &str = "parse@14";
 
 /// 存的版本与当前解析器版本不一致 → 所有"跳过"作废（纯函数，可单测）。
 pub fn extractor_changed(stored: Option<&str>) -> bool {
@@ -980,4 +980,5 @@ mod version_tests {
         assert!(extractor_changed(Some("parse@1")), "老版本 = 必须重解析");
     }
 }
+
 

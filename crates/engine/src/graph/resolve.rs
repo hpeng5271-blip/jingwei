@@ -169,6 +169,28 @@ pub fn resolve_file(
             continue;
         }
 
+        // ①.6 **模块路径 `mod::item`：先按"兄弟/子模块文件"落，再谈全图唯一**（2026-10-21）。
+        //
+        //     为什么不靠 ①.5 的末段唯一命中：那个规则在**同类名字有多个**时会拒绝连
+        //     （"凭什么挑那一个"）。而 `info::command(...)` 的写法**自己已经说了是哪个文件**，
+        //     不该被别的同名 `command` 连累。实测（tauri）：`lib.rs:283` 的 `info::command(options)?`
+        //     一条边都没有，于是 `impact` 对那整个模块只能报"查不了"。
+        //
+        //     只认**最窄的一种**：`a::b` 里 `a` 是小写标识符（模块名约定），先把 `a` 落到
+        //     本文件同目录的 `a.rs` / `a/mod.rs`；落到了、且那个文件里真有 `b`，才连。
+        //     `crate::` / `super::` / `self::` 一律先不管——那几条要模块树，留给后续。
+        if let Some(hit) = through_module_path(rel, r, all) {
+            if let Some(caller) = r.scope.last() {
+                if &hit != caller {
+                    out.sites.push((caller.clone(), hit.clone(), r.line));
+                    out.resolved.push((caller.clone(), hit));
+                }
+            } else {
+                out.module_level += 1;
+            }
+            continue;
+        }
+
         // ①.5 **限定名先拆掉路径，按末段查。**（2026-10-16 实测抓出的真缺口）
         //
         // `cmd_doctor.rs` 里的 `rules::run_all(...)` / `snapshot::load_latest(...)`
@@ -238,6 +260,39 @@ pub fn resolve_file(
     let _ = rel;
     out
 }
+
+/// `mod::item` 的窄解析：把 `mod` 落到**本文件同目录**的 `mod.rs` / `mod/mod.rs`，
+/// 再看那个文件里有没有 `item`。
+///
+/// 只处理最窄的一种形状（见调用处的注释）；`crate::` / `super::` / `self::` 前缀一律不接。
+fn through_module_path(rel: &str, r: &RefFact, all: &SymbolTable) -> Option<String> {
+    let (module, item) = r.name.split_once("::")?;
+    if module.is_empty()
+        || item.is_empty()
+        || item.contains("::")
+        || !module.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        || matches!(module, "crate" | "super" | "self")
+    {
+        return None;
+    }
+    let dir = match rel.rsplit_once('/') {
+        Some((d, _)) => format!("{d}/"),
+        None => String::new(),
+    };
+    let entries = all.get(item)?;
+    for cand in [format!("{dir}{module}.rs"), format!("{dir}{module}/mod.rs")] {
+        for e in entries
+            .iter()
+            .filter(|e| e.class == "value" || e.class == "local")
+        {
+            if id_is_symbol_in(&e.id, &cand, item) {
+                return Some(e.id.clone());
+            }
+        }
+    }
+    None
+}
+
 
 /// 这个符号 id 是不是"`file` 里的 `name`"？
 ///

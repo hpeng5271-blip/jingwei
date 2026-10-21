@@ -1311,3 +1311,34 @@ fn index_的_json_带协议_扫不到时带三字段() {
     );
     let _ = std::fs::remove_dir_all(&d2);
 }
+
+/// **首屏三数字**：`handover --json` 必须带 `metrics{files, volume_bytes, capped, lifecycle}`。
+///
+/// 口径要求（2026-10-21 人定的）：
+/// - 文件数/总体积走 `measure`（有 4000 文件 / 120ms 硬上限，撞上限必须 `capped=true`）；
+/// - 生命周期**只用 git 能证明的**：没有 `.git` 就报 `no_git`，不许编"新建/停更"。
+#[test]
+fn handover_带首屏三数字且没有git时不猜() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("metrics-no-git");
+    std::fs::write(d.join("a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["handover", "--root", &p, "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o))
+        .unwrap_or_else(|e| panic!("`handover --json` 该是 JSON（{e}）：{}", stdout(&o)));
+    let m = &v["metrics"];
+    assert!(m.is_object(), "缺 metrics（首屏三数字）：{v}");
+    assert!(m["files"].as_u64().unwrap_or(0) >= 1, "文件数至少 1：{v}");
+    assert!(m["volume_bytes"].as_u64().is_some(), "总体积必须是数：{v}");
+    assert!(m["capped"].is_boolean(), "capped 必须显式给出（撞上限要说出来）：{v}");
+    assert_eq!(
+        m["lifecycle"]["state"].as_str(),
+        Some("no_git"),
+        "没有 .git 时只许说 no_git（判不了），不许编生命周期：{v}"
+    );
+    assert!(
+        !m["lifecycle"]["basis"].as_str().unwrap_or("").is_empty(),
+        "生命周期必须带依据：{v}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

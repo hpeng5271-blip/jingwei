@@ -66,6 +66,8 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
             serde_json::json!({
                 "what": gj["what"], "ready": gj["ready"], "headline": gj["headline"],
                 "blockers": gj["blockers"], "nextStep": gj["nextStep"],
+                // **首屏三数字**：文件数 / 总体积 / 生命周期判断（口径见 `metrics()`）
+                "metrics": metrics(root),
                 "counts": counts.map(|(f, s, c, r)| serde_json::json!({"files": f, "symbols": s, "calls": c, "references": r})),
                 "entrances": tops.iter().map(|(f, n)| serde_json::json!({"file": f, "incomingCalls": n})).collect::<Vec<_>>(),
                 "fileLife": lives,
@@ -180,4 +182,72 @@ fn knowledge_line(root: &Path) -> Option<String> {
         "  ③b 知识层：{n} 条主张 / {linked} 条已挂符号 · 主题：{}{more}（jingwei learn <主题> 照着走）",
         shown.join(" / ")
     ))
+}
+
+/// 首屏三数字（2026-10-21）：文件数 / 总体积 / 生命周期判断。
+///
+/// 口径（都不猜）：
+/// - **文件数**、**总体积**：走 `understand::projects::measure`（有 4000 文件 / 120ms 的硬上限，
+///   撞上限就 `capped=true`——**"只量了一部分"必须说出来**，不许把部分当成全部）；
+/// - **生命周期**：只用 git 能证明的东西（最近提交时间 + 工作区有没有改动）；
+///   没有 `.git` 就报 `no_git`，不说"新建/停更"这种没有依据的话。
+pub(crate) fn metrics(root: &Path) -> serde_json::Value {
+    let (files, bytes, capped) = jingwei_engine::understand::projects::measure(root);
+    let (state, basis) = lifecycle(root);
+    serde_json::json!({
+        "files": files,
+        "volume_bytes": bytes,
+        "capped": capped,
+        "lifecycle": {"state": state, "basis": basis},
+    })
+}
+
+/// 生命周期：`new_git | active | recent | maintenance | stale | no_git | unknown`。
+fn lifecycle(root: &Path) -> (&'static str, String) {
+    if !root.join(".git").exists() {
+        return ("no_git", "没有 .git：判断不了（需要版本库才行）".to_string());
+    }
+    let log = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(root)
+        .args(["log", "-1", "--format=%ct"])
+        .output();
+    let secs = match log {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .parse::<i64>()
+            .unwrap_or(0),
+        _ => return ("unknown", "git log 跑不出来：判断不了".to_string()),
+    };
+    if secs <= 0 {
+        return ("unknown", "git log 没给出提交时间：判断不了".to_string());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(secs);
+    let days = ((now - secs) / 86_400).max(0);
+    let dirty = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(root)
+        .args(["status", "--porcelain"])
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+    let state = if days < 30 && dirty {
+        "active"
+    } else if days < 30 {
+        "recent"
+    } else if days < 180 {
+        "maintenance"
+    } else {
+        "stale"
+    };
+    (
+        state,
+        format!(
+            "最近提交 {days} 天前；工作区{}（git log -1 --format=%ct + git status --porcelain 可复跑）",
+            if dirty { "有未提交改动" } else { "干净" }
+        ),
+    )
 }

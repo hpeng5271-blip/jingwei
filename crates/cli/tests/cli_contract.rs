@@ -907,3 +907,66 @@ fn handover_的规模与_graph_stats_一致() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **全量索引报的数字必须等于 `graph stats` 的总数**（2026-10-21）。
+///
+/// 口径说明（先说清，免得断言错东西）：
+/// - **全量**（库刚建/删掉重建）时，`index` 报的「N 文件 · N 符号 · N 条调用」就是全库规模，
+///   必须与 `graph stats` 逐个相等；
+/// - **增量**时它报的是"这次处理了几个"，与总量**本来就不该相等**——所以那条走另一句文案
+///   （「这次处理了 0 个文件」），这里断言的是全量那条。
+#[test]
+fn 全量索引报的数字等于_graph_stats() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("index-vs-stats");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(
+        d.join("Cargo.toml"),
+        "[package]\nname=\"t\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("src/a.rs"),
+        "pub fn helper() -> i32 { 1 }\npub fn run() -> i32 { helper() }\n",
+    )
+    .unwrap();
+    std::fs::write(d.join("src/b.rs"), "pub fn other() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    let idx = run(&["index", "--root", &p]);
+    assert_eq!(code(&idx), 0, "索引应成功：{}", stdout(&idx));
+    let text = stdout(&idx);
+    let line = text
+        .lines()
+        .find(|l| l.contains("个文件 · ") && l.contains("条调用（"))
+        .unwrap_or_else(|| panic!("没有全量统计行：{text}"));
+    // 形如「    2 个文件 · 4 个符号 · 1 条调用（12ms）」
+    let head = line.split('（').next().unwrap_or(line);
+    let nums: Vec<i64> = head
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    assert_eq!(nums.len(), 3, "统计行里应有 3 个数：{line}");
+
+    let stats = stdout(&run(&["graph", "stats", "--json", "--root", &p]));
+    let sj: serde_json::Value = serde_json::from_str(&stats).expect("stats JSON 解析失败");
+    let want = [
+        sj["nodes"]["file"].as_i64().unwrap_or(-1),
+        sj["nodes"]["symbol"].as_i64().unwrap_or(-1),
+        sj["edges"]["calls"].as_i64().unwrap_or(-1),
+    ];
+    assert_eq!(
+        nums, want,
+        "全量索引报的规模与 graph stats 不一致：{line}"
+    );
+
+    // 增量再跑一次：不该再冒出"全量统计行"的假规模，而要说明是增量。
+    let idx2 = run(&["index", "--root", &p]);
+    let text2 = stdout(&idx2);
+    assert!(
+        text2.contains("这次处理了 0 个文件"),
+        "增量运行应说明'这次处理了 0 个文件'，实际：{text2}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

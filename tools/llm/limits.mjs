@@ -26,7 +26,9 @@ export const LIMITS = {
   roundsPerDay: 12,
   // 2026-10-21：6 → 20。实测今天跑了 41 次四道门禁（每轮 2–3 次），
   // 「每天 6 次」与真实节奏差一个数量级；闸门的意义是防跑飞，不是防正常迭代。
-  gateRunsPerDay: 20,
+  // 2026-10-21：闸门本身**不花钱**（本地命令，一次约 70 秒 CPU）。给它的数字只能防"跑飞"，
+  // 不能防"正常迭代"——所以设成一个宽松的理智上界，真正的预算闸是 pro 的花费（见 caps.mjs）。
+  gateRunsPerDay: 200,
   decisionsPerDay: 4,
   // 总账（估算，含 flash 与 pro）
   totalCnyPerDay: 10,
@@ -115,4 +117,5 @@ if (cmd === 'check') {
   const u = usage();
   console.log(JSON.stringify({ usage: u, limits: LIMITS, pro: summary(3) }, null, 1));
 }
+
 

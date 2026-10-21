@@ -12,10 +12,22 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use crate::protocol::{envelope, Coverage, Evidence, State};
+
+
+/// 一个 Python 都没探到时的三字段说明（2026-10-21）：**缺什么 / 为什么 / 怎么补**。
+///
+/// 这三样缺一，用户就只能看到"没有 Python"——而他真正需要知道的是"是我们没探到，还是他确实没装"，
+/// 以及下一步该敲什么。
+fn envs_unknown_summary() -> String {
+    "暂无法探知：这台机器上没探到可用的 Python｜缺：可用的 Python 解释器｜为什么：PATH、注册表、常见安装目录与项目 venv 都没读到｜怎么补：装 uv 后跑 `uv python install 3.12`，或从 python.org 装一个".to_string()
+}
 pub(crate) fn cmd_envs(root: &Path, json: bool) -> i32 {
     let (contract, _) = Contract::load(root);
     let list = probe::find_pythons(root, contract.as_ref(), true);
     if json {
+        // **协议**（2026-10-21）：以前这里直接打一个数组——空数组会被读成"这台机器没有 Python"，
+        // 而真相往往是"几种探法都没读到"。三态 + 三字段（缺什么/为什么/怎么补）必须一起出。
         let rows: Vec<serde_json::Value> = list
             .iter()
             .map(|p| {
@@ -26,7 +38,31 @@ pub(crate) fn cmd_envs(root: &Path, json: bool) -> i32 {
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&rows).unwrap_or_default());
+        let found = !rows.is_empty();
+        let state = if found { State::Yes } else { State::Unknown };
+        let summary = if found {
+            format!(
+                "找到 {} 个可用的 Python（PATH / 注册表 / 常见安装目录 / venv）",
+                rows.len()
+            )
+        } else {
+            envs_unknown_summary()
+        };
+        let v = envelope(
+            state,
+            summary,
+            vec![
+                Evidence::command(
+                    "jingwei envs",
+                    "探法：PATH、注册表、常见安装目录、项目 venv；装法见 summary",
+                ),
+                Evidence::file("env.contract.json", "有契约时优先按契约里的解释器找"),
+            ],
+            // 探法有限：没找到不等于没有，所以永远标 partial。
+            Coverage::partial(rows.len(), None, "探到的数目；探法有限，没找到 ≠ 没有"),
+            serde_json::json!({"pythons": rows}),
+        );
+        crate::protocol::print(&v);
         return 0;
     }
     println!();

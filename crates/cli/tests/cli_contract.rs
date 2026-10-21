@@ -1349,3 +1349,34 @@ fn handover_带首屏三数字且没有git时不猜() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`envs --json` 也走协议**：以前打的是数组，空数组会被读成"没有 Python"。
+/// 判据：四件套齐全；没人探到时 summary 必须带「缺什么/为什么/怎么补」；coverage 恒 partial（探法有限）。
+#[test]
+fn envs_的_json_带协议且没探到时带三字段() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("envs-json");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["envs", "--root", &p, "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o))
+        .unwrap_or_else(|e| panic!("`envs --json` 该是 JSON（{e}）：{}", stdout(&o)));
+    for k in ["state", "summary", "evidence", "coverage"] {
+        assert!(v.get(k).is_some(), "`envs --json` 缺 `{k}`：{v}");
+    }
+    assert!(
+        v["state"].as_str() == Some("yes") || v["state"].as_str() == Some("unknown"),
+        "`envs` 只可能 yes 或 unknown：{v}"
+    );
+    assert!(
+        v["coverage"]["partial"].as_bool().unwrap_or(false),
+        "探法有限：没找到 ≠ 没有，必须 partial=true：{v}"
+    );
+    // 一个都没探到时，三字段必须齐——这条是真窗口里最容易糊弄过去的地方。
+    if v["state"].as_str() == Some("unknown") {
+        let s = v["summary"].as_str().unwrap_or("");
+        for k in ["暂无法探知", "缺：", "为什么：", "怎么补："] {
+            assert!(s.contains(k), "没探到时必须带三字段（缺 `{k}`）：{s}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

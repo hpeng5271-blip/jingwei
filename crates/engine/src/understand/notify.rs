@@ -47,6 +47,12 @@ pub struct Message {
     pub last_at: i64,
 }
 
+/// 最多留多少条（D-20261022-02）：超了就**先丢已归档的**，再丢最旧的。
+///
+/// 为什么要有上限：这张表活在进程里，界面又只显示前几条；没有上限的话，
+/// 一个长期开着的窗口会一直涨——那是"看不见的泄漏"。
+const KEEP_MAX: usize = 50;
+
 /// 收一条消息：同 key 只留一条，计数 +1，并记下最后一次时间。
 ///
 /// 重复出现 = **新事件**，所以状态回到 `New`（哪怕之前已读/已归档）——
@@ -68,6 +74,12 @@ pub fn ingest(list: &mut Vec<Message>, key: &str, level: Level, text: &str, at: 
         first_at: at,
         last_at: at,
     });
+    // 超出上限：先丢已归档的（它们已经"读过了"），不够再按出现顺序丢最旧的。
+    while list.len() > KEEP_MAX {
+        let archived = list.iter().position(|m| m.state == MsgState::Archived);
+        let victim = archived.unwrap_or(0);
+        list.remove(victim);
+    }
 }
 
 /// 状态转移：只认 `New → Shown|Read`、`Shown → Read`、`Read → Archived`、`Shown → Archived`。

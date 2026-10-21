@@ -57,3 +57,36 @@ fn 静音期内不重复提示() {
     assert!(notify::should_notify(Some(1_000), 1_000 + 61, 60), "过了 60 秒该提示");
     assert!(notify::should_notify(None, 5, 60), "从没提示过 → 提示");
 }
+
+/// **归档后再来一条 = 新事件**（D-20261022-02）：状态回到 New、计数 +1。
+/// 否则"归档"就变成了"永久静音"，那是对用户的隐瞒。
+#[test]
+fn 归档之后再来一条要变回未读() {
+    let mut v = Vec::new();
+    notify::ingest(&mut v, "k", Level::Info, "x", 1);
+    for st in [MsgState::Shown, MsgState::Read, MsgState::Archived] {
+        notify::mark(&mut v, "k", st).expect("合法转移");
+    }
+    notify::ingest(&mut v, "k", Level::Info, "x 又来了", 2);
+    assert_eq!(v.len(), 1, "同 key 仍只占一槽");
+    assert_eq!(v[0].count, 2);
+    assert_eq!(v[0].state, MsgState::New, "归档后再来必须是未读");
+}
+
+/// **保留上限**：超出上限先丢已归档的，不够再丢最旧的。
+#[test]
+fn 超出上限先丢已归档的() {
+    let mut v = Vec::new();
+    for i in 0..55 {
+        notify::ingest(&mut v, &format!("k{i}"), Level::Info, "x", i);
+    }
+    let n = v.len();
+    assert!(n <= 50, "不该无限涨：{n}");
+    // 把前两条归档后再塞新的：归档的那两条应该先被挤掉
+    notify::mark(&mut v, "k0", MsgState::Archived).ok();
+    notify::mark(&mut v, "k1", MsgState::Archived).ok();
+    for i in 55..60 {
+        notify::ingest(&mut v, &format!("n{i}"), Level::Info, "x", i);
+    }
+    assert!(!v.iter().any(|m| m.key == "k0" || m.key == "k1"), "已归档的该先丢");
+}

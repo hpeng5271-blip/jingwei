@@ -72,7 +72,7 @@ function stubTauri() {
             globalThis.__msgs = globalThis.__msgs || [];
             const k = args.key;
             const hit = globalThis.__msgs.find((x) => x.key === k);
-            if (hit) { hit.count++; hit.text = args.text; }
+            if (hit) { hit.count++; hit.text = args.text; hit.state = 'new'; }   // 归档后再来 = 新事件（D-20261022-02）
             else globalThis.__msgs.push({ key: k, level: args.level, text: args.text, count: 1, state: 'new' });
             return globalThis.__msgs.map((x) => ({ ...x }));
           }
@@ -688,6 +688,18 @@ try {
     return { n: rows.length, txt, marked, state: (globalThis.__msgs[0] || {}).state };
   });
   check('消息阵列：同 key 只占一槽并计数', mf.n === 1 && /×2/.test(mf.txt[0] || ''), JSON.stringify(mf));
+  // 归档不是永久静音（D-20261022-02）：同一 key 再来一次要重新出现。
+  const mf2 = await page.evaluate(async () => {
+    globalThis.__msgs = [];
+    await msgIngest('k:again', 'error', '第一次');
+    await msgArchive('k:again');
+    const gone = (document.querySelectorAll('#msgFeed .msg-row') || []).length;
+    const list = await msgIngest('k:again', 'error', '第二次');
+    const rows = Array.from(document.querySelectorAll('#msgFeed .msg-row'));
+    return { gone, n: rows.length, state: (list && list[0] && list[0].state) || '', txt: rows.map((r) => r.textContent.trim()) };
+  });
+  check('消息阵列：归档后行消失', mf2.gone === 0, JSON.stringify(mf2));
+  check('消息阵列：归档后再来要重新出现且计数 ＋1', mf2.n === 1 && mf2.state === 'new' && /×2/.test(mf2.txt[0] || ''), JSON.stringify(mf2));
   check('消息阵列：归档走引擎判据（状态变成 archived）', mf.marked === 'ok' && mf.state === 'archived', JSON.stringify(mf));
   check('错误角标：点它打开问题栏，没 error 就收走', eb.opened === true && eb.hiddenAfter === true, JSON.stringify(eb));
   check('最近结果：error 时标红并给跳转', rl.sev === 'error' && rl.hasJump === true, JSON.stringify(rl));

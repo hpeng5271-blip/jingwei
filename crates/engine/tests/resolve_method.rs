@@ -223,3 +223,39 @@ fn 泛型返回类型不猜() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+
+/// **泛型返回拆包装**：`fn make() -> Option<S>` + `let s = make()?;` → `S`（2026-10-21）。
+#[test]
+fn 可选返回拆包装后能连上() {
+    let root = fixture(
+        "opt",
+        "pub struct S;\nimpl S {\n    pub fn save(&self) {}\n}\nfn make() -> Option<S> { Some(S) }\npub fn use_it() -> Option<()> {\n    let s = make()?;\n    s.save();\n    Some(())\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(e.calls, 1, "`make()?` 应拆成 S，实际 {:?}", e.callers);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// **负向**：拆包装只发生在真的拆了的时候——`let s = make();`（没 `?`/`unwrap`）不该连。
+#[test]
+fn 没有拆包装就不当内层类型() {
+    let root = fixture(
+        "opt-nowrap",
+        "pub struct S;\nimpl S {\n    pub fn save(&self) {}\n}\nfn make() -> Option<S> { Some(S) }\npub fn use_it() {\n    let s = make();\n    s.save();\n}\n",
+    );
+    let mut st = Store::open(&root.join("g.db")).expect("开库失败");
+    index::index_source(&root, &mut st).expect("索引失败");
+    let e = query::explain_symbol(&st, "symbol:src/a.rs#S::save")
+        .expect("查询失败")
+        .expect("S::save 应在图谱里");
+    assert_eq!(
+        e.calls, 0,
+        "`Option<S>` 没拆时不该当 S 用，实际 {:?}",
+        e.callers
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

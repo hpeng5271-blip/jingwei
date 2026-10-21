@@ -1,4 +1,4 @@
-//! 把源码变成符号。M3 的落点。
+﻿//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -236,8 +236,12 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         }
     }
     // **函数的返回类型**（2026-10-21）：`let x = make();` 之后 `x.m()` 要靠它。
-    // 只收**不带泛型的**返回类型（`-> S`）——`-> Option<S>` 这种要拆包装，先不猜。
+    // 两张表：`returns` = 原样返回的类型（`-> S`）；`returns_unwrapped` = 拆掉 `Option`/`Result`
+    // 之后的那层（`-> Option<S>` → `S`）。**调用处拆没拆包装，决定查哪张表**——
+    // 不拆包装就查 unwrapped 表，等于把 `Option<S>` 当 `S`，会连出假边。
     let mut returns: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    let mut returns_unwrapped: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     {
         let mut stack = vec![root];
@@ -259,11 +263,16 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
             else {
                 continue;
             };
+            let name = name.trim().to_string();
             if rt.contains('<') {
-                continue; // 泛型返回不猜
+                // 泛型返回：只认 `Option`/`Result` 的第一层，别的（`Vec<Foo>`、`Box<T>`）不猜
+                if let Some(inner) = unwrap_inner_type(rt) {
+                    returns_unwrapped.insert(name, inner);
+                }
+                continue;
             }
             if let Some(t) = last_type_ident(rt) {
-                returns.insert(name.trim().to_string(), t);
+                returns.insert(name, t);
             }
         }
     }
@@ -276,11 +285,12 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         &mut vars,
         &fields,
         &returns,
+        &returns_unwrapped,
         &by_name,
         &by_path,
         &mut calls,
         &mut refs,
-          &mut call_sites,
+        &mut call_sites,
     );
     // 同一个调用点可能在多处出现（同一个函数调 `helper()` 两次）——
     // 图上只该有一条边：**边表达的是"有关系"，不是"关系发生了几次"**。
@@ -329,6 +339,7 @@ fn collect_calls(
     vars: &mut std::collections::BTreeMap<String, String>,
     fields: &std::collections::BTreeMap<(String, String), String>,
     returns: &std::collections::BTreeMap<String, String>,
+    returns_unwrapped: &std::collections::BTreeMap<String, String>,
     by_name: &std::collections::BTreeMap<&str, &str>,
     by_path: &std::collections::BTreeMap<String, String>,
     out: &mut Vec<(String, String)>,
@@ -393,6 +404,7 @@ fn collect_calls(
                         vars,
                         fields,
                         returns,
+                        returns_unwrapped,
                         by_name,
                         by_path,
                         out,
@@ -412,7 +424,7 @@ fn collect_calls(
                     .map(|s| s.trim().to_string());
                 if let (Some(tname), Some(body)) = (tname, child.child_by_field_name("body")) {
                     // **不 push scope**：容器已经是 trait 名；两样都写会拼成 Gen::Gen::x
-                    collect_calls(body, src, rel, Some(&tname), scope, vars, fields, returns, by_name, by_path, out, refs, sites);
+                    collect_calls(body, src, rel, Some(&tname), scope, vars, fields, returns, returns_unwrapped, by_name, by_path, out, refs, sites);
                 }
             }
             "impl_item" => {
@@ -431,6 +443,7 @@ fn collect_calls(
                         vars,
                         fields,
                         returns,
+                        returns_unwrapped,
                         by_name,
                         by_path,
                         out,
@@ -442,7 +455,7 @@ fn collect_calls(
             "mod_item" => {
                 if let Some(body) = child.child_by_field_name("body") {
                     collect_calls(
-                        body, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites,
+                        body, src, rel, container, scope, vars, fields, returns, returns_unwrapped, by_name, by_path, out, refs, sites,
                     );
                 }
             }
@@ -467,7 +480,7 @@ fn collect_calls(
                                 .and_then(last_type_ident);
                             let inferred = child
                                 .child_by_field_name("value")
-                                .and_then(|v| ty_of_initializer(v, src, returns));
+                                .and_then(|v| ty_of_initializer(v, src, returns, returns_unwrapped, false));
                             if let Some(ty) = declared.or(inferred) {
                                 vars.insert(var.trim().to_string(), ty);
                             }
@@ -475,7 +488,7 @@ fn collect_calls(
                     }
                 }
                 collect_calls(
-                    child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites,
+                    child, src, rel, container, scope, vars, fields, returns, returns_unwrapped, by_name, by_path, out, refs, sites,
                 );
             }
             "call_expression" => {
@@ -646,7 +659,7 @@ fn collect_calls(
                 // 外层 `call_expression` 先处理掉，match 臂之间不会"落下继续"。
                 // 症状：`x.m()` 只要被 `.ok()`/`.unwrap()` 包一层，方法调用就整条丢。
                 collect_calls(
-                    child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs,
+                    child, src, rel, container, scope, vars, fields, returns, returns_unwrapped, by_name, by_path, out, refs,
                     sites,
                 );
             }
@@ -657,7 +670,7 @@ fn collect_calls(
             // 而症状是"一条边都抽不出来"，看起来像"这文件里没有调用"，
             // **不报错、不警告**。被测试当场抓住。
             _ => {
-                collect_calls(child, src, rel, container, scope, vars, fields, returns, by_name, by_path, out, refs, sites);
+                collect_calls(child, src, rel, container, scope, vars, fields, returns, returns_unwrapped, by_name, by_path, out, refs, sites);
             }
         }
     }
@@ -921,6 +934,23 @@ fn short_name(id: &str) -> &str {
     id.split_once('#').map(|(_, rest)| rest).unwrap_or(id)
 }
 
+/// 把 `Option<T>` / `Result<T, E>` 拆出**第一层**：`Option<Store>` → `Store`。
+///
+/// 只认这两种容器（2026-10-21）：别的泛型返回（`Vec<Foo>`、`Box<T>`、`impl Trait`）**不猜**——
+/// 拆错了会连出假边，而"查不了"是允许的答案。
+fn unwrap_inner_type(text: &str) -> Option<String> {
+    let t = text.trim();
+    let t = t.strip_prefix("->").map(str::trim).unwrap_or(t);
+    let inner = t
+        .strip_prefix("Option<")
+        .or_else(|| t.strip_prefix("Result<"))?;
+    let first = inner.split([',', '>']).next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    last_type_ident(first)
+}
+
 /// 类型文本里最后一个"看起来像类型"的标识符：`&Store` → `Store`，`Vec<Foo>` → `Foo`。
 /// 首字母不是大写的就当没有（`&mut self`、生命周期那种不该进这张表）。
 fn last_type_ident(text: &str) -> Option<String> {
@@ -947,6 +977,8 @@ fn ty_of_initializer(
     v: TsNode<'_>,
     src: &str,
     returns: &std::collections::BTreeMap<String, String>,
+    returns_unwrapped: &std::collections::BTreeMap<String, String>,
+    unwrapped: bool,
 ) -> Option<String> {
     match v.kind() {
         "struct_expression" => v
@@ -957,12 +989,12 @@ fn ty_of_initializer(
         "try_expression" => v
             .child_by_field_name("value")
             .or_else(|| v.named_child(0))
-            .and_then(|inner| ty_of_initializer(inner, src, returns)),
+            .and_then(|inner| ty_of_initializer(inner, src, returns, returns_unwrapped, true)),
         // `expr.await`：类型不变（外层是 Future，这里取被 await 的那层）
         "await_expression" => v
             .child_by_field_name("value")
             .or_else(|| v.named_child(0))
-            .and_then(|inner| ty_of_initializer(inner, src, returns)),
+            .and_then(|inner| ty_of_initializer(inner, src, returns, returns_unwrapped, true)),
         "call_expression" => {
             let f = v.child_by_field_name("function")?;
             // `.unwrap()` / `.expect(..)` / `.unwrap_or(..)` 这类：剥掉，看接收者
@@ -978,7 +1010,7 @@ fn ty_of_initializer(
                     "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default" | "ok"
                 ) {
                     let recv = f.child_by_field_name("value")?;
-                    return ty_of_initializer(recv, src, returns);
+                    return ty_of_initializer(recv, src, returns, returns_unwrapped, true);
                 }
             }
             let t = f.utf8_text(src.as_bytes()).ok()?;
@@ -988,7 +1020,11 @@ fn ty_of_initializer(
             } else {
                 // `let x = make();` —— 类型来自**本文件里那个函数的返回类型**（2026-10-21）。
                 // 只认裸标识符的调用（`make` / `make(...)`），`obj.make()` 那种要看接收者，不猜。
-                returns.get(first).cloned()
+                if unwrapped {
+                    returns_unwrapped.get(first).cloned()
+                } else {
+                    returns.get(first).cloned()
+                }
             }
         }
         _ => None,
@@ -1257,6 +1293,8 @@ fn helper() {}
         assert!(junk.symbols.is_empty() || !junk.complete);
     }
 }
+
+
 
 
 

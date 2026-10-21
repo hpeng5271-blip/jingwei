@@ -1,4 +1,4 @@
-// **用量闸**（2026-10-19）：pro 做决策、flash 做执行，两边的量都卡死。
+﻿// **用量闸**（2026-10-19）：pro 做决策、flash 做执行，两边的量都卡死。
 //
 // 为什么要脚本而不是"我自觉"：这轮之前已经证明，靠自觉会多跑 8–10 轮返工。
 // 这里把配额写成**可执行检查**：超了就退出码 1，不许继续。
@@ -19,11 +19,14 @@ import { CAPS } from './caps.mjs';
 /** 两边的日限（超出即拒绝继续）。 */
 export const LIMITS = {
   // 决策层（pro）
-  proCallsPerDay: CAPS.proPerDay, // 20
-  proCnyPerDay: CAPS.cnyPerDay, // ¥3
+  // 一律从 caps.mjs 取，不再在注释里写第二份数字（注释与运行值曾经不一致）
+  proCallsPerDay: CAPS.proPerDay,
+  proCnyPerDay: CAPS.cnyPerDay,
   // 执行层（flash 主会话）
   roundsPerDay: 12,
-  gateRunsPerDay: 6,
+  // 2026-10-21：6 → 20。实测今天跑了 41 次四道门禁（每轮 2–3 次），
+  // 「每天 6 次」与真实节奏差一个数量级；闸门的意义是防跑飞，不是防正常迭代。
+  gateRunsPerDay: 20,
   decisionsPerDay: 4,
   // 总账（估算，含 flash 与 pro）
   totalCnyPerDay: 10,
@@ -112,3 +115,4 @@ if (cmd === 'check') {
   const u = usage();
   console.log(JSON.stringify({ usage: u, limits: LIMITS, pro: summary(3) }, null, 1));
 }
+

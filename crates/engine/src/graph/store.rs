@@ -366,6 +366,39 @@ impl Store {
         };
         Ok(Some(row_to_node(row)?))
     }
+    /// **函数签名提示**：从已落库的符号 `data` 里取 `ret`（返回类型），给"跨文件返回值推导"用
+    /// （2026-10-21）。只返回**名字唯一**的那些——同名函数指向不同返回类型时，猜哪个都是错的。
+    pub fn signature_hints(&self) -> Result<Vec<(String, String)>> {
+        let mut st = self
+            .conn
+            .prepare_cached(
+                "SELECT name, data FROM nodes WHERE kind='symbol' AND data IS NOT NULL",
+            )
+            .context("准备签名提示查询失败")?;
+        let rows = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .context("查签名提示失败")?;
+        let mut seen: std::collections::BTreeMap<String, Option<String>> =
+            std::collections::BTreeMap::new();
+        for r in rows {
+            let (name, data) = r.context("读签名提示行失败")?;
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+                continue;
+            };
+            let Some(ret) = v.get("ret").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            match seen.entry(name).or_insert_with(|| Some(ret.to_string())) {
+                Some(prev) if prev == ret => {}
+                slot => *slot = None, // 同名不同返回类型 → 不可用
+            }
+        }
+        Ok(seen
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| (k, v)))
+            .collect())
+    }
+
     /// 库里记着哪些文件（用来找"索引过但现在已经没有了"的）。
     pub fn indexed_files(&self) -> Result<Vec<String>> {
         let mut st = self

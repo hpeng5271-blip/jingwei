@@ -1,4 +1,4 @@
-﻿//! 把源码变成符号。M3 的落点。
+//! 把源码变成符号。M3 的落点。
 //!
 //! 这一层只干一件事：**语法树 → 领域模型里的 `Node`**。它不碰数据库、不碰规则
 //! （那些是 store 和 rules 的事），所以坏代码最多让这里少出几个符号，
@@ -111,6 +111,20 @@ pub struct RefFact {
 /// `ParseOutcome { symbols: vec![], complete: false }`——
 /// "这次没解析成"和"这个文件没有符号"是两件事，由 `complete` 区分。
 pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
+    parse_rust_with_hints(rel, src, now, &std::collections::BTreeMap::new())
+}
+
+/// **带"全项目签名提示"再解析一遍**（2026-10-21）。
+///
+/// 为什么需要：`let x = make();` 里 `make` 的定义可能在**另一个文件**，而解析是按文件进行的。
+/// 提示由索引层从库里（上一轮解析时落下的 `ret`）或本轮其它文件的结果里收集，**只在
+/// 有的文件里出现"接收者类型看不出来"的方法调用时才重解析这些文件**——不是全量重来。
+pub fn parse_rust_with_hints(
+    rel: &str,
+    src: &str,
+    now: i64,
+    hints: &std::collections::BTreeMap<String, String>,
+) -> ParseOutcome {
     let mut parser = tree_sitter::Parser::new();
     if parser.set_language(&tree_sitter_rust::LANGUAGE.into()).is_err() {
         return ParseOutcome::default();
@@ -243,6 +257,10 @@ pub fn parse_rust(rel: &str, src: &str, now: i64) -> ParseOutcome {
         std::collections::BTreeMap::new();
     let mut returns_unwrapped: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
+    // 先放"全项目提示"（来自别的文件），**本文件里的签名随后覆盖**——本文件更权威。
+    for (k, v) in hints {
+        returns.insert(k.clone(), v.clone());
+    }
     {
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
@@ -780,7 +798,22 @@ fn push_symbol(
     // 具体到这里：`foo()` 是个**调用**，它只可能在**值命名空间**里解析，
     // 所以同名的 struct / trait / mod 根本不该进候选。
     // 不记这一条的话，46 条"拿不准"里有相当一部分是白白拿不准的。
-    n.data = Some(serde_json::json!({ "sym": symbol_class(item.kind()) }));
+    let mut data = serde_json::json!({ "sym": symbol_class(item.kind()) });
+    // **函数签名里的返回类型**也存下来（2026-10-21）：下一次索引别的文件时要拿它做提示——
+    // `let x = make();` 里 `make` 的定义常常在另一个文件。只存"简单返回类型"（无泛型），
+    // 与解析期 `returns` 表的口径一致，避免库里存一个解析期不会用的东西。
+    if item.kind() == "function_item" {
+        if let Some(rt) = item.child_by_field_name("return_type") {
+            if let Ok(text) = rt.utf8_text(src.as_bytes()) {
+                if !text.contains('<') {
+                    if let Some(t) = last_type_ident(text) {
+                        data["ret"] = serde_json::Value::String(t);
+                    }
+                }
+            }
+        }
+    }
+    n.data = Some(data);
     // 内容指纹：种类 + 名字 + 容器 + 文件。**故意不含行号**——
     // 方法往下挪两行不算"内容变了"，而抽样校验问的正是"内容变了没"。
     //

@@ -1,4 +1,4 @@
-﻿//! **CLI 的端到端契约测试**（2026-10-16 加）。
+//! **CLI 的端到端契约测试**（2026-10-16 加）。
 //!
 //! ## 为什么需要这一层
 //!
@@ -1148,6 +1148,50 @@ fn next_一屏三层都在() {
     // ③ 依据与边界层
     assert!(s.contains("依据："), "缺依据层：\n{s}");
     assert!(s.contains("边界："), "缺边界层：\n{s}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// **统一的输出协议**：`next --json` 必须带「结论 + 三态 + 依据 + 覆盖度」。
+///
+/// 为什么这条比任何功能都重要（2026-10-21）：GUI 概览卡、编辑器状态栏、报告窗口
+/// 都要渲染**同一份**数据。没有这四样，"信息表达"就只能各拼各的——那不叫一家人。
+/// 四样缺一，用户看到的就是"结论"而不知道它凭什么、覆盖了多少、到底查没查到。
+///
+/// 判据：`state ∈ {yes,no,unknown}`、`summary` 非空、`evidence` 非空、`coverage.read` 是数。
+/// 空目录里运行也必须给全——**空项目不等于没有结论，它该说"查不了"**。
+#[test]
+fn next_的_json_带三态依据与覆盖度() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("next-json-protocol");
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["next", "--root", &p, "--json"]);
+    assert_eq!(code(&o), 0, "`next --json` 该成功退出：{}", stdout(&o));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&o)).expect("`next --json` 该是合法 JSON");
+
+    for k in ["state", "summary", "evidence", "coverage"] {
+        assert!(
+            v.get(k).is_some(),
+            "`next --json` 缺 `{k}`——没有它就是在给不完整的信息：{v}"
+        );
+    }
+    let st = v["state"].as_str().unwrap_or("");
+    assert!(
+        matches!(st, "yes" | "no" | "unknown"),
+        "state 只许 yes/no/unknown（三态不许压扁）：{st:?}"
+    );
+    assert!(
+        v["summary"].as_str().map(|s| !s.trim().is_empty()).unwrap_or(false),
+        "summary 不许为空：{v}"
+    );
+    assert!(
+        v["evidence"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "evidence 不许为空——每条结论都要有依据：{v}"
+    );
+    assert!(
+        v["coverage"]["read"].as_u64().is_some(),
+        "coverage.read 必须是数（覆盖度不许缺）：{v}"
+    );
     let _ = std::fs::remove_dir_all(&d);
 }
 

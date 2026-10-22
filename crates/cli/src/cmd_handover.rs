@@ -71,6 +71,9 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
                 "counts": counts.map(|(f, s, c, r)| serde_json::json!({"files": f, "symbols": s, "calls": c, "references": r})),
                 "entrances": tops.iter().map(|(f, n)| serde_json::json!({"file": f, "incomingCalls": n})).collect::<Vec<_>>(),
                 "fileLife": lives,
+                // **刚才**（2026-10-22）：接手人最想知道的除了"现在什么状态"，还有"上一件事做完没有"。
+                // 与 `next` 同一个来源（任务日志），同一个形状。
+                "recent_task": recent_task(),
                 "decisions": decs.iter().map(|d| serde_json::json!({"id": d.id, "title": d.title, "why": d.why})).collect::<Vec<_>>(),
             }),
         );
@@ -79,6 +82,28 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
     }
 
     println!();
+    // 先说"刚才"，再说"是什么"（2026-10-22）：前者是最近的，后者是长期的。
+    {
+        let log = jingwei_engine::understand::tasks::tasks_path();
+        let all = jingwei_engine::understand::tasks::load(&log);
+        match all.last() {
+            Some(t) => {
+                let secs = t.ended_at.map(|e| (e - t.started_at).max(0)).unwrap_or(0);
+                println!(
+                    "  刚才：{} · {} · {} 秒{}",
+                    t.name,
+                    t.state,
+                    secs,
+                    t.detail.as_deref().map(|d| format!(" · {d}")).unwrap_or_default()
+                );
+                println!();
+            }
+            None => {
+                println!("  刚才：还没有任务记录（跑一次 jingwei index / envs 就有）");
+                println!();
+            }
+        }
+    }
     println!("  ① 是什么：{}", gj["what"].as_str().unwrap_or("查不了"));
     println!("  ② 能不能跑：{}", gj["headline"].as_str().unwrap_or("查不了"));
     if let Some(bs) = gj["blockers"].as_array() {
@@ -250,4 +275,22 @@ fn lifecycle(root: &Path) -> (&'static str, String) {
             if dirty { "有未提交改动" } else { "干净" }
         ),
     )
+}
+
+/// **"刚才"**（2026-10-22）：任务日志里最近一条，形状与 `jingwei next` 的 `recent_task` 一致。
+///
+/// 为什么放成函数而不是塞进 `json!` 宏里：宏里不能写语句块。也顺手让"两处同形"看得见。
+fn recent_task() -> serde_json::Value {
+    let log = jingwei_engine::understand::tasks::tasks_path();
+    let all = jingwei_engine::understand::tasks::load(&log);
+    match all.last() {
+        Some(t) => serde_json::json!({
+            "kind": format!("{:?}", t.kind).to_lowercase(),
+            "name": t.name,
+            "state": t.state,
+            "elapsed_s": match t.ended_at { Some(e) => (e - t.started_at).max(0), None => 0 },
+            "detail": t.detail,
+        }),
+        None => serde_json::Value::Null,
+    }
 }

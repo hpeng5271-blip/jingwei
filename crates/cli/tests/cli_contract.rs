@@ -1747,3 +1747,38 @@ fn next_也告诉我们刚才干了什么() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`handover` 也说"刚才"**（2026-10-22）：接手人要知道上一件事做完没有，形状与 `next` 一致。
+#[test]
+fn handover_也说刚才() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("handover-recent");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let log = std::env::temp_dir().join(format!("jingwei-tasks-handover-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let b = bin().unwrap();
+    // 先索引（日志里有一条 index），再用同一条日志跑 handover
+    let idx = Command::new(&b)
+        .args(["index", "--root", &p])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-ho.jsonl"))
+        .output()
+        .expect("跑不起来");
+    assert_eq!(idx.status.code(), Some(0), "索引应成功");
+    let out = Command::new(&b)
+        .args(["handover", "--root", &p, "--json"])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-ho.jsonl"))
+        .output()
+        .expect("跑不起来");
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("handover --json 该是 JSON");
+    let r = &v["recent_task"];
+    assert!(r.is_object(), "handover 该带上最近一条任务：{v}");
+    assert_eq!(r["kind"].as_str(), Some("index"), "最近一条该是索引：{r}");
+    assert!(r["elapsed_s"].as_i64().is_some(), "该有用时字段：{r}");
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

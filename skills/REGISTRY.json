@@ -49,13 +49,11 @@
         "from": "原子能《为什么说英语才是最好的计算机语言》的来源分级实践 + 本项目 ASR 流水线",
         "url": "https://www.bilibili.com/video/BV17N4y1p7rB"
       },
-      "adaptation": "把「一手来源 / 推断 / 查不了」做成引用纪律，并绑定 tools/research/asr-atomen.mjs。",
-      "verify": "node tools/research/atomen-digest.mjs",
+      "adaptation": "通道实测矩阵（SO/GitHub/HN/Discourse 可用；Reddit/Discord/搜索引擎不可用）+ 可信度标注 + 落盘路径；由 tools/web.mjs 执行。",
+      "verify": "node tools/web.mjs so \"webview2\" --limit 1",
       "owner": "flash",
       "added": "2026-10-20",
-      "reviewed": "2026-10-20",
-      "cold": true,
-      "coldReason": "pro B1：使用频率低，挂\"冷\"标签降频；需要调研时仍可用"
+      "reviewed": "2026-10-22"
     },
     {
       "name": "jingwei-docs",

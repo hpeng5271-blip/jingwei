@@ -18,8 +18,8 @@
       "saves": "省掉三态话术与卡点协议的重申"
     },
     "jingwei-research": {
-      "trigger": "（冷）「查一下外部项目/人物/技术」",
-      "saves": "省掉来源与可信度标注的重复说明"
+      "trigger": "「查一下外部」「社区怎么说」「SO/Reddit/Discord 有没有」",
+      "saves": "省掉通道试错（哪个能读、哪个登录墙）与可信度标注的重述"
     },
     "commit-evidence": {
       "trigger": "「提交」「这次改动值得提交吗」",

@@ -1782,3 +1782,37 @@ fn handover_也说刚才() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`doctor` 也说"刚才"**（2026-10-22）：体检卡是"能不能跑"的来源，顺带说清"上次谁干的、成没成"。
+/// 形状与 `next` / `handover` 的 `recent_task` 一致。
+#[test]
+fn doctor_也说刚才() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("doctor-recent");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let log = std::env::temp_dir().join(format!("jingwei-tasks-doctor-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let b = bin().unwrap();
+    let idx = Command::new(&b)
+        .args(["index", "--root", &p])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-doc.jsonl"))
+        .output()
+        .expect("跑不起来");
+    assert_eq!(idx.status.code(), Some(0), "索引应成功");
+    let out = Command::new(&b)
+        .args(["doctor", "--root", &p, "--json"])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-doc.jsonl"))
+        .output()
+        .expect("跑不起来");
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("doctor --json 该是 JSON");
+    let r = &v["recent_task"];
+    assert!(r.is_object(), "doctor 该带上最近一条任务：{v}");
+    assert_eq!(r["kind"].as_str(), Some("index"), "最近一条该是索引：{r}");
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

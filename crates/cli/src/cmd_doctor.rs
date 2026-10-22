@@ -51,7 +51,10 @@ pub(crate) fn cmd_doctor(root: &Path, json: bool, want_check: bool) -> i32 {
             "deps_tree": {
                 "edges": edges.iter().map(|e| serde_json::json!({"from": e.from, "to": e.to})).collect::<Vec<_>>(),
                 "total": total,
-            }
+            },
+            // **刚才**（2026-10-22）：体检卡是"能不能跑"的来源，补上"上次谁干的、成没成"。
+            // 与 `next` / `handover` 同一个来源、同一个形状（只读任务日志）。
+            "recent_task": recent_task(),
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         return exit_code(&facts, &findings);
@@ -63,6 +66,11 @@ pub(crate) fn cmd_doctor(root: &Path, json: bool, want_check: bool) -> i32 {
         c(BOLD, "jingwei"),
         env!("CARGO_PKG_VERSION")
     );
+    // 先说"刚才"，再说体检结论（2026-10-22）。
+    match recent_task_text() {
+        Some(t) => println!("  刚才：{t}"),
+        None => println!("  刚才：还没有任务记录（跑一次 jingwei index / envs 就有）"),
+    }
     println!("  {} {}", c(DIM, "项目"), root.display());
     println!("  {} {}", c(DIM, "时间"), facts.taken_at);
     println!();
@@ -565,4 +573,31 @@ pub(crate) fn cmd_fix(root: &Path, json: bool, yes: bool, only: &[String]) -> i3
             1
         }
     }
+}
+
+/// **"刚才"**（2026-10-22）：任务日志最近一条，形状与 `next` / `handover` 一致。
+fn recent_task() -> serde_json::Value {
+    let log = jingwei_engine::understand::tasks::tasks_path();
+    let all = jingwei_engine::understand::tasks::load(&log);
+    match all.last() {
+        Some(t) => serde_json::json!({
+            "kind": format!("{:?}", t.kind).to_lowercase(),
+            "name": t.name,
+            "state": t.state,
+            "elapsed_s": match t.ended_at { Some(e) => (e - t.started_at).max(0), None => 0 },
+            "detail": t.detail,
+        }),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// 文本版：名字 · 状态 · N 秒 · 说明。
+fn recent_task_text() -> Option<String> {
+    let log = jingwei_engine::understand::tasks::tasks_path();
+    let all = jingwei_engine::understand::tasks::load(&log);
+    all.last().map(|t| {
+        let secs = t.ended_at.map(|e| (e - t.started_at).max(0)).unwrap_or(0);
+        format!("{} · {} · {} 秒{}", t.name, t.state, secs,
+            t.detail.as_deref().map(|d| format!(" · {d}")).unwrap_or_default())
+    })
 }

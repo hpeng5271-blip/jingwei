@@ -1982,3 +1982,48 @@ fn file_单文件聚焦() {
     assert_eq!(v2["state"].as_str(), Some("unknown"), "{v2}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`events stats` 读侧**（2026-10-22，债 0.45 闭环的最后一格）：
+/// 90 天窗口内给详情、窗口外只算计数；没有事件文件时是 `unknown` + 三字段（"还没采集"≠"没有行为"）。
+#[test]
+fn events_stats_读得到且守九十天窗口() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("events-stats");
+    let p = d.to_str().unwrap().to_string();
+    let f = d.join("events.jsonl");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|x| x.as_secs() as i64)
+        .unwrap_or(0);
+    let old = now - 200 * 86_400;
+    let fresh = now - 3600;
+    std::fs::write(
+        &f,
+        format!(
+            "{{\"at\":{old},\"kind\":\"edit\",\"key\":\"src/old.rs\",\"detail\":\"很旧的\"}}\n\
+{{\"at\":{fresh},\"kind\":\"open\",\"key\":\"src/new.rs\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    // ① 没有文件 → unknown + 三字段
+    let missing = d.join("nope.jsonl");
+    let o0 = run_env(&["events", "stats", "--root", &p, "--json"], &[("JINGWEI_EVENTS_FILE", missing.to_str().unwrap())]);
+    let v0: serde_json::Value = serde_json::from_str(&stdout(&o0)).expect("events --json 该是 JSON");
+    assert_eq!(v0["state"].as_str(), Some("unknown"), "没有事件该是 unknown：{v0}");
+    for k in ["what", "why", "how"] {
+        assert!(v0[k].as_str().map(|s| !s.is_empty()).unwrap_or(false), "缺字段 {k}：{v0}");
+    }
+
+    // ② 有文件：详情只有 90 天内的，计数两条都算
+    let o1 = run_env(&["events", "stats", "--root", &p, "--json"], &[("JINGWEI_EVENTS_FILE", f.to_str().unwrap())]);
+    let v1: serde_json::Value = serde_json::from_str(&stdout(&o1)).expect("events --json 该是 JSON");
+    assert_eq!(v1["state"].as_str(), Some("yes"), "有事件该是 yes：{v1}");
+    let recent = v1["recent"].as_array().expect("要有 recent 数组");
+    assert_eq!(recent.len(), 1, "只该显示 90 天内的 1 条：{recent:?}");
+    assert_eq!(recent[0]["kind"].as_str(), Some("open"), "{recent:?}");
+    let counts = v1["counts"].as_array().expect("要有 counts 数组");
+    let total: u64 = counts.iter().filter_map(|c| c["n"].as_u64()).sum();
+    assert_eq!(total, 2, "计数要算全部（含 90 天外）：{counts:?}");
+    let _ = std::fs::remove_dir_all(&d);
+}

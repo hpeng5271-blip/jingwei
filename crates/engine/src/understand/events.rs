@@ -90,6 +90,9 @@ pub struct Snapshot {
 /// 读全部事件与计数；**坏行当没有**（与缓存同一条规矩：不因为一行坏掉就整份作废）。
 pub fn load_all(path: &Path) -> Snapshot {
     let Ok(text) = std::fs::read_to_string(path) else { return Snapshot::default() };
+    // **BOM 不能当内容**：Windows 上写文件的工具经常带 BOM；不剥掉的话第一条事件
+    // 会因为开头多一个 \u{feff} 而解析失败、被"坏行当没有"静默丢掉——那是数据丢失。
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let mut snap = Snapshot::default();
     for line in text.lines() {
         let line = line.trim();
@@ -440,3 +443,34 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn 手写json也能解析() {
+        let raw = "{\"at\":1,\"kind\":\"open\",\"key\":\"x\"}";
+        let e: Event = serde_json::from_str(raw).expect("手写 JSON 该能解析");
+        assert_eq!(e.kind, "open");
+        assert_eq!(e.key, "x");
+        assert!(e.detail.is_none());
+    }
+
+    #[test]
+    fn load_all_能读手写文件() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::write(&f, "{\"at\":1000,\"kind\":\"open\",\"key\":\"src/a.rs\"}\n").unwrap();
+        let snap = load_all(&f);
+        assert_eq!(snap.events.len(), 1, "手写文件该读到 1 条：{:?}", snap.events);
+        assert_eq!(snap.counts.len(), 1, "计数该有 1 组：{:?}", snap.counts);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 带_bom_的文件第一条也要读到() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-bom-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::write(&f, "\u{feff}{\"at\":1000,\"kind\":\"open\",\"key\":\"src/a.rs\"}\n").unwrap();
+        let snap = load_all(&f);
+        assert_eq!(snap.events.len(), 1, "BOM 不该让第一条消失：{:?}", snap.events);
+        std::fs::remove_dir_all(&dir).ok();
+    }

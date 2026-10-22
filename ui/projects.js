@@ -153,12 +153,15 @@ function resultLineHtml() {
   const test = diags.filter((d) => d.src === 'test');
   const errs = diags.filter((d) => d.level === 'error').length;
   const warns = diags.filter((d) => d.level !== 'error').length;
-  if (!diags.length && !(DOCK.testLocs || []).length) return '';
+  // 测试失败但没有定位、也没有编译器诊断时，这一行仍然要说一句话（空着等于隐瞒）。
+  const testFailed = DOCK.lastTest && DOCK.lastTest.ok === false;
+  if (!diags.length && !(DOCK.testLocs || []).length && !testFailed) return '';
   const first = diags.find((d) => d.level === 'error') || diags[0];
   const parts = [];
   if (check.length) parts.push('检查 ' + check.length + ' 处');
   if (test.length) parts.push('测试 ' + test.length + ' 处定位');
-  else if ((DOCK.testLocs || []).length && !test.length) parts.push('测试失败 ' + DOCK.testLocs.length + ' 行（位置认不出，没标）');
+  else if ((DOCK.testLocs || []).length) parts.push('测试失败 ' + DOCK.testLocs.length + ' 行（位置认不出，没标）');
+  else if (DOCK.lastTest && DOCK.lastTest.ok === false) parts.push('测试失败（没定位到行）');
   const sev = errs ? 'error' : 'warn';
   const jump = first && first.file
     ? '<a class="rl-jump" data-jump-file="' + esc(first.file) + '" data-jump-line="'
@@ -381,6 +384,9 @@ function mergeTestLocs() {
   }
   DOCK.diags = keep.concat(added);
   if (added.length && typeof edPaintGutter === 'function' && ED && ED.path) edPaintGutter(true);
+  // 结果行也要跟着变（2026-10-22）：跑完测试不刷新，那一行说的还是上一次的话。
+  const rl = document.getElementById('resultLine');
+  if (rl) rl.innerHTML = resultLineHtml();
   return added.length;
 }
 
@@ -1290,7 +1296,10 @@ async function doRun(kind) {
     S.live = null;
     // 你手动点过「运行」= 你为这个项目点过头。之后它才允许自动试运行。
     if (kind === 'run') trust(S.root);
-    if (kind === 'test') mergeTestLocs();
+    if (kind === 'test') {
+      DOCK.lastTest = { ok: out.exit_code === 0, exit: out.exit_code };
+      mergeTestLocs();
+    }
     if (kind === 'test' && typeof msgIngest === 'function') {
       msgIngest('test:' + (S.root || ''), out.exit_code === 0 ? 'status' : 'error',
         '测试：' + (out.exit_code === 0 ? '通过' : '失败（退出码 ' + out.exit_code + '）'));

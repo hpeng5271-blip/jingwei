@@ -677,6 +677,16 @@ try {
     return { txt, hasJump: !!jump, sev: el.querySelector('.result-line')?.dataset.sev || '' };
   });
   check('最近结果：检查与测试分开计数', /检查 2 处/.test(rl.txt) && /测试 1 处定位/.test(rl.txt), rl.txt);
+  // 测试失败但没定位时，结果行也要说（2026-10-22）：不许装作"没有测试这回事"。
+  const rl2 = await page.evaluate(() => {
+    DOCK.diags = [];
+    DOCK.testLocs = [];
+    DOCK.lastTest = { ok: false, exit: 1 };
+    dockProblems({ findings: [] });
+    const el = document.getElementById('resultLine');
+    return { txt: el.textContent.replace(/\s+/g, ' ').trim(), sev: el.querySelector('.result-line')?.dataset.sev || '' };
+  });
+  check('测试失败但没定位也要说出来', /测试失败（没定位到行）/.test(rl2.txt) && rl2.sev === 'warn', JSON.stringify(rl2));
   // 错误角标（2026-10-22）：有 error 才亮、显示数量、点它打开问题栏。
   const eb = await page.evaluate(async () => {
     const f = ED.path;

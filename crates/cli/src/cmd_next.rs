@@ -119,6 +119,34 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
         } else {
             Coverage::partial(entries.len(), Some(entries.len()), "知识层全读；图谱未建（先 jingwei index）")
         };
+        // **刚才怎么样**（2026-10-22）：`next` 以前只回答"该做什么"，不回答"刚才干了什么"。
+        // 数据就是任务日志里最近一条（只读，不判断、不刷新），与界面角标同源。
+        // **刚才怎么样**（2026-10-22）：`next` 以前只回答"该做什么"，不回答"刚才干了什么"。
+        // 数据就是任务日志里最近一条（只读，不判断、不刷新），与界面角标同源。
+        let recent = {
+            let log = jingwei_engine::understand::tasks::tasks_path();
+            let all = jingwei_engine::understand::tasks::load(&log);
+            match all.last() {
+                Some(t) => serde_json::json!({
+                    "kind": format!("{:?}", t.kind).to_lowercase(),
+                    "name": t.name,
+                    "state": t.state,
+                    "elapsed_s": match t.ended_at { Some(e) => (e - t.started_at).max(0), None => 0 },
+                    "detail": t.detail,
+                }),
+                None => serde_json::Value::Null,
+            }
+        };
+        if recent.is_object() {
+            evidence.push(Evidence::file(
+                "tasks.json",
+                &format!(
+                    "最近一条任务：{} · {}",
+                    recent["name"].as_str().unwrap_or(""),
+                    recent["state"].as_str().unwrap_or("")
+                ),
+            ));
+        }
         let v = envelope(
             state,
             summary,
@@ -129,12 +157,31 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
                 "stale": stale,
                 "inbox": inbox,
                 "text_only": unmapped,
+                "recent_task": recent,
             }),
         );
         print(&v);
         return 0;
     }
 
+    // 先说"刚才"，再说"接下来"（2026-10-22）——顺序按人真正关心的来。
+    {
+        let log = jingwei_engine::understand::tasks::tasks_path();
+        let all = jingwei_engine::understand::tasks::load(&log);
+        match all.last() {
+            Some(t) => {
+                let secs = t.ended_at.map(|e| (e - t.started_at).max(0)).unwrap_or(0);
+                println!(
+                    "刚才：{} · {} · {} 秒{}",
+                    t.name,
+                    t.state,
+                    secs,
+                    t.detail.as_deref().map(|d| format!(" · {d}")).unwrap_or_default()
+                );
+            }
+            None => println!("刚才：还没有任务记录（跑一次 jingwei index / envs 就有）"),
+        }
+    }
     println!("现在该做什么（每行括号里是对应的命令，可复跑核对）：");
     match &learn_next {
         Some(n) => println!("  学　{n}（jingwei learn <主题>；--mark <序号> 打勾）"),

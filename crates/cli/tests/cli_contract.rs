@@ -1715,3 +1715,35 @@ fn env_use_也留下任务记录() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`next` 先说"刚才"，再说"接下来"**（2026-10-22）：只读任务日志里最近一条，与界面角标同源。
+#[test]
+fn next_也告诉我们刚才干了什么() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("next-recent");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    // 先跑一次索引（日志里就有一条 index）
+    let (o1, _log) = run_tasks(&["index", "--root", &p], "next-recent");
+    assert_eq!(code(&o1), 0, "索引应成功");
+    // 同一条日志路径上再跑 next
+    let b = bin().unwrap();
+    let log = std::env::temp_dir().join(format!("jingwei-tasks-next-recent-{}.json", std::process::id()));
+    let out = Command::new(b)
+        .args(["next", "--root", &p, "--json"])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-next.jsonl"))
+        .output()
+        .expect("跑不起来");
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("next --json 该是 JSON");
+    let r = &v["recent_task"];
+    assert!(r.is_object(), "next 该带上最近一条任务：{v}");
+    assert_eq!(r["kind"].as_str(), Some("index"), "最近一条该是索引：{r}");
+    assert_eq!(r["state"].as_str(), Some("done"), "该是 done：{r}");
+    let text = run_tasks(&["next", "--root", &p], "next-recent").0;
+    assert!(stdout(&text).contains("刚才："), "文本模式也要先说刚才：{}", stdout(&text));
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -53,7 +53,9 @@
       "verify": "node tools/research/atomen-digest.mjs",
       "owner": "flash",
       "added": "2026-10-20",
-      "reviewed": "2026-10-20"
+      "reviewed": "2026-10-20",
+      "cold": true,
+      "coldReason": "pro B1：使用频率低，挂\"冷\"标签降频；需要调研时仍可用"
     },
     {
       "name": "jingwei-docs",
@@ -112,7 +114,7 @@
     },
     {
       "name": "writing-plans",
-      "status": "active",
+      "status": "deprecated",
       "source": {
         "kind": "adapted",
         "from": "superpowers-zh 同名技能（MIT）",
@@ -122,7 +124,60 @@
       "verify": "node tools/skills-check.mjs",
       "owner": "flash",
       "added": "2026-10-20",
-      "reviewed": "2026-10-20"
+      "reviewed": "2026-10-20",
+      "reason": "pro B1：步骤太虚，职责被 jingwei-triage（卡点/三态）与 facts-refresh（执行链）覆盖"
+    },
+    {
+      "name": "facts-refresh",
+      "status": "active",
+      "source": {
+        "kind": "original",
+        "from": "2026-10-22 真源/门禁/提交链（含三次踩坑：CRLF、mtime、规模词）"
+      },
+      "adaptation": "把 collect → write-docs → check → links → gates 压成一条固定链，并写明\"缺一不算\"的三样。",
+      "verify": "node tools/check_facts.mjs && node tools/check-links.mjs",
+      "owner": "flash",
+      "added": "2026-10-22",
+      "reviewed": "2026-10-22"
+    },
+    {
+      "name": "file-focus",
+      "status": "active",
+      "source": {
+        "kind": "original",
+        "from": "D-20261022-03 §四（pro Q5-C）+ jingwei file 实现"
+      },
+      "adaptation": "四件问答 + 三态 + 界面聚焦的对应关系；强调\"诊断不在 file 里算\"。",
+      "verify": "cargo test -p jingwei --test cli_contract file_单文件聚焦",
+      "owner": "flash",
+      "added": "2026-10-22",
+      "reviewed": "2026-10-22"
+    },
+    {
+      "name": "focus-mode",
+      "status": "active",
+      "source": {
+        "kind": "original",
+        "from": "D-20261022-03（pro Q2-A / Q7-B）+ 实测耗时表"
+      },
+      "adaptation": "把\"先量再停最后换通道\"的顺序与聚焦默认档写死，附实测数字。",
+      "verify": "node tools/perf.mjs",
+      "owner": "flash",
+      "added": "2026-10-22",
+      "reviewed": "2026-10-22"
+    },
+    {
+      "name": "usage-governance",
+      "status": "active",
+      "source": {
+        "kind": "original",
+        "from": "D-20261022-03（pro Q1-A / Q3 / Q4）+ 数据目录实测"
+      },
+      "adaptation": "存哪/记哪 5 条/绝不记清单/90 天保留/先量后合，压成一页。",
+      "verify": "node -e \"const f=require('os').homedir();console.log(f)\"   # 目录存在即可",
+      "owner": "flash",
+      "added": "2026-10-22",
+      "reviewed": "2026-10-22"
     }
   ]
 }

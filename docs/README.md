@@ -12,6 +12,9 @@
 | [`框架.md`](../框架.md) | 该按什么想（§九 四条方法） |
 | [`docs/reference/失效模式清单.md`](reference/失效模式清单.md) | **我犯过的错，浓缩版**：每条都写着"现在由什么守着" |
 | [`docs/decisions/`](decisions/) | 已拍板的决策（编号 D-日期-序号），先看再改判据 |
+| [docs/MANIFEST-摘要.md](MANIFEST-摘要.md) | 一页索引：每份一句话 + 最新数字 + 更新时间（先看它） |
+| [docs/reference/操作细节.md](reference/操作细节.md) | 节奏 / 门禁细则 / 分工 / 设备约束（从 AGENTS 搬出） |
+| [docs/reference/里程碑-2026-10.md](reference/里程碑-2026-10.md) | 历史里程碑与实测量（从 AGENTS 搬出） |
 | [`docs/design/界面约定.md`](design/界面约定.md) | 加界面之前对一遍的八条规矩（每条都写着落在哪、哪条断言守着） |
 
 ## 二、设计（现行 / 史料分开）

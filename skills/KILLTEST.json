@@ -1,0 +1,57 @@
+{
+  "note": "kill test 规格（2026-10-22，pro B4）：每个技能的触发语与它替人省掉什么。判断'这次有没有用到'由人/模型裁决，脚本只记结果并算命中率。",
+  "skills": {
+    "jingwei-gate": {
+      "trigger": "「跑门禁」「门禁红了」「能不能提交」",
+      "saves": "省掉重述四道门禁顺序、红不提交、数字真源"
+    },
+    "jingwei-docs": {
+      "trigger": "「改文档数字」「写报告」「打包/说明书」",
+      "saves": "省掉 fact 标记纪律与打包前检查"
+    },
+    "jingwei-graph": {
+      "trigger": "「这项目是什么结构」「这个符号在哪/谁调它」",
+      "saves": "省掉手翻目录与猜结构"
+    },
+    "jingwei-triage": {
+      "trigger": "「能不能说完成」「卡住了」「两次都失败」",
+      "saves": "省掉三态话术与卡点协议的重申"
+    },
+    "jingwei-research": {
+      "trigger": "（冷）「查一下外部项目/人物/技术」",
+      "saves": "省掉来源与可信度标注的重复说明"
+    },
+    "commit-evidence": {
+      "trigger": "「提交」「这次改动值得提交吗」",
+      "saves": "省掉证据三样与提交信息结构"
+    },
+    "review-diff": {
+      "trigger": "「看看这次 diff 有没有问题」「提交前自查」",
+      "saves": "省掉逐文件通读"
+    },
+    "systematic-debugging": {
+      "trigger": "「测试挂了」「索引报错」「说不清为什么」",
+      "saves": "省掉乱改一气的弯路"
+    },
+    "writing-plans": {
+      "trigger": "（已 deprecated，不再触发）",
+      "saves": "—"
+    },
+    "facts-refresh": {
+      "trigger": "「刷新 facts」「提交前那条链」「文档数字对不对」",
+      "saves": "省掉 collect→write→check→links→gates 的重新推导与三个踩坑"
+    },
+    "file-focus": {
+      "trigger": "「这个文件怎么样」「它依赖谁」「改它影响谁」",
+      "saves": "省掉 explain+impact 两条命令拼装与三态说明"
+    },
+    "focus-mode": {
+      "trigger": "「卡/慢」「停一下后台」「聚焦」「占资源」",
+      "saves": "省掉重新测量与'先量再停'的顺序"
+    },
+    "usage-governance": {
+      "trigger": "「数据存哪」「记了什么」「隐私」「删数据」",
+      "saves": "省掉 5 条事件 + 绝不记清单 + 90 天保留的重述"
+    }
+  }
+}

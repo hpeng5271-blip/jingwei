@@ -59,6 +59,26 @@ pub(crate) fn cmd_serve(root: &Path) -> i32 {
                     "result": {"total": total, "kinds": snap.counts.len(), "recent": recent},
                 })
             }
+            // 2026-10-23：这两条也要走常驻通道（原来只能 spawn）。
+            // 判据复用 engine 的 `progress()` / `by_key()`，不在这里再实现一遍。
+            "progress" => {
+                let snap = load_all(&events_path());
+                let (todo, learned) = snap.progress();
+                serde_json::json!({"id": id, "ok": true, "result": {"todo": todo, "learned": learned}})
+            }
+            "events_summary" => {
+                let key = req
+                    .get("params")
+                    .and_then(|p| p.get("key"))
+                    .and_then(|k| k.as_str())
+                    .unwrap_or("");
+                let snap = load_all(&events_path());
+                let st = snap.by_key(key);
+                serde_json::json!({"id": id, "ok": true, "result": {
+                    "key": key, "open": st.open, "edit": st.edit, "check": st.check,
+                    "revisit": st.revisit, "last_check": st.last_check,
+                }})
+            }
             other => serde_json::json!({
                 "id": id, "ok": false,
                 "error": format!("不认识的方法：{other}（支持 ping / metrics / events）"),

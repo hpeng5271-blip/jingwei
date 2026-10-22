@@ -516,3 +516,53 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         assert_eq!(snap.events.len(), 1, "BOM 不该让第一条消失：{:?}", snap.events);
         std::fs::remove_dir_all(&dir).ok();
     }
+
+/// 一个 key（文件路径）的汇总（2026-10-23）：serve 与 CLI 共用，不许各算一份。
+#[derive(Debug, Default, Clone)]
+pub struct KeySummary {
+    pub open: u64,
+    pub edit: u64,
+    pub check: u64,
+    pub revisit: u64,
+    pub last_check: Option<String>,
+}
+
+impl Snapshot {
+    /// 按 key 汇总（只数 `events` 里还在的那些；已归档的只剩计数，不参与分类）。
+    pub fn by_key(&self, key: &str) -> KeySummary {
+        let mut out = KeySummary::default();
+        for e in self.events.iter().filter(|e| e.key == key) {
+            match e.kind.as_str() {
+                "open" => out.open += 1,
+                "edit" => out.edit += 1,
+                "check" => { out.check += 1; out.last_check = e.detail.clone(); }
+                "revisit" => out.revisit += 1,
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// 学习进度：`复访 ≥3 且最后一次检查仍红` = 待解决；检查过且不红 = 已变绿。
+    pub fn progress(&self) -> (Vec<String>, Vec<String>) {
+        let mut todo = Vec::new();
+        let mut learned = Vec::new();
+        let mut keys: Vec<&str> = self.events.iter().map(|e| e.key.as_str()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for k in keys {
+            let st = self.by_key(k);
+            let red = st
+                .last_check
+                .as_deref()
+                .map(|d| d.contains("error ") && !d.contains("error 0"))
+                .unwrap_or(false);
+            if st.revisit >= 3 && red {
+                todo.push(k.to_string());
+            } else if st.check > 0 && !red {
+                learned.push(k.to_string());
+            }
+        }
+        (todo, learned)
+    }
+}

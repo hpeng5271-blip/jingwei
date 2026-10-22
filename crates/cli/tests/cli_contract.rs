@@ -2073,6 +2073,15 @@ fn serve_一问一答() {
     assert_eq!(e["id"].as_i64(), Some(3), "{e}");
     assert!(e["result"]["total"].as_u64().is_some(), "events 该给 total（0 也算）：{e}");
 
+    // 2026-10-23：通道扩面——progress 与 events_summary 也要能一问一答
+    let pr = ask(r#"{"id":5,"method":"progress"}"#);
+    assert_eq!(pr["ok"].as_bool(), Some(true), "{pr}");
+    assert!(pr["result"]["todo"].is_array(), "progress 要给 todo 数组：{pr}");
+    let es = ask(r#"{"id":6,"method":"events_summary","params":{"key":"src/a.rs"}}"#);
+    assert_eq!(es["ok"].as_bool(), Some(true), "{es}");
+    assert_eq!(es["result"]["key"].as_str(), Some("src/a.rs"), "{es}");
+    assert!(es["result"]["open"].as_u64().is_some(), "要给次数（0 也算）：{es}");
+
     let bad = ask(r#"{"id":4,"method":"nope"}"#);
     assert_eq!(bad["ok"].as_bool(), Some(false), "未知方法该回错误：{bad}");
     assert_eq!(bad["id"].as_i64(), Some(4), "{bad}");

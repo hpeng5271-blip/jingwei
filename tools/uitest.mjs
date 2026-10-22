@@ -52,6 +52,11 @@ function stubTauri() {
       return { files: 3, volume_bytes: 2048, lifecycle: { state: "recent", basis: "测试" } };
     }
     if (cmd === 'channel_stop') { globalThis.__chanStopped = (globalThis.__chanStopped || 0) + 1; return null; }
+    if (cmd === 'events_summary') {
+      const k = args && args.key;
+      if (!k) return { open: 0, edit: 0, check: 0, revisit: 0, last_check: null };
+      return { key: k, open: 3, edit: 2, check: 1, revisit: 3, last_check: 'error 1 / warn 0' };
+    }
     if (cmd === 'event_note') { (globalThis.__events ||= []).push(args); return true; }
     if (cmd === 'data_dir') return 'C:\\Users\\demo\\AppData\\Local\\jingwei';
     if (cmd === 'open_path') { (globalThis.__opened ||= []).push(args && args.path); return null; }
@@ -652,6 +657,15 @@ try {
     return { shown, text, lncol, hiddenAfter };
   });
   check('编辑器：工具栏上有诊断计数', dc.shown === true && /error/.test(dc.text) && /warn/.test(dc.text), JSON.stringify(dc));
+  // 文件历史（2026-10-22，pro：采集→展示闭环）：次数 + 复访提醒，都来自事件。
+  const eh = await page.evaluate(async () => {
+    await renderEdHistory();
+    await new Promise((r) => setTimeout(r, 150));
+    const el = document.getElementById('edHistory');
+    return { text: el ? el.textContent : '', hidden: el ? el.hidden : true };
+  });
+  check('文件历史：说得出打开/改动/检查次数与复访',
+    /打开 3/.test(eh.text) && /改动 2/.test(eh.text) && /回来第 3 次/.test(eh.text) && eh.hidden === false, JSON.stringify(eh));
   check('编辑器：点计数跳第一处，没诊断就收起', dc.lncol.includes('第 2 行') && dc.hiddenAfter === true, JSON.stringify(dc));
   // 网络允许（2026-10-22）：列表来自 CLI 的 net status；点 × 走 net deny。
   const netSt = await page.evaluate(async () => {

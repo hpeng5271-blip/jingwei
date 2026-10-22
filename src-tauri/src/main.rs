@@ -952,6 +952,7 @@ fn main() {
     data_dir,
     open_path,
     event_note,
+    events_summary,
     channel::channel_start,
     channel::channel_request,
     channel::channel_stop,
@@ -1052,4 +1053,32 @@ fn event_note(kind: String, key: String, detail: Option<String>) -> Result<bool,
         "abandon" => Ok(rec.abandon(&key, now)),
         _ => Ok(rec.record(ev, Source::Human)),
     }
+}
+
+/// **按 key 汇总事件**（2026-10-22，pro：界面要消费 events，形成采集→展示闭环）。
+///
+/// 只读：数一数这个文件被打开/改动/检查过几次、复访几次、最后一次检查结果是什么。
+/// 不写事件（写是 `event_note` 的事），也不碰"绝不记"清单。
+#[tauri::command]
+fn events_summary(key: String) -> Result<serde_json::Value, String> {
+    use jingwei_engine::understand::events::{events_path, load_all};
+    let snap = load_all(&events_path());
+    let (mut open, mut edit, mut check, mut revisit) = (0u64, 0u64, 0u64, 0u64);
+    let mut last_check: Option<String> = None;
+    for e in snap.events.iter().filter(|e| e.key == key) {
+        match e.kind.as_str() {
+            "open" => open += 1,
+            "edit" => edit += 1,
+            "check" => {
+                check += 1;
+                last_check = e.detail.clone();
+            }
+            "revisit" => revisit += 1,
+            _ => {}
+        }
+    }
+    Ok(serde_json::json!({
+        "key": key, "open": open, "edit": edit, "check": check, "revisit": revisit,
+        "last_check": last_check,
+    }))
 }

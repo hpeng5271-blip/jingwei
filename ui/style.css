@@ -2058,3 +2058,7 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 
 /* 消息阵列的"重启会清空"提醒（2026-10-22）。 */
 .msg-hint { opacity: 0.55; cursor: help; text-decoration: underline dotted; }
+
+/* 编辑器里的文件历史（2026-10-22）：一行字，不抢注意力。 */
+.ed-history { font-size: 12px; opacity: 0.65; margin-left: 8px; }
+.ed-history[hidden] { display: none; }

@@ -616,6 +616,7 @@ function edPaintGutter(force) {
   wrap.scrollTop = $('#edText').scrollTop;
   edPaintCode();
   edPaintGuides();
+  renderEdHistory();
   edPaintCaret();
   edPaintDiagCount();
 }
@@ -923,3 +924,24 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   gotoDiag(ED.path, parseInt(el.dataset.line || '1', 10), 1);
 });
+
+
+/// **这个文件的历史**（2026-10-22，pro：采集→展示闭环）。
+/// 只显示"能被说出口的"：打开几次、改几次、检查几次、回来几次、最后一次检查结果。
+/// 复访 ≥3 次时多说一句——那正是"同一个坑反复付学费"的样子。
+async function renderEdHistory() {
+  const el = document.getElementById('edHistory');
+  if (!el || !ED.path) return;
+  try {
+    const s = await invoke('events_summary', { key: ED.path });
+    const parts = [];
+    if (s.open) parts.push('打开 ' + s.open);
+    if (s.edit) parts.push('改动 ' + s.edit);
+    if (s.check) parts.push('检查 ' + s.check + (s.last_check ? '（' + s.last_check + '）' : ''));
+    el.textContent = parts.length ? '历史：' + parts.join(' · ') : '历史：还没有记录';
+    if (s.revisit >= 3) el.textContent += ' · 这个文件你回来第 ' + s.revisit + ' 次了';
+    el.hidden = false;
+  } catch (err) {
+    el.hidden = true;   // 读不到就不占位（看不清就别装）
+  }
+}

@@ -15,6 +15,7 @@ mod cmd_deps;
 mod cmd_net;
 mod cmd_discover;
 mod cmd_explain;
+mod cmd_data;
 mod cmd_events;
 mod cmd_serve;
 mod cmd_file;
@@ -496,6 +497,7 @@ fn run(used_cmd: &mut String) -> i32 {
     // **单文件聚焦**（2026-10-22，D-20261022-03 §四）：问"这一个文件怎么样"一次答完。
     "events" => cmd_events::cmd_events(&rest, json),
     "serve" => cmd_serve::cmd_serve(&root),
+    "data" => cmd_data::cmd_data(&rest, json),
     "file" => {
         let Some(path) = rest.first() else {
             eprintln!("用法：jingwei file <路径> [--json]");
@@ -694,6 +696,7 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     // 用户敲 `jingwei --help` 看不到 handover / explain / positions / rename / watch，
     // 只能从说明书或记忆里找。帮助表是"有哪些命令"的唯一真源，漏了就等于没这命令。
     ("handover", &[], "接手人一页纸：能不能跑 / 规模 / 热点 / 下一步 / 决策理由 / 文件状态"),
+    ("data", &[], "数据台账：每份数据多大/多少行/最后写入；事件给 24 小时增量"),
     ("serve", &[], "常驻通道骨架：stdio 上一行一请求（ping / metrics / events）"),
     ("events", &[], "使用事件读侧：计数（长期保留）+ 最近 90 天详情"),
     ("file", &[], "单文件聚焦：是什么 / 依赖谁 / 最近动过（图里没建就说查不了）"),

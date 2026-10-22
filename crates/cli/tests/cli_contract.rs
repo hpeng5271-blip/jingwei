@@ -2081,3 +2081,55 @@ fn serve_一问一答() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **数据台账**（2026-10-22，债 0.46 的"先量"）：把 `%LOCALAPPDATA%\jingwei` 里每一份
+/// 数据说清楚——多大、多少行、最后写于何时；事件还多给一个"近 24 小时"的增量。
+/// 目录不存在时是 `unknown` + 三字段（"还没产生数据"≠"没有数据"）。
+#[test]
+fn data_stats_把每一份数据说清楚() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("data-stats");
+    let root = d.to_str().unwrap().to_string();
+
+    // ① 目录不存在 → unknown + 三字段
+    let miss = d.join("no-such-dir");
+    let o0 = run_env(
+        &["data", "stats", "--json"],
+        &[("JINGWEI_DATA_DIR", miss.to_str().unwrap())],
+    );
+    let v0: serde_json::Value = serde_json::from_str(&stdout(&o0)).expect("该是 JSON");
+    assert_eq!(v0["state"].as_str(), Some("unknown"), "没目录该是 unknown：{v0}");
+    for k in ["what", "why", "how"] {
+        assert!(v0[k].as_str().map(|s| !s.is_empty()).unwrap_or(false), "缺字段 {k}：{v0}");
+    }
+
+    // ② 有数据 → 说清每一份；事件给近 24 小时增量
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|x| x.as_secs() as i64)
+        .unwrap_or(0);
+    std::fs::write(
+        d.join("events.jsonl"),
+        format!(
+            "{{\"at\":{},\"kind\":\"open\",\"key\":\"a.rs\"}}\n{{\"at\":{},\"kind\":\"edit\",\"key\":\"a.rs\",\"detail\":\"行数 1 → 2\"}}\n",
+            now - 7200,
+            now - 400 * 86_400
+        ),
+    )
+    .unwrap();
+    std::fs::write(d.join("tasks.json"), "[]").unwrap();
+
+    let o1 = run_env(
+        &["data", "stats", "--json"],
+        &[("JINGWEI_DATA_DIR", &root), ("JINGWEI_EVENTS_FILE", d.join("events.jsonl").to_str().unwrap())],
+    );
+    let v1: serde_json::Value = serde_json::from_str(&stdout(&o1)).expect("该是 JSON");
+    assert_eq!(v1["state"].as_str(), Some("yes"), "有数据该是 yes：{v1}");
+    let files = v1["files"].as_array().expect("要有 files 数组");
+    assert!(files.iter().any(|f| f["name"] == "events.jsonl"), "该列出 events.jsonl：{files:?}");
+    let ev = files.iter().find(|f| f["name"] == "events.jsonl").unwrap();
+    assert_eq!(ev["lines"].as_u64(), Some(2), "2 行事件：{ev}");
+    assert_eq!(v1["events"]["total"].as_u64(), Some(2), "总数 2：{v1}");
+    assert_eq!(v1["events"]["last_24h"].as_u64(), Some(1), "近 24 小时 1 条：{v1}");
+    let _ = std::fs::remove_dir_all(&d);
+}

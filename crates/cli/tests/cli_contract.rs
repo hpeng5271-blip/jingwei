@@ -1921,3 +1921,24 @@ fn 三处_metrics_同形() {
     assert!(first["files"].as_u64().unwrap_or(0) >= 1, "至少该量到两个文件：{first}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`handover` 文本版也要印三数字**（2026-10-22）：JSON 里一直有 `metrics`，文本只讲规模（图库里的），
+/// 少了"这个项目有多大、还算活着吗"。人看的和机读的要一致。
+#[test]
+fn handover_文本版也印三数字() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("ho-text-metrics");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let o = run(&["handover", "--root", &p]);
+    let s = stdout(&o);
+    assert!(s.contains("③ 三数字"), "文本版该印三数字那一行：{s}");
+    assert!(s.contains("个文件"), "三数字里该有文件数：{s}");
+    assert!(
+        s.contains("没有版本库") || s.contains("最近改过") || s.contains("判断不了"),
+        "三数字里该有生命周期的人话：{s}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

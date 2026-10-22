@@ -123,6 +123,22 @@ pub fn cmd_handover(root: &Path, json: bool) -> i32 {
             get("modified"), get("unchanged"), get("deleted"), get("unseen")
         );
     }
+    // **三数字先印**（2026-10-22）：JSON 里一直有 metrics，文本版却只有"规模"（图库里的），
+    // 少了"这个项目有多大、还算活着吗"。两处都走同一个 metrics()，不各算一份。
+    {
+        let m = metrics(root);
+        let files = m["files"].as_u64().unwrap_or(0);
+        let bytes = m["volume_bytes"].as_u64().unwrap_or(0);
+        let capped = m["capped"].as_bool().unwrap_or(false);
+        let life = m["lifecycle"]["state"].as_str().unwrap_or("unknown");
+        println!(
+            "  ③ 三数字：{} 个文件 / {}{} / {}  {}",
+            files, human_bytes(bytes),
+            if capped { "（只量了一部分）" } else { "" },
+            life_text(life),
+            m["lifecycle"]["basis"].as_str().unwrap_or("")
+        );
+    }
     match counts {
         Some((f, s, c, r)) => println!("  ③ 规模：{f} 文件 / {s} 符号 / {c} 调用边 / {r} 引用边"),
         None => println!("  ③ 规模：查不了（图谱还没建，先 `jingwei index`）"),
@@ -292,5 +308,29 @@ fn recent_task() -> serde_json::Value {
             "detail": t.detail,
         }),
         None => serde_json::Value::Null,
+    }
+}
+
+/// 字节说人话（与界面 fmtBytes 同口径）。
+fn human_bytes(b: u64) -> String {
+    const U: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = b as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < U.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 { format!("{b} B") } else { format!("{v:.1} {}", U[i]) }
+}
+
+/// 生命周期说人话：既给状态也给判据。
+fn life_text(state: &str) -> &'static str {
+    match state {
+        "active" => "最近改过",
+        "recent" => "这几个月动过",
+        "maintenance" => "维护期",
+        "stale" => "很久没动",
+        "no_git" => "没有版本库，判断不了",
+        _ => "查不了",
     }
 }

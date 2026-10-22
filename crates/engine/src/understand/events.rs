@@ -246,3 +246,197 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+// ───────────────────────── 采集策略（pro Q3） ─────────────────────────
+
+/// 采集时**必须回答的上下文**。任何拿不准的情况都退回"不记"——宁可少记，不许记错。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// 人在界面/命令行里主动做的事。
+    Human,
+    /// 程序自己发起的取数（例如 GUI 为了显示而调 CLI）——**绝不记**，否则事件流被自己污染。
+    ProgramSpawn,
+    /// 后台对账/自动刷新（允许表、任务角标轮询）——**绝不记**。
+    AutoReconcile,
+}
+
+/// "绝不记"清单（pro Q3 原话）：帮助调用、纯滚动/悬停、后台内部查询、自动对账、GUI spawn 的取数。
+pub fn should_record(source: Source, kind: &str) -> bool {
+    if source != Source::Human {
+        return false;
+    }
+    matches!(kind, "open" | "edit" | "check" | "revisit" | "abandon")
+}
+
+/// 同一条 `open` 在这个窗口内不重复记（pro Q3：5 分钟）。
+pub const OPEN_DEDUP_SECS: i64 = 300;
+
+/// 复访判定窗口（pro Q3：30 分钟）。
+pub const REVISIT_GAP_SECS: i64 = 1800;
+
+/// 采集器：所有"该不该记"的判断都在这里，调用方只描述发生了什么。
+///
+/// 为什么集中在一处：如果界面和 CLI 各写各的判断，同一条规矩会被实现两遍，然后漂移。
+pub struct Recorder {
+    path: PathBuf,
+}
+
+impl Recorder {
+    pub fn new(path: PathBuf) -> Self { Self { path } }
+
+    /// 用默认位置（`%LOCALAPPDATA%\jingwei\events.jsonl`）。
+    pub fn with_default_path() -> Self { Self::new(events_path()) }
+
+    /// 记一条事件；返回 `true` 表示真的写进去了（便于测试与自查）。
+    pub fn record(&self, ev: Event, source: Source) -> bool {
+        if !should_record(source, &ev.kind) {
+            return false;
+        }
+        if ev.key.trim().is_empty() {
+            return false;
+        }
+        append(&self.path, &ev).is_ok()
+    }
+
+    /// 打开一个文件：**5 分钟内同一个 key 只记一次**。
+    pub fn open_file(&self, path: &str, now: i64, source: Source) -> bool {
+        let recent = load(&self.path)
+            .iter()
+            .rev()
+            .take(50)
+            .any(|e| e.kind == "open" && e.key == path && now - e.at < OPEN_DEDUP_SECS);
+        if recent {
+            return false;
+        }
+        self.record(Event { at: now, kind: "open".into(), key: path.into(), detail: None }, source)
+    }
+
+    /// 保存后内容变了：**只记行数变化，不记内容**（pro Q3 的硬边界）。
+    pub fn edit_file(&self, path: &str, lines_before: usize, lines_after: usize, now: i64) -> bool {
+        if lines_before == lines_after {
+            return false; // 没变就不算"改动"
+        }
+        let delta = lines_after as i64 - lines_before as i64;
+        self.record(
+            Event {
+                at: now,
+                kind: "edit".into(),
+                key: path.into(),
+                detail: Some(format!("行数 {lines_before} → {lines_after}（{delta:+}）")),
+            },
+            Source::Human,
+        )
+    }
+
+    /// 检查跑完：只记这个文件的 error/warn 数与是否变绿。
+    pub fn check_file(&self, path: &str, errors: usize, warns: usize, now: i64) -> bool {
+        self.record(
+            Event {
+                at: now,
+                kind: "check".into(),
+                key: path.into(),
+                detail: Some(format!("error {errors} / warn {warns}")),
+            },
+            Source::Human,
+        )
+    }
+
+    /// 复访：距上次同一 key 的 `open` 超过 30 分钟才记。
+    pub fn revisit(&self, path: &str, now: i64) -> bool {
+        let last = load(&self.path)
+            .iter()
+            .rev()
+            .find(|e| e.key == path && (e.kind == "open" || e.kind == "revisit"))
+            .map(|e| e.at);
+        match last {
+            Some(t) if now - t < REVISIT_GAP_SECS => false,
+            _ => self.record(
+                Event { at: now, kind: "revisit".into(), key: path.into(), detail: None },
+                Source::Human,
+            ),
+        }
+    }
+
+    /// 放弃：打开后很短时间就离开、且期间没有 `edit`（时间式，先能跑；行为式以后替换）。
+    pub fn abandon(&self, path: &str, now: i64) -> bool {
+        let events = load(&self.path);
+        let last_open = events.iter().rev().find(|e| e.kind == "open" && e.key == path);
+        let Some(open) = last_open else { return false };
+        if now - open.at > ABANDON_WINDOW_SECS {
+            return false;
+        }
+        let edited = events
+            .iter()
+            .any(|e| e.kind == "edit" && e.key == path && e.at >= open.at);
+        if edited {
+            return false;
+        }
+        self.record(
+            Event { at: now, kind: "abandon".into(), key: path.into(), detail: None },
+            Source::Human,
+        )
+    }
+}
+
+/// "打开又马上离开"的窗口（abandon 的时间式判据）。
+pub const ABANDON_WINDOW_SECS: i64 = 30;
+
+    #[test]
+    fn 绝不记清单_程序取数不记_帮助调用不记() {
+        assert!(!should_record(Source::ProgramSpawn, "open"), "GUI spawn 的取数不许记");
+        assert!(!should_record(Source::AutoReconcile, "check"), "自动对账不许记");
+        assert!(!should_record(Source::Human, "-h"), "帮助调用不算行为");
+        assert!(!should_record(Source::Human, "scroll"), "纯滚动不记");
+        assert!(should_record(Source::Human, "edit"), "人改文件要记");
+    }
+
+    #[test]
+    fn edit事件不含文件内容_只含行数变化() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-edit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let rec = Recorder::new(f.clone());
+        assert!(rec.edit_file("src/a.rs", 10, 12, 1_000));
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(text.contains("行数 10 → 12"), "要有行数变化：{text}");
+        // 断言"不含代码"要挑真正的代码特征（JSON 本身就有花括号，别拿它当判据）
+        for code in ["fn ", "def ", "=>", "import "] {
+            assert!(!text.contains(code), "**不许含代码内容**（发现 {code}）：{text}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 五分钟内同一个open只记一次() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let rec = Recorder::new(f.clone());
+        assert!(rec.open_file("src/a.rs", 10_000, Source::Human));
+        assert!(!rec.open_file("src/a.rs", 10_100, Source::Human), "5 分钟内不重复");
+        assert!(rec.open_file("src/a.rs", 10_000 + OPEN_DEDUP_SECS + 1, Source::Human), "过了窗口要记");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 复访要隔三十分钟_放弃只在没改动时记() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-rev-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let rec = Recorder::new(f.clone());
+        assert!(rec.open_file("src/a.rs", 1_000, Source::Human));
+        assert!(!rec.revisit("src/a.rs", 1_100), "30 分钟内不算复访");
+        assert!(rec.revisit("src/a.rs", 1_000 + REVISIT_GAP_SECS + 1), "过了窗口算复访");
+        // 同一秒内打开后马上离开：没 edit → 记 abandon
+        assert!(rec.open_file("src/b.rs", 2_000, Source::Human));
+        assert!(rec.abandon("src/b.rs", 2_010));
+        // 有 edit 就不算放弃
+        assert!(rec.open_file("src/c.rs", 3_000, Source::Human));
+        assert!(rec.edit_file("src/c.rs", 5, 6, 3_005));
+        assert!(!rec.abandon("src/c.rs", 3_010));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+

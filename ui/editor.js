@@ -360,6 +360,11 @@ function edPaintCrumb(path) {
     + ' data-crumb="' + esc(parts.slice(0, i + 1).join('/')) + '">' + esc(p) + '</button>').join('');
 }
 
+/// 记一条使用事件（2026-10-22）：**失败静默**，记不上不能挡住用户操作。
+function noteEvent(kind, key, detail) {
+  try { invoke('event_note', { kind, key, detail: detail || null }); } catch (err) { /* 记不上就算了 */ }
+}
+
 async function edOpen(path) {
   if (!S.root || ED.busy) return;
   // 有未应用的改动时不再弹 confirm（WebView 里的 confirm 会卡住整条交互链），
@@ -370,6 +375,7 @@ async function edOpen(path) {
     const o = await invoke('open_file', { root: S.root, path });
     ED.path = path;
     ED.disk = o.text || '';
+    noteEvent('open', path);
     ED.text = o.text || '';
     ED.dirty = false;
     // 记住这个文件本来的编码与换行：写回时要照原样（不然就是悄悄改用户的文件）

@@ -45,6 +45,7 @@ function stubTauri() {
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
+    if (cmd === 'event_note') { (globalThis.__events ||= []).push(args); return true; }
     if (cmd === 'data_dir') return 'C:\\Users\\demo\\AppData\\Local\\jingwei';
     if (cmd === 'open_path') { (globalThis.__opened ||= []).push(args && args.path); return null; }
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -859,6 +860,20 @@ try {
     return { text, opened: globalThis.__opened || [] };
   });
   check('数据目录：显示路径且能一键打开', /jingwei/.test(dd.text) && dd.opened.length === 1 && dd.opened[0] === dd.text, JSON.stringify(dd));
+  // 使用事件（2026-10-22，D-20261022-03 Q3）：界面主动动作才记；GUI 自己取数不记。
+  const ev = await page.evaluate(async () => {
+    globalThis.__events = [];
+    const p = ED.files[0];
+    await edOpen(p);
+    await new Promise((r) => setTimeout(r, 150));
+    const afterOpen = (globalThis.__events || []).slice();
+    await fillMetrics(PS.sel);   // GUI 为了显示去取数：不该产生事件
+    await new Promise((r) => setTimeout(r, 150));
+    const afterFetch = (globalThis.__events || []).length;
+    return { afterOpen, afterFetch };
+  });
+  check('使用事件：打开文件记一条 open', ev.afterOpen.length === 1 && ev.afterOpen[0].kind === 'open', JSON.stringify(ev));
+  check('使用事件：GUI 自己取数不记（绝不记清单）', ev.afterFetch === 1, JSON.stringify(ev));
   // 聚焦模式（2026-10-22，D-20261022-03 Q2-A）：按钮上要看得见"后台剩几项"，且真的停。
   const fc = await page.evaluate(async () => {
     const btn = document.getElementById('btnFocus');

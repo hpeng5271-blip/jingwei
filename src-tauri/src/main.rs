@@ -950,6 +950,7 @@ fn main() {
             tasks::tasks_state,
     data_dir,
     open_path,
+    event_note,
             notify::notify_gate,
             notify::msg_ingest,
             notify::msg_mark,
@@ -1026,4 +1027,25 @@ fn open_path(path: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// **写一条使用事件**（2026-10-22，D-20261022-03 Q3）。
+///
+/// 只由**界面**调用（人点了什么），所以来源固定为 Human；GUI 为了显示而 spawn 的取数
+/// **不走这里**——那类调用是 `cli_json`，pro 明确列为"绝不记"。
+#[tauri::command]
+fn event_note(kind: String, key: String, detail: Option<String>) -> Result<bool, String> {
+    use jingwei_engine::understand::events::{Event, Recorder, Source};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let rec = Recorder::with_default_path();
+    let ev = Event { at: now, kind: kind.clone(), key: key.clone(), detail };
+    match kind.as_str() {
+        "open" => Ok(rec.open_file(&key, now, Source::Human)),
+        "revisit" => Ok(rec.revisit(&key, now)),
+        "abandon" => Ok(rec.abandon(&key, now)),
+        _ => Ok(rec.record(ev, Source::Human)),
+    }
 }

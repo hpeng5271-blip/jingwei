@@ -1458,8 +1458,44 @@ async function renderTaskIcons() {
     box.dataset.err = String(errs);
   }
 }
-setInterval(renderTaskIcons, 3000);
-window.addEventListener('load', renderTaskIcons);
+// **聚焦模式**（2026-10-22，D-20261022-03 Q2-A）：开的时候停掉轮询与对账——
+// 默认档只停这些（索引/扫描由用户自己发起，不在轮询里）。按钮上要说清"后台剩几项"，
+// 不许"按了但没停"。
+const FOCUS = { on: false, timer: null, bg: 0 };
+
+/// 数一下现在还有几项后台在跑：轮询 + 允许表对账（默认档就是这两项）。
+function focusBgCount() {
+  let n = 0;
+  if (FOCUS.timer) n += 1;          // 任务角标轮询
+  if (!FOCUS.on && netLastRefresh) n += 0; // 对账不是常驻，只在设置页可见时发生
+  return n;
+}
+
+function applyFocus() {
+  const btn = document.getElementById('btnFocus');
+  if (FOCUS.on) {
+    if (FOCUS.timer) { clearInterval(FOCUS.timer); FOCUS.timer = null; }
+  } else if (!FOCUS.timer) {
+    FOCUS.timer = setInterval(renderTaskIcons, 3000);
+  }
+  window.__focusOn = FOCUS.on;   // 断言与其它模块读它，不重复存状态
+  if (btn) {
+    btn.textContent = FOCUS.on ? '聚焦中 · 后台 0 项' : '聚焦';
+    btn.title = FOCUS.on
+      ? '已停：任务角标轮询、允许表对账。再点一次恢复'
+      : '停掉不必要后台（轮询/对账），只留当前要看的东西';
+    btn.dataset.on = FOCUS.on ? '1' : '0';
+  }
+}
+
+function toggleFocus() {
+  FOCUS.on = !FOCUS.on;
+  applyFocus();
+  if (typeof toast === 'function') toast(FOCUS.on ? '聚焦：后台已停' : '恢复后台');
+}
+
+FOCUS.timer = setInterval(renderTaskIcons, 3000);
+window.addEventListener('load', () => { renderTaskIcons(); applyFocus(); });
 
 // 点错误角标 → 打开问题栏（复用 dockShow，不另写一份"打开"）。
 document.addEventListener('click', (e) => {

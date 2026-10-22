@@ -19,6 +19,11 @@
 const TABS = ['home', 'run', 'editor', 'note', 'graph', 'machine', 'clean'];
 
 // ── 事件 ───────────────────────────────
+// 聚焦按钮（2026-10-22）：停不必要的后台，状态由 shell.js 的 applyFocus 统一管。
+if (document.getElementById('btnFocus')) {
+  document.getElementById('btnFocus').addEventListener('click', () => toggleFocus());
+}
+
 function switchTab(name) {
   PANEL.tab = name;
   panelPolicy();

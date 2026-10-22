@@ -2044,3 +2044,7 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 
 /* 首屏"最近"一句（2026-10-22）：比三数字低一级，一行说完。 */
 .pd-recent { padding: 2px 12px 6px; font-size: 12px; opacity: 0.85; }
+
+/* 协议条的数据来源（2026-10-22）：比三数字低一级，点一下复制命令。 */
+.pd-metrics .pm-src { cursor: pointer; opacity: 0.7; font-size: 12px; text-decoration: underline dotted; }
+.pd-metrics .pm-src:hover { opacity: 1; }

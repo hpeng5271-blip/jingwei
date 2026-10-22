@@ -489,6 +489,14 @@ try {
   check('任务角标：只有真任务源在跑', ti.running === 1, JSON.stringify(ti.states));
 
   check('概览协议条：文件数 / 体积 / 生命周期都在', /文件/.test(st) && /体积/.test(st) && /生命周期/.test(st), st.slice(0, 160));
+  // 协议条标出数据来源（2026-10-22）：agreement 里第一条 evidence 的 ref。
+  const sc = await page.evaluate(async () => {
+    await fillMetrics(PS.sel);
+    await new Promise((r) => setTimeout(r, 200));
+    const el = document.querySelector('#pdMetrics .pm-src');
+    return { text: el ? el.textContent : '', src: el ? el.dataset.src : '', title: el ? el.title : '' };
+  });
+  check('协议条标出数据来源', /来自 /.test(sc.text) && sc.src.length > 0, JSON.stringify(sc));
 
   // 更新窗（2026-10-21）：有旧快照才弹；点"知道了"收起；同一次变化不重复弹。
   await page.evaluate(() => {

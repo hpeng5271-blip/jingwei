@@ -1193,6 +1193,18 @@ document.addEventListener('click', (e) => {
   if (typeof dockShow === 'function') dockShow('problems');
 });
 
+/// **数据来源**（2026-10-22）：协议里每条 evidence 都带 `ref`（命令 / 文件 / 图库）。
+/// 协议条只摆第一条——"这条结论凭什么"的最小答案；点一下把它复制出来，能自己复跑。
+function srcChip(v) {
+  const ev = (v && v.evidence) || [];
+  const first = ev.find((e) => e && (e.ref || e.note));
+  if (!first) return '';
+  const ref = String(first.ref || '');
+  const note = String(first.note || '');
+  return '<span class="pm-src" data-src="' + esc(ref) + '" title="' + esc(note) + '">来自 '
+    + esc(ref || first.kind || '（没说来源）') + '</span>';
+}
+
 async function fillMetrics(root) {
   const el = document.getElementById('pdMetrics');
   if (!el) return;
@@ -1210,7 +1222,8 @@ async function fillMetrics(root) {
       + (m.capped ? '<i class="pm-cap">只量了一部分</i>' : '') + '</span>'
       + '<span class="pm">生命周期 <b>' + esc(lifeText(life)) + '</b></span>'
       + '<span class="pm-why">' + esc((m.lifecycle && m.lifecycle.basis) || '') + '</span>'
-      + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>';
+      + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>'
+      + srcChip(v);
     const recent = document.getElementById('pdRecent');
     if (recent) recent.innerHTML = recentSummaryHtml();
   } catch (e) {
@@ -1443,4 +1456,15 @@ document.addEventListener('click', (e) => {
   if (!c) return;
   e.preventDefault();
   if (typeof dockShow === 'function') dockShow('problems');
+});
+
+// 点协议条上的"来自 …"→ 把那条命令复制出来（想自己复跑时不用手打）。
+document.addEventListener('click', (e) => {
+  const c = e.target && e.target.closest ? e.target.closest('[data-src]') : null;
+  if (!c) return;
+  e.preventDefault();
+  const ref = c.dataset.src || '';
+  if (!ref) return;
+  if (typeof copyText === 'function') copyText(ref);
+  else toast('来源：' + ref);
 });

@@ -1205,13 +1205,42 @@ function srcChip(v) {
     + esc(ref || first.kind || '（没说来源）') + '</span>';
 }
 
+/// **单飞 + 去抖**（2026-10-22，D-20261022-03 §三 第 3 项）。
+///
+/// 为什么：每次取数都要 spawn 一次 CLI（实测 380–540 ms），连点三次就把进程起三次。
+/// 规矩：同类请求**同时只有一个在飞**；同一 key 在 `ttl` 毫秒内复用上一次结果。
+/// 只做这两件事，不缓存跨 session、不做预取——那是常驻通道（债 0.42）的活。
+const INFLIGHT = new Map();
+const RECENT = new Map();
+
+function fetchOnce(key, ttl, fn) {
+  const hit = RECENT.get(key);
+  if (hit && Date.now() - hit.at < ttl) {
+    if (typeof window !== 'undefined') {
+      window.__fetchHits = (window.__fetchHits || 0) + 1;
+    }
+    return Promise.resolve(hit.value);
+  }
+  const flying = INFLIGHT.get(key);
+  if (flying) return flying;
+  const p = Promise.resolve()
+    .then(fn)
+    .then((value) => {
+      RECENT.set(key, { at: Date.now(), value });
+      return value;
+    })
+    .finally(() => INFLIGHT.delete(key));
+  INFLIGHT.set(key, p);
+  return p;
+}
 async function fillMetrics(root) {
   const el = document.getElementById('pdMetrics');
   if (!el) return;
   // "最近"那一行用同一块容器：上面是三数字，下面是最近发生了什么（2026-10-22）。
 
   try {
-    const v = await invoke('cli_json', { root, args: ['handover'] });
+    const v = await fetchOnce(`handover:${root}`, 500, () =>
+      invoke('cli_json', { root, args: ['handover'] }));
     const m = (v && v.metrics) || {};
     const st = (v && v.state) || 'unknown';
     const life = (m.lifecycle && m.lifecycle.state) || 'unknown';

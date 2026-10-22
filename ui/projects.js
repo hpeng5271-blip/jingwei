@@ -167,11 +167,26 @@ function resultLineHtml() {
     ? '<a class="rl-jump" data-jump-file="' + esc(first.file) + '" data-jump-line="'
       + esc(String(first.line || 1)) + '">跳到第一处</a>'
     : '';
+  // 可展开明细（2026-10-22）：一行是结论，展开才是逐条；展开状态记在 DOCK 里，刷新不丢。
+  const toggle = diags.length
+    ? '<span class="rl-more" data-rl-toggle="1">' + (DOCK.resultOpen ? '收起' : '明细 ' + diags.length) + '</span>'
+    : '';
+  const rows = (DOCK.resultOpen && diags.length)
+    ? '<div class="rl-rows">' + diags.slice(0, 8).map((d) =>
+      '<div class="rl-row" data-lv="' + esc(d.level === 'error' ? 'error' : 'warn') + '">'
+      + '<a data-jump-file="' + esc(d.file || '') + '" data-jump-line="' + esc(String(d.line || 1)) + '">'
+      + esc((d.file || '（没有位置）') + (d.line ? ':' + d.line : '')) + '</a>'
+      + '<span class="rl-msg">' + esc(d.message || '') + '</span></div>').join('')
+      + (diags.length > 8 ? '<div class="rl-row">……还有 ' + (diags.length - 8) + ' 条</div>' : '')
+      + '</div>'
+    : '';
   return '<div class="result-line" data-sev="' + sev + '">'
     + '<b>' + esc(parts.join(' · ')) + '</b>'
     + '<span class="rl-n">error ' + errs + ' / warn ' + warns + '</span>'
+    + toggle
     + jump
-    + '</div>';
+    + '</div>'
+    + rows;
 }
 
 function dockProblems(d) {
@@ -1490,4 +1505,14 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     msgArchive(a.dataset.msgArchive);
   }
+});
+
+// 点结果行的"明细/收起"（2026-10-22）：只切一个布尔量并重画 #resultLine，不去重跑检查。
+document.addEventListener('click', (e) => {
+  const t = e.target && e.target.closest ? e.target.closest('[data-rl-toggle]') : null;
+  if (!t) return;
+  e.preventDefault();
+  DOCK.resultOpen = !DOCK.resultOpen;
+  const rl = document.getElementById('resultLine');
+  if (rl) rl.innerHTML = resultLineHtml();
 });

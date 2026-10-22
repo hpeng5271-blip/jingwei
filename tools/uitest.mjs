@@ -687,6 +687,29 @@ try {
     return { txt: el.textContent.replace(/\s+/g, ' ').trim(), sev: el.querySelector('.result-line')?.dataset.sev || '' };
   });
   check('测试失败但没定位也要说出来', /测试失败（没定位到行）/.test(rl2.txt) && rl2.sev === 'warn', JSON.stringify(rl2));
+  // 结果行可展开明细（2026-10-22）：一行是结论，展开是逐条，点一条跳过去。
+  const rx = await page.evaluate(async () => {
+    const f = ED.path;
+    DOCK.resultOpen = false;
+    DOCK.testLocs = [];
+    DOCK.lastTest = { ok: false, exit: 1 };
+    DOCK.diags = [
+      { level: 'error', file: f, line: 2, col: 1, message: '错一行', src: 'check' },
+      { level: 'warn', file: f, line: 3, col: 1, message: '警告一行', src: 'check' },
+    ];
+    dockProblems({ findings: [] });
+    const before = document.querySelectorAll('#resultLine .rl-row').length;
+    document.querySelector('#resultLine [data-rl-toggle]').click();
+    await new Promise((r) => setTimeout(r, 100));
+    const after = document.querySelectorAll('#resultLine .rl-row').length;
+    const first = document.querySelector('#resultLine .rl-row a');
+    if (first) first.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const lncol = (document.getElementById('edLnCol') || {}).textContent || '';
+    return { before, after, lncol };
+  });
+  check('结果行默认不展开、点一下出明细', rx.before === 0 && rx.after >= 2, JSON.stringify(rx));
+  check('结果行明细点一条能跳过去', rx.lncol.includes('第 2 行'), JSON.stringify(rx));
   // 错误角标（2026-10-22）：有 error 才亮、显示数量、点它打开问题栏。
   const eb = await page.evaluate(async () => {
     const f = ED.path;

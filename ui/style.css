@@ -2033,3 +2033,11 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .msg-n { opacity: 0.7; }
 .msg-x { margin-left: auto; cursor: pointer; opacity: 0.6; }
 .msg-x:hover { opacity: 1; color: #ff8a8a; }
+
+/* 结果行展开的明细（2026-10-22）：逐条一行，点击跳到该行。 */
+.rl-more { cursor: pointer; text-decoration: underline; opacity: 0.8; }
+.rl-rows { padding: 4px 10px 6px; font-size: 12px; }
+.rl-row { display: flex; gap: 8px; padding: 1px 0; }
+.rl-row[data-lv="error"] a { color: #ff9a9a; }
+.rl-row a { cursor: pointer; text-decoration: underline; opacity: 0.9; }
+.rl-msg { opacity: 0.75; }

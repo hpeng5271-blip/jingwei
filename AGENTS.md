@@ -134,6 +134,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 4. **跑界面前后做进程审查**：先 `Get-Process jingwei-gui | Stop-Process -Force`，结束后复查残留 = 0。
 5. **设备健康**：重活（全量编译 / 扫全盘）前后 `node tools/health.mjs --once`；编译用 `CARGO_BUILD_JOBS=4`。细节见 `SOP.md` S30。
 6. **硬决策才用 pro**：不可逆/连续失败 2 次/人点名 → 子智能体跑 `deepseek-v4-pro`，上下文走 `tools/llm/digest.mjs`+`slice.mjs`（≤2K+8K），一次约 ¥0.01；日限 60 次/¥15（`record.mjs` 记账）。**决策归 pro、执行归 flash；先写 `docs/decisions/` 再动手；`limits.mjs check` 超限即停。**
+   **pro 通道：复用同一个会话**（2026-10-22 人定）——所有硬决策都发给**同一个** pro 会话，保持连续性；
+   **不许每问一次新建子智能体**（机器会被拖卡）。它只要“冷眼”即可：只读、不碰仓库、不参与执行。
 
 ## 8. 工具速查
 

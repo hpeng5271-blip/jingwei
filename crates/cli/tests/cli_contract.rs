@@ -2027,3 +2027,57 @@ fn events_stats_读得到且守九十天窗口() {
     assert_eq!(total, 2, "计数要算全部（含 90 天外）：{counts:?}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **常驻通道骨架**（2026-10-22，D-20261022-03 §三第 4 项的准备）：
+/// `jingwei serve` 走 stdio，一行一个请求、一行一个响应；先只做 `ping` / `metrics` / `events`。
+/// 判据：一次启动能连问三次，`id` 对得上，未知方法回错误而不是崩。
+#[test]
+fn serve_一问一答() {
+    let Some(_) = bin() else { return };
+    use std::io::{BufRead, BufReader, Write};
+    let d = empty_dir("serve-rtt");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let events = d.join("events.jsonl");
+
+    let mut child = Command::new(bin().unwrap())
+        .args(["serve", "--root", &p])
+        .env("JINGWEI_EVENTS_FILE", &events)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("serve 该能起来");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+
+    let mut ask = |req: &str| -> serde_json::Value {
+        writeln!(stdin, "{req}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("该有响应");
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("响应不是 JSON：{e} / {line}"))
+    };
+
+    let pong = ask(r#"{"id":1,"method":"ping"}"#);
+    assert_eq!(pong["id"].as_i64(), Some(1), "{pong}");
+    assert_eq!(pong["ok"].as_bool(), Some(true), "{pong}");
+
+    let m = ask(r#"{"id":2,"method":"metrics"}"#);
+    assert_eq!(m["id"].as_i64(), Some(2), "{m}");
+    assert!(m["result"]["files"].as_u64().unwrap_or(0) >= 1, "metrics 该量到文件：{m}");
+
+    let e = ask(r#"{"id":3,"method":"events"}"#);
+    assert_eq!(e["id"].as_i64(), Some(3), "{e}");
+    assert!(e["result"]["total"].as_u64().is_some(), "events 该给 total（0 也算）：{e}");
+
+    let bad = ask(r#"{"id":4,"method":"nope"}"#);
+    assert_eq!(bad["ok"].as_bool(), Some(false), "未知方法该回错误：{bad}");
+    assert_eq!(bad["id"].as_i64(), Some(4), "{bad}");
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&d);
+}

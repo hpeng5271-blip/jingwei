@@ -33,6 +33,34 @@ const sampleFile = ['crates/cli/src/main.rs', 'crates/cli/src/protocol.rs', 'Car
   .map((p) => path.join(root, p))
   .find((p) => fs.existsSync(p));
 
+
+/// **常驻通道往返**（2026-10-22）：起一次 `serve`，连问 N 次 `metrics`，量每次往返。
+/// 与 `handover` 的 spawn 耗时对比，才能回答"通道值不值得接界面"。
+async function measureServe(exe, root, rounds) {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(exe, ['serve', '--root', root], { cwd: root, stdio: ['pipe', 'pipe', 'ignore'] });
+  const t0 = process.hrtime.bigint();
+  let buf = '';
+  let got = 0;
+  const once = new Promise((resolve) => {
+    child.stdout.on('data', (d) => {
+      buf += d.toString();
+      while (buf.includes('\n')) {
+        const i = buf.indexOf('\n');
+        buf = buf.slice(i + 1);
+        got += 1;
+        if (got === rounds) resolve();
+      }
+    });
+  });
+  for (let i = 0; i < rounds; i += 1) {
+    child.stdin.write(JSON.stringify({ id: i, method: 'metrics' }) + '\n');
+  }
+  await Promise.race([once, new Promise((r) => setTimeout(r, 30000))]);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  child.kill();
+  return { total: Math.round(ms), per: Math.round(ms / rounds), rounds, got };
+}
 const actions = [
   ['index', ['index', '--root', root]],
   ['handover', ['handover', '--root', root, '--json']],
@@ -67,6 +95,17 @@ for (const [name, argv] of actions) {
   rows.push({ at: new Date().toISOString(), action: name, ms: Math.round(ms), code: r.status ?? -1, exe });
 }
 
+
+// 常驻通道往返：先起一个 serve，再连问 20 次（与上面那些 spawn 动作对照）。
+try {
+  const rtt = await measureServe(exe, root, 20);
+  rows.push({ at: new Date().toISOString(), action: 'serve-rtt', ms: rtt.per, code: rtt.got === rtt.rounds ? 0 : 1, exe });
+  if (!has('quiet') && !has('json')) {
+    console.log(`  serve-rtt   每次往返 ≈ ${rtt.per} ms（起一次问 ${rtt.rounds} 次，共 ${rtt.total} ms）`);
+  }
+} catch (e) {
+  if (!has('quiet')) console.error('  serve-rtt 跳过：' + e.message);
+}
 fs.appendFileSync(logPath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
 
 if (has('json')) {

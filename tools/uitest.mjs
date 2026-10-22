@@ -517,6 +517,21 @@ try {
   check('错误窗：静音期内不自己跳出来', ep.denied === false, JSON.stringify(ep));
 
   check('更新窗：有旧快照时弹一次', hasUpd === true, String(hasUpd));
+  // 更新窗只列变了的那些（2026-10-22）：生命周期没变就不许出现在里面。
+  const ud = await page.evaluate(() => {
+    localStorage.setItem('jw.seen.files.' + PS.sel,
+      JSON.stringify({ files: 1, bytes: 1, life: 'no_git' }));
+    fillMetrics(PS.sel);
+    const box = document.getElementById('updatePanel');
+    return new Promise((r) => setTimeout(() => {
+      const b = document.getElementById('updatePanel');
+      const rows = b ? Array.from(b.querySelectorAll('.upd-row')).map((x) => x.dataset.k) : [];
+      r({ rows, why: b ? b.querySelector('.upd-why').textContent : '' });
+    }, 400));
+  });
+  check('更新窗：只列变了的那些（没变的生命周期不出现）',
+    ud.rows.includes('files') && ud.rows.includes('bytes') && !ud.rows.includes('life'),
+    JSON.stringify(ud.rows));
   await page.evaluate(() => {
     const x = document.querySelector('#updatePanel [data-close]');
     if (x) x.click();

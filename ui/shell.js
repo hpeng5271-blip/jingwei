@@ -1086,13 +1086,27 @@ function updateSeenKey(path) { return 'jw.seen.files.' + path; }
 
 function maybeUpdateWindow(path, metrics) {
   if (!metrics || metrics.files == null) return;
-  const cur = { files: metrics.files, bytes: metrics.volume_bytes || 0 };
+  const cur = {
+    files: metrics.files,
+    bytes: metrics.volume_bytes || 0,
+    life: (metrics.lifecycle && metrics.lifecycle.state) || 'unknown',
+  };
   let prev = null;
   try { prev = JSON.parse(localStorage.getItem(updateSeenKey(path)) || 'null'); } catch (_) { prev = null; }
-  if (prev && (prev.files !== cur.files || prev.bytes !== cur.bytes)) {
+  if (prev && updDiffRows(prev, cur).length) {
     showUpdateWindow(path, prev, cur);
   }
   try { localStorage.setItem(updateSeenKey(path), JSON.stringify(cur)); } catch (_) {}
+}
+
+/// **只说变了的那些**（2026-10-22）：三数字里哪几项真的变了就列哪几项，
+/// 没变的不要摆出来占地方。旧快照可能是两字段的（本功能早期的版本），缺就跳过。
+function updDiffRows(prev, cur) {
+  const rows = [];
+  if (prev.files !== cur.files) rows.push('files');
+  if (prev.bytes !== cur.bytes) rows.push('bytes');
+  if (prev.life && prev.life !== cur.life) rows.push('life');
+  return rows;
 }
 
 function showUpdateWindow(path, prev, cur) {
@@ -1103,13 +1117,25 @@ function showUpdateWindow(path, prev, cur) {
     box.className = 'upd-panel';
     document.body.appendChild(box);
   }
+  const rows = updDiffRows(prev, cur);
   const dFiles = (cur.files || 0) - (prev.files || 0);
   const sign = dFiles > 0 ? '+' + dFiles : String(dFiles);
+  const parts = [];
+  if (rows.includes('files')) {
+    parts.push('<div class="upd-row" data-k="files">文件 <b>' + esc(String(prev.files))
+      + ' → ' + esc(String(cur.files)) + '</b><span class="upd-d">' + esc(sign) + '</span></div>');
+  }
+  if (rows.includes('bytes')) {
+    parts.push('<div class="upd-row" data-k="bytes">体积 <b>' + esc(fmtBytes(prev.bytes))
+      + ' → ' + esc(fmtBytes(cur.bytes)) + '</b></div>');
+  }
+  if (rows.includes('life')) {
+    parts.push('<div class="upd-row" data-k="life">生命周期 <b>' + esc(lifeText(prev.life))
+      + ' → ' + esc(lifeText(cur.life)) + '</b></div>');
+  }
   box.innerHTML = '<div class="upd-head">项目有变化<span class="upd-x" data-close="1">知道了</span></div>'
-    + '<div class="upd-row">文件 <b>' + esc(String(prev.files)) + ' → ' + esc(String(cur.files)) + '</b>'
-    + '<span class="upd-d">' + esc(sign) + '</span></div>'
-    + '<div class="upd-row">体积 <b>' + esc(fmtBytes(prev.bytes)) + ' → ' + esc(fmtBytes(cur.bytes)) + '</b></div>'
-    + '<div class="upd-why">同一个项目，上一次看到的三数字和这次不一样；看过就收起，不重复弹。</div>';
+    + parts.join('')
+    + '<div class="upd-why">只列变了的那些；要看"到底改了什么"跑一次 jingwei handover。看过就收起，不重复弹。</div>';
   const x = box.querySelector('[data-close]');
   if (x) x.onclick = () => box.remove();
 }

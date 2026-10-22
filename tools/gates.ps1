@@ -1,4 +1,4 @@
-# One-shot gate runner (design section 12.3).
+﻿# One-shot gate runner (design section 12.3).
 #
 # Why a script: the design has said for a while that "these four gates run in CI",
 # yet the repo has no .github at all -- a decision recorded on paper with nothing
@@ -87,4 +87,16 @@ if ($failed.Count -gt 0) {
 Write-Host ''
 # **记账**（债 0.29）：这次门禁真的跑过，记一次。
 & node (Join-Path $PSScriptRoot 'llm\limits.mjs') gate 2>&1 | Out-Null
+
+# **性能量具：只报不阻断**（2026-10-22，D-20261022-03 Q7-B）。
+# 为什么放这里：不在这里跑，就没人看；但让它红，会把"能跑优先"这个阶段判断反过来。
+Write-Host ""
+Write-Host "-- perf (report only, never blocks) --" -ForegroundColor DarkGray
+try {
+    & node tools/perf.mjs --quiet 2>&1 | Out-Null
+    if (Test-Path (Join-Path $env:LOCALAPPDATA "jingwei\perf.jsonl")) {
+        $last = Get-Content (Join-Path $env:LOCALAPPDATA "jingwei\perf.jsonl") -Tail 5
+        foreach ($l in $last) { Write-Host ("   " + $l) -ForegroundColor DarkGray }
+    }
+} catch { Write-Host "   perf 跳过（$($_.Exception.Message)）" -ForegroundColor DarkGray }
 Write-Host 'ALL GATES PASSED' -ForegroundColor Green

@@ -55,6 +55,8 @@ pub(crate) fn cmd_doctor(root: &Path, json: bool, want_check: bool) -> i32 {
             // **刚才**（2026-10-22）：体检卡是"能不能跑"的来源，补上"上次谁干的、成没成"。
             // 与 `next` / `handover` 同一个来源、同一个形状（只读任务日志）。
             "recent_task": recent_task(),
+            // 首屏三数字（2026-10-22）：与 handover 同一处实现，别各写一份。
+            "metrics": crate::cmd_handover::metrics(root),
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         return exit_code(&facts, &findings);

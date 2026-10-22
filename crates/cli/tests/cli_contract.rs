@@ -1878,3 +1878,46 @@ fn 三处_recent_task_同形() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **三处首屏三数字必须同形**（2026-10-22）：next / handover / doctor 的 `metrics` 都指向
+/// `cmd_handover::metrics()` 这一处实现，字段集合与**数值**都该一致——不然界面上三个地方
+/// 会各说一个文件数。
+///
+/// 同样是没有"先红"的守不变量测试；写完后用变异验证过（把 next 的那处实现换成空对象会红）。
+#[test]
+fn 三处_metrics_同形() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("metrics-shape");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let b = bin().unwrap();
+    let mut shapes: Vec<(&str, serde_json::Value)> = Vec::new();
+    for verb in ["next", "handover", "doctor"] {
+        let out = Command::new(&b)
+            .args([verb, "--root", &p, "--json"])
+            .env("JINGWEI_TASKS_FILE", std::env::temp_dir().join(format!("jw-tasks-{}.json", std::process::id())))
+            .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-metrics.jsonl"))
+            .output()
+            .expect("跑不起来");
+        let v: serde_json::Value = serde_json::from_str(&stdout(&out))
+            .unwrap_or_else(|e| panic!("{verb} --json 该是 JSON：{e}"));
+        let m = v["metrics"].clone();
+        assert!(m.is_object(), "{verb} 该带上 metrics：{v}");
+        shapes.push((verb, m));
+    }
+    let (first_verb, first) = &shapes[0];
+    let mut first_keys: Vec<String> = first.as_object().unwrap().keys().cloned().collect();
+    first_keys.sort();
+    for (verb, m) in &shapes[1..] {
+        let mut keys: Vec<String> = m.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, first_keys, "{verb} 的 metrics 字段与 {first_verb} 不一致");
+        // 数值也必须一致：都来自同一处实现
+        assert_eq!(m["files"], first["files"], "{verb} 的文件数与 {first_verb} 不一致");
+        assert_eq!(m["volume_bytes"], first["volume_bytes"], "{verb} 的体积与 {first_verb} 不一致");
+    }
+    assert!(first["files"].as_u64().unwrap_or(0) >= 1, "至少该量到两个文件：{first}");
+    let _ = std::fs::remove_dir_all(&d);
+}

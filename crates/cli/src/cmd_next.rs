@@ -157,6 +157,8 @@ pub fn cmd_next(root: &Path, json: bool) -> i32 {
                 "stale": stale,
                 "inbox": inbox,
                 "text_only": unmapped,
+                // 首屏三数字（2026-10-22）：与 handover 同一处实现，别各写一份。
+                "metrics": crate::cmd_handover::metrics(root),
                 "recent_task": recent,
             }),
         );

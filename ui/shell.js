@@ -1402,6 +1402,8 @@ function renderEnvLast(latest) {
     + (e.detail ? ' · ' + e.detail : '');
 }
 
+let netLastRefresh = 0;   // 设置页开着时，允许表最多每 15 秒刷一次（2026-10-22）
+
 async function renderTaskIcons() {
   let box = document.getElementById('taskIcons');
   if (!box) {
@@ -1432,6 +1434,15 @@ async function renderTaskIcons() {
       }
     }
     renderEnvLast(latest);   // latest 在这个 try 里才在作用域内
+    // 设置页开着时，允许表可能已经过期（24 小时到点），最多每 15 秒对一次账（2026-10-22）。
+    // 不在设置页就不刷——那是有代价的（起一次 CLI），不能每 3 秒都花。
+    {
+      const panel = document.getElementById('settingsPanel');
+      if (panel && !panel.hidden && Date.now() - netLastRefresh > 15000 && typeof netRefresh === 'function') {
+        netLastRefresh = Date.now();
+        netRefresh();
+      }
+    }
   } catch (e) {
     /* 没有任务源不算错：图标保持 idle */
   }

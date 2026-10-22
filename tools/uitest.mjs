@@ -655,6 +655,22 @@ try {
   });
   check('网络：列出临时允许（带剩余时间）', netSt.n === 1 && /小时后过期|分钟后过期/.test(netSt.html), netSt.html);
   check('网络：点 × 走 net deny', netSt.calls.some((c) => c.startsWith('deny')), JSON.stringify(netSt.calls));
+  // 允许表会自己跟时间对账（2026-10-22）：设置页开着时，3 秒那次刷新会顺带对一次账（最多 15 秒一次）。
+  const nt = await page.evaluate(async () => {
+    globalThis.__netCalls = [];
+    const panel = document.getElementById('settingsPanel');
+    if (panel) panel.hidden = false;
+    netLastRefresh = 0;           // 装作"很久没刷了"
+    await renderTaskIcons();
+    await new Promise((r) => setTimeout(r, 100));
+    const first = (globalThis.__netCalls || []).filter((c) => c.startsWith('status')).length;
+    await renderTaskIcons();       // 15 秒内再来一次，不该再刷
+    await new Promise((r) => setTimeout(r, 100));
+    const second = (globalThis.__netCalls || []).filter((c) => c.startsWith('status')).length;
+    if (panel) panel.hidden = true;
+    return { first, second };
+  });
+  check('允许表会自己跟时间对账（且不在 15 秒内反复刷）', nt.first === 1 && nt.second === 1, JSON.stringify(nt));
   // 终端里网络被拒 → 就地给一个能点的「允许 24 小时」（2026-10-22）。
   const ta = await page.evaluate(async () => {
     globalThis.__netCalls = [];

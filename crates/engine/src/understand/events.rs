@@ -111,7 +111,8 @@ pub fn load_all(path: &Path) -> Snapshot {
                             let key = row.get("key").and_then(|x| x.as_str()).unwrap_or("");
                             let n = row.get("n").and_then(|x| x.as_u64()).unwrap_or(0);
                             if !k.is_empty() {
-                                snap.counts.insert((k.to_string(), key.to_string()), n);
+                                // **+ 不是覆盖**：计数行与事件行必须相加（2026-10-23）
+                                *snap.counts.entry((k.to_string(), key.to_string())).or_insert(0) += n;
                             }
                         }
                     }
@@ -144,11 +145,22 @@ pub fn append(path: &Path, ev: &Event) -> std::io::Result<()> {
 pub fn compact(path: &Path, now: i64) -> std::io::Result<(usize, usize)> {
     let snap = load_all(path);
     let total = snap.events.len();
-    let (kept, mut counts) = split(&snap.events, now);
-    // 把之前压好的计数并进来（同键相加，**不能覆盖**）
-    for ((k, key), n) in snap.counts {
-        *counts.entry((k, key)).or_insert(0) += n.saturating_sub(0);
+    let (kept, _all_counts) = split(&snap.events, now);
+    // 保留事件（窗口内）的计数：这些行还在文件里，下次会被重新数，先从计数里扣掉
+    let mut kept_counts: Counts = BTreeMap::new();
+    for e in &kept {
+        *kept_counts.entry((e.kind.clone(), e.key.clone())).or_insert(0) += 1;
     }
+    // **计数行只存"文件里已经不在"的那部分**（2026-10-23 抓到的真 bug：压两次 2 → 5）。
+    // 推导：snap.counts = 旧计数行 + 文件里每条事件；减去 all_counts（文件里事件的计数）
+    // 剩下的才是"已归档"。**不要**再把 all_counts 加回去——那正是重复相加的来源。
+    let mut counts = snap.counts;
+    for (k, n) in &kept_counts {
+        if let Some(slot) = counts.get_mut(k) {
+            *slot = slot.saturating_sub(*n);
+        }
+    }
+    counts.retain(|_, n| *n > 0);
     let mut out = String::new();
     for e in &kept {
         out.push_str(&serde_json::to_string(e).unwrap_or_default());
@@ -440,6 +452,36 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         assert!(rec.open_file("src/c.rs", 3_000, Source::Human));
         assert!(rec.edit_file("src/c.rs", 5, 6, 3_005));
         assert!(!rec.abandon("src/c.rs", 3_010));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// **边界**（2026-10-23）：详情滚出 90 天后，计数**不许丢，也不许重复相加**。
+    /// 这条曾抓到真 bug：压两次后 2 变成 5。
+    #[test]
+    fn 滚动九十天后计数既不多也不少() {
+        let dir = std::env::temp_dir().join(format!("jw-ev-roll2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let now = 2_100_000_000;
+        append(&f, &Event { at: now - 120 * DAY, kind: "edit".into(), key: "src/a.rs".into(), detail: Some("很旧的".into()) }).unwrap();
+        append(&f, &Event { at: now - DAY, kind: "edit".into(), key: "src/a.rs".into(), detail: Some("新的".into()) }).unwrap();
+
+        let (t1, k1) = compact(&f, now).unwrap();
+        assert_eq!((t1, k1), (2, 1), "压完该留 1 条详情");
+        assert_eq!(
+            load_all(&f).counts.get(&("edit".into(), "src/a.rs".into())),
+            Some(&2),
+            "压一次后计数该是 2"
+        );
+
+        let (_t2, k2) = compact(&f, now).unwrap();
+        assert_eq!(k2, 1, "再压一次详情仍是 1 条");
+        assert_eq!(
+            load_all(&f).counts.get(&("edit".into(), "src/a.rs".into())),
+            Some(&2),
+            "**计数还是 2**（滚出窗口不等于没发生过，也不许重复相加）"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

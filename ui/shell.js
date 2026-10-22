@@ -1578,9 +1578,9 @@ document.addEventListener('click', async (e) => {
 /// 回退只提示一次——每次失败都弹，比慢更烦。
 let chanWarned = false;
 
-function channelFetch(root, method) {
-  return invoke('channel_request', { root, method })
-    .then((r) => ({
+function channelFetch(root, method, params) {
+  return invoke('channel_request', { root, method, params: params || null })
+    .then((r) => (method !== 'metrics' ? r : {
       metrics: r,
       // **来源要说真话**：这些数字是常驻通道给的，不是 spawn 出来的 handover
       evidence: [{ kind: 'command', ref: 'jingwei serve', note: '常驻通道（惰性启动）' }],
@@ -1618,7 +1618,7 @@ async function renderProgress(root) {
   }
   try {
     const v = await fetchOnce(`progress:${root}`, 5000, () =>
-      invoke('cli_json', { root, args: ['events', 'progress'] }));
+      channelFetch(root, 'progress'));
     const todo = (v && v.todo) || [];
     const learned = (v && v.learned) || [];
     if (!todo.length && !learned.length) { el.textContent = ''; return; }

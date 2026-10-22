@@ -933,7 +933,7 @@ async function renderEdHistory() {
   const el = document.getElementById('edHistory');
   if (!el || !ED.path) return;
   try {
-    const s = await invoke('events_summary', { key: ED.path });
+    const s = await channelFetch(ED.path, 'events_summary', { key: ED.path });
     const parts = [];
     if (s.open) parts.push('打开 ' + s.open);
     if (s.edit) parts.push('改动 ' + s.edit);

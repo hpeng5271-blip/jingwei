@@ -47,8 +47,14 @@ function stubTauri() {
       invoke: async (cmd, args) => {
     if (cmd === 'cli_json') { (globalThis.__cli ||= []).push((args && args.args || []).join(' ')); }
     if (cmd === 'channel_request') {
-      (globalThis.__chan ||= []).push(args && args.method);
+      const m = args && args.method;
+      (globalThis.__chan ||= []).push(m);
       if (globalThis.__chanFail) throw new Error("通道挂了");
+      if (m === 'progress') return { todo: globalThis.__progTodo || [], learned: globalThis.__progLearned || [] };
+      if (m === 'events_summary') {
+        return { key: args.params && args.params.key, open: 3, edit: 2, check: 1,
+          revisit: 3, last_check: 'error 1 / warn 0' };
+      }
       return { files: 3, volume_bytes: 2048, lifecycle: { state: "recent", basis: "测试" } };
     }
     if (cmd === 'channel_stop') { globalThis.__chanStopped = (globalThis.__chanStopped || 0) + 1; return null; }

@@ -841,6 +841,21 @@ try {
     return (document.getElementById('msgFeed') || {}).textContent || '';
   });
   check('消息阵列说了"重启会清空"', mh.includes('重启会清空'), mh.slice(0, 60));
+  // 聚焦模式（2026-10-22，D-20261022-03 Q2-A）：按钮上要看得见"后台剩几项"，且真的停。
+  const fc = await page.evaluate(async () => {
+    const btn = document.getElementById('btnFocus');
+    if (!btn) return { missing: true };
+    const before = { timer: !!FOCUS.timer, text: btn.textContent };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 60));
+    const on = { timer: !!FOCUS.timer, text: btn.textContent, on: !!FOCUS.on, flag: window.__focusOn === true };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 60));
+    const off = { timer: !!FOCUS.timer, text: btn.textContent, on: !!FOCUS.on };
+    return { before, on, off };
+  });
+  check('聚焦模式：按钮在、开着时后台停、关掉恢复',
+    fc.before && fc.before.timer === true && fc.on && fc.on.timer === false && /后台 0 项/.test(fc.on.text) && fc.off.timer === true, JSON.stringify(fc));
   // 归档不是永久静音（D-20261022-02）：同一 key 再来一次要重新出现。
   const mf2 = await page.evaluate(async () => {
     globalThis.__msgs = [];

@@ -2133,3 +2133,38 @@ fn data_stats_把每一份数据说清楚() {
     assert_eq!(v1["events"]["last_24h"].as_u64(), Some(1), "近 24 小时 1 条：{v1}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **学习进度**（2026-10-22，pro 下一批最小闭环）：按文件汇总，
+/// `复访 ≥3 且最后一次检查仍红` = 待解决；检查过且不红 = 已变绿。
+#[test]
+fn events_progress_分出待解决与已变绿() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("events-progress");
+    let f = d.join("events.jsonl");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|x| x.as_secs() as i64)
+        .unwrap_or(0);
+    let mut body = String::new();
+    // a.rs：回来 3 次 + 检查仍红 → 待解决
+    for i in 0..3 {
+        body.push_str(&format!("{{\"at\":{},\"kind\":\"revisit\",\"key\":\"src/a.rs\"}}\n", now - i * 100));
+    }
+    body.push_str(&format!("{{\"at\":{},\"kind\":\"check\",\"key\":\"src/a.rs\",\"detail\":\"error 2 / warn 0\"}}\n", now - 50));
+    // b.rs：检查过且不红 → 已变绿
+    body.push_str(&format!("{{\"at\":{},\"kind\":\"check\",\"key\":\"src/b.rs\",\"detail\":\"error 0 / warn 1\"}}\n", now - 60));
+    std::fs::write(&f, body).unwrap();
+
+    let o = run_env(
+        &["events", "progress", "--root", d.to_str().unwrap(), "--json"],
+        &[("JINGWEI_EVENTS_FILE", f.to_str().unwrap())],
+    );
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).expect("该是 JSON");
+    let todo = v["todo"].as_array().expect("要有 todo");
+    let learned = v["learned"].as_array().expect("要有 learned");
+    assert_eq!(todo.len(), 1, "待解决该 1 个：{v}");
+    assert_eq!(todo[0].as_str(), Some("src/a.rs"), "{v}");
+    assert_eq!(learned.len(), 1, "已变绿该 1 个：{v}");
+    assert_eq!(learned[0].as_str(), Some("src/b.rs"), "{v}");
+    let _ = std::fs::remove_dir_all(&d);
+}

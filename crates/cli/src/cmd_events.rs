@@ -14,8 +14,8 @@ const RECENT_MAX: usize = 20;
 
 pub(crate) fn cmd_events(rest: &[String], json: bool) -> i32 {
     let sub = rest.first().map(|s| s.as_str()).unwrap_or("stats");
-    if sub != "stats" && sub != "stat" {
-        eprintln!("用法：jingwei events [stats] [--json]");
+    if sub != "stats" && sub != "stat" && sub != "progress" {
+        eprintln!("用法：jingwei events [stats|progress] [--json]");
         return 2;
     }
     let path = events_path();
@@ -45,6 +45,9 @@ pub(crate) fn cmd_events(rest: &[String], json: bool) -> i32 {
     recent.sort_by_key(|e| e.at);
     let shown: Vec<_> = recent.iter().rev().take(RECENT_MAX).collect();
 
+    if sub == "progress" {
+        return progress(&snap, now, json);
+    }
     let mut counts: Vec<(String, String, u64)> = snap
         .counts
         .iter()
@@ -158,4 +161,87 @@ fn 查不了(json: bool, path: &Path, what: &str, why: &str, how: &str, code: i3
         println!("  怎么补：{how}");
     }
     code
+}
+
+/// 一个文件的"学得怎么样"（只从事件算，不新增采集）。
+struct FileStat {
+    key: String,
+    open: u64,
+    edit: u64,
+    check: u64,
+    revisit: u64,
+    last_check: Option<String>,
+}
+
+fn collect_stats(snap: &jingwei_engine::understand::events::Snapshot) -> Vec<FileStat> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<String, FileStat> = BTreeMap::new();
+    for e in &snap.events {
+        let st = map.entry(e.key.clone()).or_insert(FileStat {
+            key: e.key.clone(), open: 0, edit: 0, check: 0, revisit: 0, last_check: None,
+        });
+        match e.kind.as_str() {
+            "open" => st.open += 1,
+            "edit" => st.edit += 1,
+            "check" => { st.check += 1; st.last_check = e.detail.clone(); }
+            "revisit" => st.revisit += 1,
+            _ => {}
+        }
+    }
+    map.into_values().collect()
+}
+
+/// 仍红 = 最后一次检查的 detail 里 error 后不是 0。
+fn still_red(st: &FileStat) -> bool {
+    match st.last_check.as_deref() {
+        Some(d) => d.contains("error ") && !d.contains("error 0"),
+        None => false,
+    }
+}
+
+fn progress(snap: &jingwei_engine::understand::events::Snapshot, _now: i64, json: bool) -> i32 {
+    let stats = collect_stats(snap);
+    let mut todo: Vec<&FileStat> = stats.iter().filter(|s| s.revisit >= 3 && still_red(s)).collect();
+    let mut learned: Vec<&FileStat> = stats.iter().filter(|s| s.check > 0 && !still_red(s)).collect();
+    todo.sort_by_key(|s| std::cmp::Reverse(s.revisit));
+    learned.sort_by_key(|s| std::cmp::Reverse(s.check));
+    let summary = format!("{} 个文件有记录；待解决 {} 个，学会了 {} 个", stats.len(), todo.len(), learned.len());
+    if json {
+        let v = envelope(
+            if stats.is_empty() { State::Unknown } else { State::Yes },
+            summary,
+            vec![Evidence::file(&events_path().display().to_string(), "只从事件算，不新增采集")],
+            Coverage::full(stats.len(), "按文件汇总事件"),
+            serde_json::json!({
+                "files": stats.iter().map(|s| serde_json::json!({
+                    "key": s.key, "open": s.open, "edit": s.edit, "check": s.check,
+                    "revisit": s.revisit, "still_red": still_red(s), "last_check": s.last_check,
+                })).collect::<Vec<_>>(),
+                "todo": todo.iter().map(|s| s.key.clone()).collect::<Vec<_>>(),
+                "learned": learned.iter().map(|s| s.key.clone()).collect::<Vec<_>>(),
+            }),
+        );
+        print(&v);
+        return 0;
+    }
+    println!("{summary}");
+    if todo.is_empty() && learned.is_empty() {
+        println!("  还没有足够的记录（复访 ≥3 且仍红才算待解决）");
+        return 0;
+    }
+    if !todo.is_empty() {
+        println!();
+        println!("  待解决（回来 ≥3 次，最后一次检查还是红的）：");
+        for s in todo {
+            println!("    {}  回来 {} 次 · {} · 最近检查 {}", s.key, s.revisit, s.last_check.as_deref().unwrap_or("—"), s.check);
+        }
+    }
+    if !learned.is_empty() {
+        println!();
+        println!("  已变绿：");
+        for s in learned {
+            println!("    {}  检查 {} 次 · 最近 {}", s.key, s.check, s.last_check.as_deref().unwrap_or("—"));
+        }
+    }
+    0
 }

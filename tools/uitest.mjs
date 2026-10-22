@@ -968,6 +968,32 @@ try {
   await page.waitForTimeout(300);
   st = await page.evaluate(() => ({ motion: SET.motion, changed: document.querySelectorAll('#settingsPanel .changed').length }));
   check('设置：还原回到默认', st.motion === 'default' && st.changed === 0, JSON.stringify(st));
+  // "最近"可点（2026-10-22）：点检查/测试 → 问题栏；点环境 → 设置页那行。
+  const rc = await page.evaluate(async () => {
+    window.__latestEnv = { name: 'jingwei env use', state: 'done', elapsed_s: 3, running: false };
+    DOCK.diags = [
+      { level: 'error', file: ED.path, line: 2, col: 1, message: 'x', src: 'check' },
+    ];
+    DOCK.lastTest = null;
+    const el = document.getElementById('pdRecent');
+    el.innerHTML = recentSummaryHtml();
+    const links = Array.from(el.querySelectorAll('[data-recent]')).map((a) => a.dataset.recent);
+    switchTab('home');
+    const panel = document.getElementById('settingsPanel');
+    if (panel) panel.hidden = true;
+    const envLink = el.querySelector('[data-recent="env"]');
+    if (envLink) envLink.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const settingsOpen = !!(panel && !panel.hidden);
+    const checkLink = el.querySelector('[data-recent="check"]');
+    if (checkLink) checkLink.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const dockProblems = typeof DOCK !== 'undefined' && DOCK.tab === 'problems';
+    return { links, settingsOpen, dockProblems };
+  });
+  check('首屏最近一句可点：三段各有去处', rc.links.includes('env') && rc.links.includes('check'), JSON.stringify(rc.links));
+  await page.evaluate(() => { const p = document.getElementById('settingsPanel'); if (p) p.hidden = true; });
+  check('首屏最近一句可点：点环境开设置、点检查开问题栏', rc.settingsOpen === true && rc.dockProblems === true, JSON.stringify(rc));
 
   // 统一信封：**`unknown` 不许被当成"没有"**——那是这套系统最核心的那条线，
   // 它从引擎一直贯到界面，所以在这一层也要有一条断言盯着。

@@ -1145,24 +1145,53 @@ function showUpdateWindow(path, prev, cur) {
 ///
 /// 三块数据本来就散着：环境在 `tasks_state.latest.env`（renderEnvLast 缓存到 window），
 /// 检查/测试在 `DOCK.diags`。这里**只做拼装**，不新增采集、不重算判据。
-function recentSummaryText() {
+function recentSummaryHtml() {
   const parts = [];
   const env = (typeof window !== 'undefined' && window.__latestEnv) || null;
   if (env) {
     const when = env.running ? '正在跑 ' + fmtDur(env.elapsed_s) : '用时 ' + fmtDur(env.elapsed_s);
-    parts.push('环境 ' + (env.name || '').replace(/^jingwei /, '') + ' ' + when);
+    parts.push('<a data-recent="env">环境 ' + esc((env.name || '').replace(/^jingwei /, '')) + ' ' + esc(when) + '</a>');
   }
   const diags = (typeof DOCK !== 'undefined' && DOCK.diags) || [];
   const check = diags.filter((d) => (d.src || 'check') === 'check').length;
   const test = diags.filter((d) => d.src === 'test').length;
   const errs = diags.filter((d) => d.level === 'error').length;
-  if (check) parts.push('检查 ' + check + ' 处（error ' + errs + '）');
-  if (test) parts.push('测试 ' + test + ' 处定位');
+  if (check) parts.push('<a data-recent="check">检查 ' + check + ' 处（error ' + errs + '）</a>');
+  if (test) parts.push('<a data-recent="test">测试 ' + test + ' 处定位</a>');
   else if (typeof DOCK !== 'undefined' && DOCK.lastTest && DOCK.lastTest.ok === false) {
-    parts.push('测试失败（没定位到行）');
+    parts.push('<a data-recent="check">测试失败（没定位到行）</a>');
   }
   return parts.length ? '最近：' + parts.join(' · ') : '最近：还没有记录';
 }
+
+/// 兼容旧名（有些地方按 textContent 用）：纯文本版。
+function recentSummaryText() {
+  const d = document.createElement('div');
+  d.innerHTML = recentSummaryHtml();
+  return d.textContent;
+}
+
+// **"最近"可点**（2026-10-22）：点哪一段就跳到哪一处——环境跳设置页那行，检查/测试跳问题栏。
+// 只是跳转，不动任何数据。
+document.addEventListener('click', (e) => {
+  const a = e.target && e.target.closest ? e.target.closest('[data-recent]') : null;
+  if (!a) return;
+  e.preventDefault();
+  const what = a.dataset.recent;
+  if (what === 'env') {
+    const panel = document.getElementById('settingsPanel');
+    if (panel && panel.hidden) panel.hidden = false;
+    const el = document.getElementById('envLast');
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      el.style.background = 'rgba(127,127,127,0.18)';
+      setTimeout(() => { el.style.background = ''; }, 900);
+    }
+    if (typeof netRefresh === 'function') netRefresh();
+    return;
+  }
+  if (typeof dockShow === 'function') dockShow('problems');
+});
 
 async function fillMetrics(root) {
   const el = document.getElementById('pdMetrics');
@@ -1183,7 +1212,7 @@ async function fillMetrics(root) {
       + '<span class="pm-why">' + esc((m.lifecycle && m.lifecycle.basis) || '') + '</span>'
       + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>';
     const recent = document.getElementById('pdRecent');
-    if (recent) recent.textContent = recentSummaryText();
+    if (recent) recent.innerHTML = recentSummaryHtml();
   } catch (e) {
     el.innerHTML = '<span class="pm-pill pm-unknown">查不了</span><span class="pm-why">' + esc(String(e)) + '</span>';
   }

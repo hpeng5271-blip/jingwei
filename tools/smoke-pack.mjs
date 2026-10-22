@@ -12,6 +12,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+
+/// 先分清「缺宿主」还是「应用坏」（2026-10-23，adopted：webview2-诊断口径）。
+/// 判据是注册表里的 WebView2 Runtime 版本，不是「进程有没有起来」——缺运行时进程也会活着。
+function webview2Runtime() {
+  if (process.env.JINGWEI_FAKE_NO_WEBVIEW === '1') return null;
+  if (process.platform !== 'win32') return 'n/a';
+  try {
+    const cmd = "powershell -NoProfile -Command \"(Get-ItemProperty 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv\"";
+    const out = execSync(cmd, { encoding: 'utf8', timeout: 20000 }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
 const args = process.argv.slice(2);
 
 /// WebView2 子进程数：Windows 上能用 CIM 查；别的平台返回 -1（不做这个断言）。
@@ -129,6 +143,11 @@ try {
   const gui = path.join(root, 'jingwei-gui.exe');
   if (args.includes('--gui')) {
     if (!fs.existsSync(gui)) throw new Error('包里没有 jingwei-gui.exe');
+    const wv2 = webview2Runtime();
+    if (wv2 === null) {
+      throw new Error('缺宿主：这台机器没有 WebView2 运行时（不是包坏了）。装 Edge WebView2 Runtime 后再跑');
+    }
+    if (wv2 !== 'n/a') console.log('  WebView2 运行时：' + wv2);
     const child = spawn(gui, [], { cwd: root, stdio: 'ignore', detached: false });
     let exited = false;
     child.on('exit', () => {

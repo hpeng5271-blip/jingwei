@@ -560,6 +560,32 @@ document.addEventListener('click', (e) => {
   gotoDiag(ED.path, parseInt(b.dataset.line, 10) || 1, 1);
 });
 
+/// **当前文件的诊断计数**（2026-10-22）：工具栏上一个极小的 "2 error / 1 warn"。
+/// 数据来自 `edDiagsFor(ED.path)`（已有的那个函数），不新增采集；点一下跳到第一处。
+function edPaintDiagCount() {
+  const el = document.getElementById('edDiagCount');
+  if (!el) return;
+  const diags = edDiagsFor(ED.path);
+  if (!diags.size) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  let errs = 0;
+  let warns = 0;
+  let firstLine = 0;
+  for (const [line, d] of diags) {
+    if (d.level === 'error') errs += 1;
+    else warns += 1;
+    if (!firstLine) firstLine = line;
+  }
+  el.hidden = false;
+  el.textContent = (errs ? errs + ' error' : '') + (errs && warns ? ' / ' : '')
+    + (warns ? warns + ' warn' : '');
+  el.dataset.line = String(firstLine || 1);
+  el.dataset.sev = errs ? 'error' : 'warn';
+}
+
 function edPaintGutter(force) {
   const g = $('#edNums');
   const wrap = $('#edGutter');
@@ -585,6 +611,7 @@ function edPaintGutter(force) {
   edPaintCode();
   edPaintGuides();
   edPaintCaret();
+  edPaintDiagCount();
 }
 
 /// 重活：高亮 + 行号 + 缩进线。只在"停下来"之后跑一次。
@@ -881,4 +908,12 @@ document.addEventListener('click', (e) => {
   if (t.closest('#btnEdRename')) { e.preventDefault(); edRenameOpen(); return; }
   if (t.closest('#edRnPreview')) { e.preventDefault(); edRenamePreview(); return; }
   if (t.closest('#edRnApply')) { e.preventDefault(); edRenameApply(); }
+});
+
+// 点工具栏那个计数 → 跳到这个文件的第一处诊断（复用 gotoDiag）。
+document.addEventListener('click', (e) => {
+  const el = e.target && e.target.closest ? e.target.closest('#edDiagCount') : null;
+  if (!el || !ED.path) return;
+  e.preventDefault();
+  gotoDiag(ED.path, parseInt(el.dataset.line || '1', 10), 1);
 });

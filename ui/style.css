@@ -2048,3 +2048,10 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 /* 协议条的数据来源（2026-10-22）：比三数字低一级，点一下复制命令。 */
 .pd-metrics .pm-src { cursor: pointer; opacity: 0.7; font-size: 12px; text-decoration: underline dotted; }
 .pd-metrics .pm-src:hover { opacity: 1; }
+
+/* 编辑器工具栏的诊断计数（2026-10-22）：有才显示，红/黄看最严重的那条。 */
+.ed-diagcount { cursor: pointer; font-size: 12px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(127,127,127,0.16); opacity: 0.9; }
+.ed-diagcount[data-sev="error"] { color: #ff9a9a; }
+.ed-diagcount[data-sev="warn"] { color: #e0b45c; }
+.ed-diagcount[hidden] { display: none; }

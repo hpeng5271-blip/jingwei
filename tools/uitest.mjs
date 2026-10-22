@@ -622,6 +622,27 @@ try {
       moved: document.querySelector('#edText').selectionStart !== before };
   });
   check('编辑器：行号上有诊断标记', gd.n === 2, JSON.stringify(gd));
+  // 工具栏诊断计数（2026-10-22）：有诊断才显示，点一下跳到第一处。
+  const dc = await page.evaluate(async () => {
+    const f = ED.path;
+    DOCK.diags = [
+      { level: 'error', file: f, line: 2, col: 1, message: 'e', src: 'check' },
+      { level: 'warn', file: f, line: 3, col: 1, message: 'w', src: 'check' },
+    ];
+    edPaintGutter(true);
+    const el = document.getElementById('edDiagCount');
+    const shown = el && !el.hidden;
+    const text = el ? el.textContent : '';
+    if (el) el.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const lncol = (document.getElementById('edLnCol') || {}).textContent || '';
+    DOCK.diags = [];
+    edPaintGutter(true);
+    const hiddenAfter = document.getElementById('edDiagCount').hidden;
+    return { shown, text, lncol, hiddenAfter };
+  });
+  check('编辑器：工具栏上有诊断计数', dc.shown === true && /error/.test(dc.text) && /warn/.test(dc.text), JSON.stringify(dc));
+  check('编辑器：点计数跳第一处，没诊断就收起', dc.lncol.includes('第 2 行') && dc.hiddenAfter === true, JSON.stringify(dc));
   // 网络允许（2026-10-22）：列表来自 CLI 的 net status；点 × 走 net deny。
   const netSt = await page.evaluate(async () => {
     globalThis.__netCalls = [];

@@ -709,6 +709,25 @@ try {
     return { before, after, lncol };
   });
   check('结果行默认不展开、点一下出明细', rx.before === 0 && rx.after >= 2, JSON.stringify(rx));
+  // 跑测试会走"合并位置 → 重画行号"这一步（2026-10-22）。
+  //
+  // 这里**不去伪造流事件**：桩里的 run_task 不发事件，伪造出来测的是"测试有没有造假"，
+  // 不是代码。真正可信的两段分别是：① 解析（testLocOf，另有断言）② 合并（mergeTestLocs，另有断言）；
+  // 这条只钉住"doRun('test') 会调用合并"这个接线点。
+  const tchain = await page.evaluate(async () => {
+    const orig = window.mergeTestLocs;
+    let called = 0;
+    window.mergeTestLocs = function () { called++; return orig.apply(this, arguments); };
+    DOCK.diags = [];
+    DOCK.testLocs = [];
+    DOCK.lastTest = null;
+    switchTab('run');
+    doRun('test');
+    await new Promise((r) => setTimeout(r, 2900));
+    window.mergeTestLocs = orig;
+    return { called, last: DOCK.lastTest };
+  });
+  check('跑测试会走合并位置这一步', tchain.called === 1, JSON.stringify(tchain));
   check('结果行明细点一条能跳过去', rx.lncol.includes('第 2 行'), JSON.stringify(rx));
   // 错误角标（2026-10-22）：有 error 才亮、显示数量、点它打开问题栏。
   const eb = await page.evaluate(async () => {

@@ -1254,6 +1254,7 @@ async function fillMetrics(root) {
       + '<span class="pm-why">' + esc((m.lifecycle && m.lifecycle.basis) || '') + '</span>'
       + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>'
       + srcChip(v);
+    renderProgress(root);
     const recent = document.getElementById('pdRecent');
     if (recent) recent.innerHTML = recentSummaryHtml();
   } catch (e) {
@@ -1603,3 +1604,37 @@ function channelStop() {
   if (typeof invoke !== 'function') return;
   invoke('channel_stop').catch(() => { /* 没起来过就算了 */ });
 }
+
+/// **学习进度**（2026-10-23，pro：汇总 → 展示 → 可点回文件）。
+/// 数据来自 `jingwei events progress`（CLI 已实现），这里只渲染，不重算。
+async function renderProgress(root) {
+  let el = document.getElementById('pdProgress');
+  if (!el) {
+    const host = document.getElementById('pdMetrics');
+    if (!host || !host.parentElement) return;
+    el = document.createElement('div');
+    el.className = 'pd-progress'; el.id = 'pdProgress';
+    host.parentElement.insertBefore(el, host.nextSibling);
+  }
+  try {
+    const v = await fetchOnce(`progress:${root}`, 5000, () =>
+      invoke('cli_json', { root, args: ['events', 'progress'] }));
+    const todo = (v && v.todo) || [];
+    const learned = (v && v.learned) || [];
+    if (!todo.length && !learned.length) { el.textContent = ''; return; }
+    const head = [];
+    if (todo.length) head.push('待解决 ' + todo.length);
+    if (learned.length) head.push('已变绿 ' + learned.length);
+    el.innerHTML = '<span class="pp-dim">学习进度：' + head.join(' · ') + '</span>'
+      + todo.slice(0, 3).map((k) => '<a class="pp-item" data-open-file="' + esc(k) + '">' + esc(k) + '</a>').join('');
+  } catch (e) { el.textContent = ''; }
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target && e.target.closest ? e.target.closest('[data-open-file]') : null;
+  if (!a) return;
+  e.preventDefault();
+  const p = a.dataset.openFile;
+  if (typeof switchTab === 'function') switchTab('editor');
+  if (typeof edOpen === 'function') edOpen(p);
+});

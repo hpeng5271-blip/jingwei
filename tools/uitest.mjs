@@ -56,6 +56,9 @@ function stubTauri() {
       (globalThis.__prog ||= []).push(1);
       return { todo: ['src/a.rs', 'src/b.rs'], learned: ['src/c.rs'] };
     }
+    if (cmd === 'cli_json' && args && (args.args || []).join(' ') === 'events progress') {
+      return { todo: globalThis.__progTodo || [], learned: globalThis.__progLearned || [] };
+    }
     if (cmd === 'events_summary') {
       const k = args && args.key;
       if (!k) return { open: 0, edit: 0, check: 0, revisit: 0, last_check: null };
@@ -668,6 +671,21 @@ try {
     const el = document.getElementById('edHistory');
     return { text: el ? el.textContent : '', hidden: el ? el.hidden : true };
   });
+
+  // 学习进度（2026-10-23）：只验"说得出来 + 有可点入口"，不切 tab、不动现场。
+  const pr = await page.evaluate(async () => {
+    globalThis.__progTodo = ['src/a.rs'];
+    globalThis.__progLearned = ['src/b.rs'];
+    INFLIGHT.clear(); RECENT.clear();
+    await renderProgress(PS.sel);
+    await new Promise((r) => setTimeout(r, 200));
+    const el = document.getElementById('pdProgress');
+    const text = el ? el.textContent : '';
+    const link = el ? el.querySelector('[data-open-file]') : null;
+    return { text, key: link ? link.dataset.openFile : '' };
+  });
+  check('学习进度：说出待解决/已变绿并给出可点入口',
+    /学习进度/.test(pr.text) && /已变绿 1/.test(pr.text) && pr.key === 'src/a.rs', JSON.stringify(pr));
   check('文件历史：说得出打开/改动/检查次数与复访',
     /打开 3/.test(eh.text) && /改动 2/.test(eh.text) && /回来第 3 次/.test(eh.text) && eh.hidden === false, JSON.stringify(eh));
 
@@ -1566,6 +1584,25 @@ try {
   }
 
 } catch (e) {
+  // 点入口回文件（放最后：会让 PANEL.tab 变 editor，跑完恢复现场）。
+  const pj = await page.evaluate(async () => {
+    const real = ED.files[0];
+    try {
+      globalThis.__progTodo = [real];
+      INFLIGHT.clear(); RECENT.clear();
+      await renderProgress(PS.sel);
+      await new Promise((r) => setTimeout(r, 200));
+      const link = document.querySelector('#pdProgress [data-open-file]');
+      if (link) link.click();
+      await new Promise((r) => setTimeout(r, 400));
+      return { real, tab: PANEL.tab, edPath: ED.path };
+    } finally {
+      switchTab('home');
+      globalThis.__progTodo = [];
+    }
+  });
+  check('学习进度：点一条跳回该文件',
+    pj.tab === 'editor' && pj.edPath === pj.real, JSON.stringify(pj));
   check('测试脚本自身异常', false, String(e).slice(0, 160) + ' || 页面异常: ' + pageErrors.slice(0, 2).join(' | '));
 } finally {
   if (browser) await browser.close();

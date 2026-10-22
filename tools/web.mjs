@@ -28,6 +28,15 @@ const getFlag = (k, d) => {
   return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : d;
 };
 const has = (k) => args.includes(`--${k}`);
+// 取第 n 个"位置参数"（跳过 --flag 与它的值）——否则 `v2ex --limit 2` 会把 "--limit" 当关键词。
+const pos = (n = 0) => {
+  const out = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i].startsWith('--')) { if (args[i + 1] && !args[i + 1].startsWith('--')) i += 1; continue; }
+    out.push(args[i]);
+  }
+  return out[n];
+};
 const limit = Number(getFlag('limit', '5'));
 const proxy = has('no-proxy') ? null : getFlag('proxy', process.env.JINGWEI_PROXY || 'http://127.0.0.1:7897');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
@@ -125,6 +134,77 @@ const oldReddit = (q, n = limit) => {
   return kept.slice(0, n);
 };
 
+// ── Lobsters：技术社区，JSON 直接给（无账号） ─────────────
+const lobsters = (q, n = limit) => {
+  // 实测：hottest/newest/t/<tag>.json 都是 200；`search.json` 返回的是 HTML（不能当 JSON 用）。
+  const url = !q ? 'https://lobste.rs/hottest.json'
+    : (/^[a-z0-9-]+$/.test(q) ? `https://lobste.rs/t/${encodeURIComponent(q)}.json` : 'https://lobste.rs/hottest.json');
+  const j = JSON.parse(curl(url, true));
+  return (j || []).slice(0, n).map((it) => ({
+    src: 'lobsters',
+    title: it.title,
+    url: it.url || `https://lobste.rs/s/${it.short_id}`,
+    meta: `${it.score || 0} 分 · ${it.comment_count || 0} 评论`,
+    extra: (it.tags || []).join(", "),
+  }));
+};
+
+// ── dev.to：公开文章 API（无账号） ─────────────
+const devto = (q, n = limit) => {
+  const url = q
+    ? `https://dev.to/api/articles?tag=${encodeURIComponent(q)}&per_page=${n}`
+    : `https://dev.to/api/articles?per_page=${n}`;
+  const j = JSON.parse(curl(url, true));
+  return (j || []).slice(0, n).map((it) => ({
+    src: 'dev.to',
+    title: it.title,
+    url: it.url,
+    meta: `${it.positive_reactions_count || 0} 赞 · ${it.comments_count || 0} 评论`,
+    extra: (it.tag_list || []).join(", "),
+  }));
+};
+
+// ── V2EX：中文技术社区（无账号） ─────────────
+const v2ex = (q, n = limit) => {
+  if (q === "hot" || !q) {
+    const j = JSON.parse(curl('https://www.v2ex.com/api/topics/hot.json', true));
+    return (j || []).slice(0, n).map((it) => ({
+      src: 'v2ex',
+      title: it.title,
+      url: it.url,
+      meta: `${it.replies || 0} 回复`,
+      extra: (it.node && it.node.title) || "",
+    }));
+  }
+  throw new Error("V2EX 只有热门接口（v2ex hot）；按关键词搜要自己开浏览器");
+};
+
+// ── PullPush：Reddit 公开档案（无账号；会 429，慢一点再试） ─────────────
+const pullpush = (q, n = limit) => {
+  const url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(q)}&size=${n}&sort=desc`;
+  const j = JSON.parse(curl(url, true));
+  return (j.data || []).slice(0, n).map((it) => ({
+    src: 'pullpush',
+    title: it.title,
+    url: `https://www.reddit.com${it.permalink || ""}`,
+    meta: `${it.score || 0} 分 · ${it.num_comments || 0} 评论`,
+    extra: it.subreddit || "",
+  }));
+};
+// ── SO 正文：页面被 Cloudflare 保护，但 **API 带 filter=withbody 能拿到正文** ──
+const soBody = (qid, site = "stackoverflow", n = 5) => {
+  const q = JSON.parse(curl(`https://api.stackexchange.com/2.3/questions/${qid}?site=${site}&filter=withbody`, true));
+  const a = JSON.parse(curl(`https://api.stackexchange.com/2.3/questions/${qid}/answers?site=${site}&filter=withbody&sort=votes&order=desc&pagesize=${n}`, true));
+  const pill = (it) => ({
+    title: decode(it.title || `答案 by ${it.owner && it.owner.display_name}`),
+    url: it.link || `https://${site}/q/${qid}`,
+    body: stripTags(it.body || ""),
+    score: it.score,
+  });
+  const rows = (q.items || []).map(pill);
+  for (const it of (a.items || [])) rows.push(pill(it));
+  return rows;
+};
 const printRows = (rows, asJson) => {
   if (asJson) {
     console.log(JSON.stringify(rows, null, 2));
@@ -157,6 +237,7 @@ try {
       ...safe(() => gh(q, '', 3)),
       ...safe(() => se(q, 'stackoverflow', 3)),
       ...safe(() => hn(q, 3)),
+      ...safe(() => pullpush(q, 3)),
     ];
     printRows(rows, has('json'));
   } else if (cmd === 'so') {
@@ -190,6 +271,26 @@ try {
     } else {
       console.log(text);
     }
+  } else if (cmd === 'lobsters') {
+    printRows(safe(() => lobsters(pos(1) || '')), has('json'));
+  } else if (cmd === 'devto') {
+    printRows(safe(() => devto(pos(1) || '')), has('json'));
+  } else if (cmd === 'v2ex') {
+    printRows(safe(() => v2ex(pos(1) || 'hot')), has('json'));
+  } else if (cmd === 'pullpush') {
+    printRows(safe(() => pullpush(pos(1))), has('json'));
+  } else if (cmd === 'soq') {
+    const qid = pos(1);
+    if (!qid) throw new Error("用法：node tools/web.mjs soq <question_id> [--site stackoverflow] [--chars N]");
+    const rows = safe(() => soBody(qid, getFlag("site", "stackoverflow")));
+    const chars = Number(getFlag('chars', '2500'));
+    if (has('json')) { console.log(JSON.stringify(rows, null, 2)); }
+    else rows.forEach((r, i) => {
+      console.log(`${i === 0 ? "问题" : "答案 " + i}. ${r.title}${typeof r.score === "number" ? `（${r.score} 分）` : ""}`);
+      console.log(`   ${r.url}`);
+      console.log(`   ${r.body.slice(0, chars)}`);
+      console.log("");
+    });
   } else if (cmd === 'discord') {
     console.log('Discord：**匿名读不了**（三态：查不了）。');
     console.log('官方 API 要 bot token；社区内容不在公开搜索索引里。');
@@ -203,7 +304,12 @@ try {
   reddit "<q>" | r/<sub>    old.reddit
   discourse <host> "<q>"    Discourse 论坛（如 users.rust-lang.org）
   fetch <url> [--chars N] [--save 主题]
+  soq <question_id>         SO 问题 + 答案正文（走 API，绕开 Cloudflare）
   discord                   为什么读不了
+  lobsters [q]              技术社区（JSON）
+  devto [tag]               dev.to 文章（JSON）
+  v2ex [hot]                V2EX 热门（中文，JSON）
+  pullpush "<q>"            Reddit 公开档案（会 429，慢点再试）
 公共：--json --no-proxy --proxy <url> --limit N   代理默认 ${proxy || '（不用）'}`);
     process.exit(2);
   }

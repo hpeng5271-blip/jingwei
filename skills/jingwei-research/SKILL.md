@@ -1,47 +1,47 @@
 ---
 name: jingwei-research
-description: 引入"我之外"的信息并标注可信度。要查外部项目/人物/技术、要读社区讨论（StackOverflow/GitHub/HN/论坛）、或要引用外部结论时使用。
+description: 引入"我之外"的信息并标注可信度。要查外部项目/人物/技术、要读社区（SO/GitHub/HN/Lobsters/dev.to/V2EX/Reddit 档案/论坛）、或要引用外部结论时使用。
 ---
 
 # 外网取信：先选通道，再标可信度
 
-## 通道实测（2026-10-22，本机走代理 `127.0.0.1:7897`）
+## 通道实测（2026-10-22，走代理 `127.0.0.1:7897`，**都不需要账号**）
 
-| 通道 | 状态 | 入口 |
+| 通道 | 状态 | 命令 |
 |---|---|---|
-| **StackOverflow / StackExchange** | ✓ 可用 | `node tools/web.mjs so "<q>"`（官方 API，无 key） |
-| **GitHub issues** | ✓ 可用（技术问题第一优先） | `node tools/web.mjs gh "<q>" [--repo owner/name]` |
-| **Hacker News** | ✓ 可用 | `node tools/web.mjs hn "<q>"`（Algolia） |
-| **Discourse 论坛** | ✓ 可用 | `node tools/web.mjs discourse users.rust-lang.org "<q>"` |
-| **Reddit** | ✗ 匿名读不了（登录墙/403） | 要登录态或 API key；**别因此说"没人讨论"** |
-| **DuckDuckGo / Bing RSS** | ✗ 挑战页 / 返回垃圾 | 不用 |
-| **Discord** | ✗ 要 bot token | 只能人工看邀请链接 |
+| StackOverflow / SE | ✓ | `so "<q>"` · **`soq <id>`（提问+答案正文，走 API 绕开 Cloudflare）** |
+| GitHub issues | ✓（技术问题第一优先） | `gh "<q>" [--repo o/n]` |
+| Hacker News | ✓ | `hn "<q>"` |
+| Discourse 论坛 | ✓ | `discourse users.rust-lang.org "<q>"` |
+| **Reddit（PullPush 档案）** | ✓ | `pullpush "<q>"`（有标题/分数/子版；**帖子链接打不开**） |
+| Lobsters | ✓ | `lobsters [tag]` |
+| dev.to | ✓ | `devto <tag>` |
+| V2EX（中文） | ✓ | `v2ex hot` |
+| Reddit 直连 / DDG / Bing RSS | ✗ | 403 登录墙 / 挑战页 / 垃圾结果 |
+| Discord | ✗ | 要 bot token；self-bot 会封号 |
 
-一条命令多源：`node tools/web.mjs search "webview2 white screen"` → GitHub + SO + HN。
+多源一条命令：`node tools/web.mjs search "<q>"`（GitHub + SO + HN + PullPush）。
+落盘：`node tools/web.mjs fetch <url> --save 主题` → `docs/research/<日期>-<主题>.md`。
 
 ## 用之前先问三句
 
-1. 这个结论**必须**来自外部吗？（仓库里能查的别上网）
-2. 来源是**一手**吗？（官方文档/源码 > issue > 论坛帖 > 博客）
-3. 它和我这台机器/这个版本**对得上**吗？（版本、平台、时间）
+1. 必须来自外部吗？（仓库里能查的别上网）
+2. 是一手吗？（官方文档/源码 > issue > 论坛帖 > 博客）
+3. 对得上我这台机器/这个版本吗？（版本、平台、时间）
 
 ## 引用规矩
 
-- 每个外部结论后跟 `[已核实]`（自己打开过原文）或 `[R]`（只读到摘要/二手）；
+- 每条结论后跟 `[已核实]`（自己读过原文）或 `[R]`（只读到摘要/二手）；
 - 写清**抓取时间**与 **URL**，社区答案会改；
-- **查不到就写"查不了 + 为什么"**（登录墙/无字幕/风控），不许把"没读到"写成"没有"。
+- **查不到就写"查不了 + 为什么"**（登录墙/风控/无字幕），不许把"没读到"写成"没有"。
 
-## 落盘
+## 抓取频率（硬约束）
 
-```powershell
-node tools/web.mjs fetch <url> --chars 4000 --save 主题词
-# → docs/research/<日期>-<主题>.md：原文去标签 + 来源 + 抓取方式，不做摘要
-```
-
-长文/转写放 `docs/research/transcripts/`，按那里 README 的可靠性规则标注。
+间隔 ≥3 秒；每小时 ≤60 次；只读列表/正文；**不点赞、不发帖、不加入社区**。
+PullPush/redlib 这类公共实例经常 429——**等一会儿再说，别狂试**。
 
 ## 别做的
 
-- 不用需要登录态的抓取（会让人以为"能自动化"）；
-- 不上浏览器/无头渲染（中低配机器，一个 curl 够）；
+- 不用别人的账号密码自动登录（违反条款 + 封号风险 + 凭据泄露）；
+- 不上浏览器自动化去点按钮（中低配机器；而且真人操作会被判异常）；
 - 不把社区帖子当判据——判据仍由人定。

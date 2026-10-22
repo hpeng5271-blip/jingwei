@@ -8,10 +8,10 @@
     "tests_total": 610,
     "shell_tests": 134,
     "gates": 4,
-    "graph_files": 173,
-    "graph_symbols": 2424,
-    "graph_nodes": 2607,
-    "graph_edges": 5594,
+    "graph_files": 174,
+    "graph_symbols": 2434,
+    "graph_nodes": 2618,
+    "graph_edges": 5621,
     "motives_landed": 19,
     "motives_pending": 6
   }

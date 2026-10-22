@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 
 mod payload;
+mod channel;
 mod cli;
 mod notify;
 mod tasks;
@@ -951,6 +952,9 @@ fn main() {
     data_dir,
     open_path,
     event_note,
+    channel::channel_start,
+    channel::channel_request,
+    channel::channel_stop,
             notify::notify_gate,
             notify::msg_ingest,
             notify::msg_mark,

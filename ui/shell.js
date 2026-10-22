@@ -1239,9 +1239,10 @@ async function fillMetrics(root) {
   // "最近"那一行用同一块容器：上面是三数字，下面是最近发生了什么（2026-10-22）。
 
   try {
-    const v = await fetchOnce(`handover:${root}`, 500, () =>
-      invoke('cli_json', { root, args: ['handover'] }));
-    const m = (v && v.metrics) || {};
+    const v = await fetchOnce(`metrics:${root}`, 500, () =>
+      channelFetch(root, 'metrics'));
+    // 两种来源形状不同：通道直接给 metrics，spawn 给 {metrics:…}（2026-10-22）
+    const m = (v && v.metrics) || (v && v.files !== undefined ? v : {}) || {};
     const st = (v && v.state) || 'unknown';
     const life = (m.lifecycle && m.lifecycle.state) || 'unknown';
     maybeUpdateWindow(root, m);
@@ -1569,3 +1570,36 @@ document.addEventListener('click', async (e) => {
   try { await invoke('open_path', { path: p }); }
   catch (err) { if (typeof toast === 'function') toast('打不开：' + (err && err.message ? err.message : err)); }
 });
+
+/// **详情页的常驻通道**（2026-10-22，D-20261022-03 Q8：只接这一条路径）。
+///
+/// 规矩（pro 定）：惰性启动；**崩了自动回退 spawn**；进程只随详情页存活。
+/// 回退只提示一次——每次失败都弹，比慢更烦。
+let chanWarned = false;
+
+function channelFetch(root, method) {
+  return invoke('channel_request', { root, method })
+    .then((r) => ({
+      metrics: r,
+      // **来源要说真话**：这些数字是常驻通道给的，不是 spawn 出来的 handover
+      evidence: [{ kind: 'command', ref: 'jingwei serve', note: '常驻通道（惰性启动）' }],
+    }))
+    .catch(() => {
+      // 看门狗：通道不可用 → 退回 spawn（只提示一次，不每次弹）
+      if (!chanWarned) {
+        chanWarned = true;
+        if (typeof toast === 'function') toast('常驻通道没起来，已退回普通取数（只提示这一次）');
+      }
+      return invoke('cli_json', { root, args: [method === 'metrics' ? 'handover' : method] })
+        .then((v) => {
+          if (method !== 'metrics') return v;
+          return { metrics: (v && v.metrics) || {}, evidence: (v && v.evidence) || [] };
+        });
+    });
+}
+
+/// 离开详情页时把进程退掉（pro 验收第 3 条：进程只随详情页存活）。
+function channelStop() {
+  if (typeof invoke !== 'function') return;
+  invoke('channel_stop').catch(() => { /* 没起来过就算了 */ });
+}

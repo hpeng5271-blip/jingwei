@@ -46,6 +46,12 @@ function stubTauri() {
     core: {
       invoke: async (cmd, args) => {
     if (cmd === 'cli_json') { (globalThis.__cli ||= []).push((args && args.args || []).join(' ')); }
+    if (cmd === 'channel_request') {
+      (globalThis.__chan ||= []).push(args && args.method);
+      if (globalThis.__chanFail) throw new Error("通道挂了");
+      return { files: 3, volume_bytes: 2048, lifecycle: { state: "recent", basis: "测试" } };
+    }
+    if (cmd === 'channel_stop') { globalThis.__chanStopped = (globalThis.__chanStopped || 0) + 1; return null; }
     if (cmd === 'event_note') { (globalThis.__events ||= []).push(args); return true; }
     if (cmd === 'data_dir') return 'C:\\Users\\demo\\AppData\\Local\\jingwei';
     if (cmd === 'open_path') { (globalThis.__opened ||= []).push(args && args.path); return null; }
@@ -553,7 +559,7 @@ try {
   // 更新窗只列变了的那些（2026-10-22）：生命周期没变就不许出现在里面。
   const ud = await page.evaluate(() => {
     localStorage.setItem('jw.seen.files.' + PS.sel,
-      JSON.stringify({ files: 1, bytes: 1, life: 'no_git' }));
+      JSON.stringify({ files: 1, bytes: 1, life: 'recent' }));
     fillMetrics(PS.sel);
     const box = document.getElementById('updatePanel');
     return new Promise((r) => setTimeout(() => {
@@ -876,16 +882,16 @@ try {
   check('使用事件：打开文件记一条 open', ev.afterOpen.length === 1 && ev.afterOpen[0].kind === 'open', JSON.stringify(ev));
   // 单飞 + 去抖（2026-10-22）：连点三次只起一次 CLI；过了 500 ms 才允许再取。
   const sf = await page.evaluate(async () => {
-    globalThis.__cli = [];
+    globalThis.__chan = []; globalThis.__cli = [];
     INFLIGHT.clear(); RECENT.clear();
     await Promise.all([fillMetrics(PS.sel), fillMetrics(PS.sel), fillMetrics(PS.sel)]);
     await new Promise((r) => setTimeout(r, 100));
-    const concurrent = (globalThis.__cli || []).filter((c) => c.includes('handover')).length;
+    const concurrent = (globalThis.__chan || []).filter((c) => c === 'metrics').length;
     await fillMetrics(PS.sel);            // 500 ms 内：复用
-    const withinTtl = (globalThis.__cli || []).filter((c) => c.includes('handover')).length;
+    const withinTtl = (globalThis.__chan || []).filter((c) => c === 'metrics').length;
     await new Promise((r) => setTimeout(r, 600));
     await fillMetrics(PS.sel);            // 过了 TTL：允许再取
-    const afterTtl = (globalThis.__cli || []).filter((c) => c.includes('handover')).length;
+    const afterTtl = (globalThis.__chan || []).filter((c) => c === 'metrics').length;
     return { concurrent, withinTtl, afterTtl };
   });
   check('单飞去抖：并发三次只发一次，500ms 内复用，过期才再取',

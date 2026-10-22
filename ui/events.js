@@ -35,6 +35,8 @@ function switchTab(name) {
   if (name === 'note') renderNoteProjects();
   if (name === 'editor' && S.root && !ED.files.length) edLoadFiles();
   if (name === 'editor') edPaintCode();
+  // 离开首页详情就退掉常驻通道（pro Q8 验收第 3 条：进程只随详情页存活）。
+  if (name !== 'home') channelStop();
   // 图谱：切过去才拉数据、才连线——**不切就不做任何事**
   // （一屏画几千个点是有代价的，没在看的时候不该花这份钱）
   if (name === 'graph' && S.root) {

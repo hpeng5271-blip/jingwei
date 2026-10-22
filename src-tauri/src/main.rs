@@ -1082,3 +1082,38 @@ fn events_summary(key: String) -> Result<serde_json::Value, String> {
         "last_check": last_check,
     }))
 }
+
+#[cfg(test)]
+mod event_tests {
+    //! **写侧端到端**（2026-10-22，pro 闭环第 ② 项的另一半）：
+    //! `event_note`（界面唯一入口）真的把事件写进文件，且 `open` 5 分钟内去重。
+
+    use super::*;
+
+    #[test]
+    fn event_note_写进去_且_open_去重() {
+        let dir = std::env::temp_dir().join(format!("jw-note-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        std::env::set_var("JINGWEI_EVENTS_FILE", &f);
+
+        assert_eq!(event_note("open".into(), "src/a.rs".into(), None).ok(), Some(true));
+        assert_eq!(
+            event_note("open".into(), "src/a.rs".into(), None).ok(),
+            Some(false),
+            "5 分钟内同一个 open 不该再记"
+        );
+        assert_eq!(
+            event_note("edit".into(), "src/a.rs".into(), Some("行数 10 → 12".into())).ok(),
+            Some(true)
+        );
+
+        let text = std::fs::read_to_string(&f).unwrap_or_default();
+        assert_eq!(text.lines().filter(|l| !l.trim().is_empty()).count(), 2, "该有 2 条：{text}");
+        assert!(text.contains("\"kind\":\"edit\""), "edit 要写进去：{text}");
+        assert!(!text.contains("pub fn"), "不许写文件内容：{text}");
+        std::env::remove_var("JINGWEI_EVENTS_FILE");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

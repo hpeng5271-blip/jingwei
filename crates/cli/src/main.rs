@@ -15,6 +15,7 @@ mod cmd_deps;
 mod cmd_net;
 mod cmd_discover;
 mod cmd_explain;
+mod cmd_file;
 mod cmd_handover;
 mod cmd_knowledge;
 mod cmd_learn;
@@ -490,6 +491,14 @@ fn run(used_cmd: &mut String) -> i32 {
         cmd_watch::cmd_watch(&root, &roots, journal.as_deref())
     }
     "handover" => cmd_handover::cmd_handover(&root, json),
+    // **单文件聚焦**（2026-10-22，D-20261022-03 §四）：问"这一个文件怎么样"一次答完。
+    "file" => {
+        let Some(path) = rest.first() else {
+            eprintln!("用法：jingwei file <路径> [--json]");
+            return 2;
+        };
+        cmd_file::cmd_file(&root, path, json)
+    }
     "explain" | "why" => {
         let Some(who) = rest.first() else {
             eprintln!("用法：jingwei explain <名字|symbol:id>");
@@ -613,7 +622,7 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
 /// **主路径 8 个**（2026-10-21）：只在这 8 个里选，其余是"按需用"。
 /// 判据来自审计：36 个入口 = 没有默认动作；主路径固定后，`--help` 的排序就是优先级。
 pub(crate) const MAIN_VERBS: &[&str] = &[
-    "next", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
+    "next", "file", "explain", "impact", "positions", "handover", "index", "graph", "knowledge",
 ];
 
 pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
@@ -681,6 +690,7 @@ pub(crate) const COMMANDS: &[(&str, &[&str], &str)] = &[
     // 用户敲 `jingwei --help` 看不到 handover / explain / positions / rename / watch，
     // 只能从说明书或记忆里找。帮助表是"有哪些命令"的唯一真源，漏了就等于没这命令。
     ("handover", &[], "接手人一页纸：能不能跑 / 规模 / 热点 / 下一步 / 决策理由 / 文件状态"),
+    ("file", &[], "单文件聚焦：是什么 / 依赖谁 / 最近动过（图里没建就说查不了）"),
     ("explain", &["why"], "这个符号是什么、定义在哪、被谁调 / 被引用几处"),
     (
         "impact",

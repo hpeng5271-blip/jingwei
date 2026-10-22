@@ -1942,3 +1942,43 @@ fn handover_文本版也印三数字() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **单文件聚焦**（2026-10-22，D-20261022-03 §四）：`file` 一次答完"这一个文件怎么样"。
+/// 两种情形都要对：有图谱给符号与依赖；没图谱**state=unknown 且三字段齐全**（不许说成 0 个符号）。
+#[test]
+fn file_单文件聚焦() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("file-focus");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\npub fn g() { f(); }\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+
+    // ① 没图谱：unknown + 三字段
+    let o0 = run(&["file", "src/a.rs", "--root", &p, "--json"]);
+    let v0: serde_json::Value = serde_json::from_str(&stdout(&o0)).expect("file --json 该是 JSON");
+    assert_eq!(v0["state"].as_str(), Some("unknown"), "没图谱该是 unknown：{v0}");
+    for k in ["what", "why", "how"] {
+        assert!(v0[k].as_str().map(|s| !s.is_empty()).unwrap_or(false), "缺字段 {k}：{v0}");
+    }
+    assert!(v0["symbols"].is_null(), "没图谱不许给 0 个符号：{v0}");
+
+    // ② 有图谱：yes + 符号数 + 依赖
+    let oi = run(&["index", "--root", &p]);
+    assert_eq!(code(&oi), 0, "索引应成功");
+    let o1 = run(&["file", "src/a.rs", "--root", &p, "--json"]);
+    let v1: serde_json::Value = serde_json::from_str(&stdout(&o1)).expect("file --json 该是 JSON");
+    assert_eq!(v1["state"].as_str(), Some("yes"), "有图谱该是 yes：{v1}");
+    assert_eq!(v1["lang"].as_str(), Some("Rust"), "语言该认出来：{v1}");
+    assert_eq!(v1["lines"].as_u64(), Some(2), "行数该是 2：{v1}");
+    assert!(v1["symbols"].as_u64().unwrap_or(0) >= 2, "图里至少 2 个符号：{v1}");
+    assert!(v1["depends_on"]["count"].as_u64().is_some(), "依赖要有个数（0 也算）：{v1}");
+    assert!(v1["recent"]["basis"].as_str().is_some(), "最近动过要带判据：{v1}");
+
+    // ③ 不存在：exit 2 + unknown
+    let o2 = run(&["file", "src/nope.rs", "--root", &p, "--json"]);
+    assert_eq!(code(&o2), 2, "不存在的文件该 2：{}", stdout(&o2));
+    let v2: serde_json::Value = serde_json::from_str(&stdout(&o2)).expect("也该是 JSON");
+    assert_eq!(v2["state"].as_str(), Some("unknown"), "{v2}");
+    let _ = std::fs::remove_dir_all(&d);
+}

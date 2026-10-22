@@ -72,6 +72,7 @@ pub mod understand {
     pub mod contract;
     pub mod diag;
     /// **消息与提示的判据**（去重计数 / 状态机 / 自适应静音）：GUI 只消费结果。
+    pub mod events;
     pub mod notify;
     /// **后台任务的真任务源**（索引/环境/深绘）：界面图标只认真任务，不认假状态。
     pub mod tasks;

@@ -470,6 +470,21 @@ try {
     return (document.getElementById('envLast') || {}).textContent || '';
   });
   check('设置页说得出最近一次环境动作', /env use/.test(el2) && /用时 3 秒/.test(el2), el2);
+  // 首屏"最近"一句（2026-10-22）：环境 + 检查/测试拼成一行，不新增采集。
+  const rs = await page.evaluate(() => {
+    window.__latestEnv = { name: 'jingwei env use', state: 'done', elapsed_s: 3, running: false };
+    DOCK.diags = [
+      { level: 'error', file: ED.path, line: 2, col: 1, message: 'x', src: 'check' },
+      { level: 'error', file: ED.path, line: 4, col: 1, message: 'y', src: 'test' },
+    ];
+    DOCK.lastTest = { ok: false, exit: 1 };
+    const txt = recentSummaryText();
+    const el = document.getElementById('pdRecent');
+    if (el) el.textContent = txt;
+    return { txt, hasEl: !!el };
+  });
+  check('首屏最近一句：环境 + 检查 + 测试都在', /env use/.test(rs.txt) && /检查 1 处/.test(rs.txt) && /测试 1 处定位/.test(rs.txt), rs.txt);
+  check('首屏最近一句：位置在协议条下面', rs.hasEl === true, JSON.stringify(rs));
   check('没接任务源的角标如实说', /还没接任务源/.test(tt2.deep), tt2.deep);
   check('任务角标：只有真任务源在跑', ti.running === 1, JSON.stringify(ti.states));
 

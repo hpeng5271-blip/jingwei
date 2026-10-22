@@ -931,6 +931,7 @@ function renderDetail() {
   const run = (c && c.commands && c.commands.run) || info.run;
 
   box.innerHTML = '<div class="pd-metrics" id="pdMetrics">正在读协议（CLI 那边算的）…</div>'
+    + '<div class="pd-recent" id="pdRecent">最近：还没有记录</div>'
     + '<div class="pd-bar">'
     + '<span class="pd-title">' + esc(p.name) + '</span>'
     + '<button class="btn sm" data-pd="open">打开项目</button>'
@@ -1140,9 +1141,34 @@ function showUpdateWindow(path, prev, cur) {
   if (x) x.onclick = () => box.remove();
 }
 
+/// **首屏"最近"一句**（2026-10-22）：环境动作 + 检查/测试三块拼成一行。
+///
+/// 三块数据本来就散着：环境在 `tasks_state.latest.env`（renderEnvLast 缓存到 window），
+/// 检查/测试在 `DOCK.diags`。这里**只做拼装**，不新增采集、不重算判据。
+function recentSummaryText() {
+  const parts = [];
+  const env = (typeof window !== 'undefined' && window.__latestEnv) || null;
+  if (env) {
+    const when = env.running ? '正在跑 ' + fmtDur(env.elapsed_s) : '用时 ' + fmtDur(env.elapsed_s);
+    parts.push('环境 ' + (env.name || '').replace(/^jingwei /, '') + ' ' + when);
+  }
+  const diags = (typeof DOCK !== 'undefined' && DOCK.diags) || [];
+  const check = diags.filter((d) => (d.src || 'check') === 'check').length;
+  const test = diags.filter((d) => d.src === 'test').length;
+  const errs = diags.filter((d) => d.level === 'error').length;
+  if (check) parts.push('检查 ' + check + ' 处（error ' + errs + '）');
+  if (test) parts.push('测试 ' + test + ' 处定位');
+  else if (typeof DOCK !== 'undefined' && DOCK.lastTest && DOCK.lastTest.ok === false) {
+    parts.push('测试失败（没定位到行）');
+  }
+  return parts.length ? '最近：' + parts.join(' · ') : '最近：还没有记录';
+}
+
 async function fillMetrics(root) {
   const el = document.getElementById('pdMetrics');
   if (!el) return;
+  // "最近"那一行用同一块容器：上面是三数字，下面是最近发生了什么（2026-10-22）。
+
   try {
     const v = await invoke('cli_json', { root, args: ['handover'] });
     const m = (v && v.metrics) || {};
@@ -1156,6 +1182,8 @@ async function fillMetrics(root) {
       + '<span class="pm">生命周期 <b>' + esc(lifeText(life)) + '</b></span>'
       + '<span class="pm-why">' + esc((m.lifecycle && m.lifecycle.basis) || '') + '</span>'
       + '<span class="pm-why">' + esc((v && v.reason) || '') + '</span>';
+    const recent = document.getElementById('pdRecent');
+    if (recent) recent.textContent = recentSummaryText();
   } catch (e) {
     el.innerHTML = '<span class="pm-pill pm-unknown">查不了</span><span class="pm-why">' + esc(String(e)) + '</span>';
   }
@@ -1318,6 +1346,7 @@ function fmtDur(secs) {
 /// 设置页那行"最近一次环境动作"（2026-10-22）：数据就是 `tasks_state` 里的 `latest.env`，
 /// 不新增命令、不另存一份状态。
 function renderEnvLast(latest) {
+  window.__latestEnv = (latest && latest.env) || null;   // 首屏那句要用（不新增命令）
   const el = document.getElementById('envLast');
   if (!el) return;
   const e = latest && latest.env;

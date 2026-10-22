@@ -39,7 +39,7 @@
 ## 现行数字（只信 `tools/facts.json`）
 
 - 测试：<!-- fact:tests_total -->616<!-- /fact --> 条（engine <!-- fact:engine_unit -->404<!-- /fact --> / 集成 <!-- fact:integration -->151<!-- /fact --> / model <!-- fact:model -->11<!-- /fact -->）
-- 外壳断言：<!-- fact:shell_tests -->136<!-- /fact --> 条；文档数字标记：90 处（脚本会校验）
+- 外壳断言：<!-- fact:shell_tests -->137<!-- /fact --> 条；文档数字标记：90 处（脚本会校验）
 - 性能（10-22 17:35 实测）：index 548 · handover 537 · doctor 382 · next 83 · **file 42** ms；GUI 31 MB
 - 包：`dist\2026-10-22\`（gui + cli + 使用说明），`smoke-pack --gui` 通过
 

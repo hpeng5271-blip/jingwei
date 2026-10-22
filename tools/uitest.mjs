@@ -84,6 +84,8 @@ function stubTauri() {
             if (globalThis.__gateDeny) return { allow: false, silence: 120, why: '静音中' };
             return { allow: true, silence: 30, why: '第一次提示' };
           case 'tasks_state':
+            // 计数：给"聚焦期间不取数"那条进程级证据用（2026-10-23）
+            globalThis.__tasksCalls = (globalThis.__tasksCalls || 0) + 1;
             // 任务角标的桩（2026-10-21）：一类在跑、一类刚完成、一类没任务源。
             return { running: 1, latest: {
               index: { id: 'x', state: 'running', name: 'jingwei index', started_at: 1, ended_at: null,
@@ -934,6 +936,23 @@ try {
   check('单飞去抖：并发三次只发一次，500ms 内复用，过期才再取',
     sf.concurrent === 1 && sf.withinTtl === 1 && sf.afterTtl === 2, JSON.stringify(sf));
   check('使用事件：GUI 自己取数不记（绝不记清单）', ev.afterFetch === 1, JSON.stringify(ev));
+  // 聚焦模式的**进程级证据**（2026-10-23）：控制组先手动渲染一次（证明计数器有效），
+  // 再开聚焦等 3.6 秒（跨过 3 秒轮询点）——调用数不许增加。
+  const fpv = await page.evaluate(async () => {
+    globalThis.__tasksCalls = 0;
+    await renderTaskIcons();                       // 控制组：手动一次
+    const control = globalThis.__tasksCalls || 0;
+    if (window.__focusOn) toggleFocus();           // 先确保是"关"的状态
+    await new Promise((r) => setTimeout(r, 50));
+    toggleFocus();                                 // 开聚焦
+    globalThis.__tasksCalls = 0;
+    await new Promise((r) => setTimeout(r, 3600)); // 跨过轮询点
+    const during = globalThis.__tasksCalls || 0;
+    toggleFocus();                                 // 恢复
+    await new Promise((r) => setTimeout(r, 100));
+    return { control, during };
+  });
+  check('聚焦期间后台不再取数（进程级证据）', fpv.control === 1 && fpv.during === 0, JSON.stringify(fpv));
   // 聚焦模式（2026-10-22，D-20261022-03 Q2-A）：按钮上要看得见"后台剩几项"，且真的停。
   const fc = await page.evaluate(async () => {
     const btn = document.getElementById('btnFocus');

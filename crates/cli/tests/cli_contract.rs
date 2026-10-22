@@ -1663,3 +1663,30 @@ fn net_能看清白名单并放行收回() {
     }
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **环境探测也留任务记录**（债 0.39）：角标三个图标里不能只有索引是真的。
+/// 判据：跑完 `envs` 后日志里多一条 kind=env、state=done、detail 说探到几个。
+#[test]
+fn envs_也留下真任务记录() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("task-journal-env");
+    let p = d.to_str().unwrap().to_string();
+    let (out, log) = run_tasks(&["envs", "--root", &p], "journal-env");
+    assert_eq!(code(&out), 0, "envs 该成功：{}", stdout(&out));
+    let text = std::fs::read_to_string(&log).expect("envs 该留一条任务记录");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("任务日志该是 JSON 数组");
+    let t = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"].as_str() == Some("env"))
+        .unwrap_or_else(|| panic!("没有 kind=env 的任务：{text}"));
+    assert_eq!(t["state"].as_str(), Some("done"), "跑完该是 done：{t}");
+    let detail = t["detail"].as_str().unwrap_or("");
+    assert!(
+        detail.contains("Python"),
+        "detail 要说清探到什么（不然角标亮了也说不清）：{detail}"
+    );
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

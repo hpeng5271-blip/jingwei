@@ -23,8 +23,22 @@ fn envs_unknown_summary() -> String {
     "暂无法探知：这台机器上没探到可用的 Python｜缺：可用的 Python 解释器｜为什么：PATH、注册表、常见安装目录与项目 venv 都没读到｜怎么补：装 uv 后跑 `uv python install 3.12`，或从 python.org 装一个".to_string()
 }
 pub(crate) fn cmd_envs(root: &Path, json: bool) -> i32 {
+    // **真任务源**（2026-10-22，债 0.39）：环境探测也写一条任务日志，
+    // 不然界面那个"环"角标永远是"还没接任务源"——三个图标里只有索引是真的，等于半个假象。
+    let task_log = jingwei_engine::understand::tasks::tasks_path();
+    let task_id = jingwei_engine::understand::tasks::start(
+        &task_log,
+        jingwei_engine::understand::tasks::TaskKind::Env,
+        "jingwei envs",
+    );
     let (contract, _) = Contract::load(root);
     let list = probe::find_pythons(root, contract.as_ref(), true);
+    jingwei_engine::understand::tasks::finish(
+        &task_log,
+        &task_id,
+        true,
+        Some(&format!("探到 {} 个可用的 Python", list.len())),
+    );
     if json {
         // **协议**（2026-10-21）：以前这里直接打一个数组——空数组会被读成"这台机器没有 Python"，
         // 而真相往往是"几种探法都没读到"。三态 + 三字段（缺什么/为什么/怎么补）必须一起出。

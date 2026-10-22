@@ -116,6 +116,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\gates.ps1
 | 怎么动手 | `SOP.md` ★ | 840+ 行 |
 | 我错过什么 / 教训 | `docs/process/事故账本.md` | 800+ 行 |
 | **我犯过的错，浓缩版** | `docs/reference/失效模式清单.md` | 60 行 |
+| **加界面前的规矩** | `docs/design/界面约定.md` | 70 行 |
 | 决策与判据 | `docs/design/设计.md` | 1400+ 行 |
 | 数据层 | `docs/design/数据层设计.md` | 545 行 |
 | 真项目实测 | `docs/process/研究对象.md` + `研究对象实测.json` | —— |

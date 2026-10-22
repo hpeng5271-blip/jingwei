@@ -2055,3 +2055,6 @@ main:has(#view-graph.on) { padding: 0; overflow: hidden; }
 .ed-diagcount[data-sev="error"] { color: #ff9a9a; }
 .ed-diagcount[data-sev="warn"] { color: #e0b45c; }
 .ed-diagcount[hidden] { display: none; }
+
+/* 消息阵列的"重启会清空"提醒（2026-10-22）。 */
+.msg-hint { opacity: 0.55; cursor: help; text-decoration: underline dotted; }

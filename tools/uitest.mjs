@@ -834,6 +834,13 @@ try {
     return { n: rows.length, txt, marked, state: (globalThis.__msgs[0] || {}).state };
   });
   check('消息阵列：同 key 只占一槽并计数', mf.n === 1 && /×2/.test(mf.txt[0] || ''), JSON.stringify(mf));
+  // 消息阵列是内存态（D-20261022-02）：必须写在脸上"重启会清空"，否则用户以为记录丢了。
+  const mh = await page.evaluate(async () => {
+    globalThis.__msgs = [];
+    await msgIngest('k:hint', 'info', '一条消息');
+    return (document.getElementById('msgFeed') || {}).textContent || '';
+  });
+  check('消息阵列说了"重启会清空"', mh.includes('重启会清空'), mh.slice(0, 60));
   // 归档不是永久静音（D-20261022-02）：同一 key 再来一次要重新出现。
   const mf2 = await page.evaluate(async () => {
     globalThis.__msgs = [];

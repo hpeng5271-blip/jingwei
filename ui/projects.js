@@ -1465,7 +1465,11 @@ function msgFeedHtml(list) {
   if (!rows.length) return '';
   const rank = { error: 0, status: 1, info: 2, progress: 3 };
   rows.sort((a, b) => (rank[a.level] ?? 9) - (rank[b.level] ?? 9) || b.count - a.count);
+  // "重启会清空"必须写在脸上（2026-10-22，见 D-20261022-02）：
+  // 这张表只在进程内存里，重启就没。不写，用户会以为记录丢了。
   return '<div class="msg-head">最近 <b>' + rows.length + '</b> 条'
+    + '<span class="msg-hint" title="消息表只在本次会话的内存里；关掉应用就清空——历史请查 docs/process/事故账本.md">'
+    + '重启会清空</span>'
     + '<span class="msg-clear" data-msg-archive-all="1">全部归档</span></div>'
     + rows.slice(0, 8).map((m) =>
       '<div class="msg-row" data-lv="' + esc(m.level) + '">'

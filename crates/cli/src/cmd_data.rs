@@ -7,6 +7,7 @@
 
 use crate::protocol::{envelope, print, Coverage, Evidence, State};
 use jingwei_engine::understand::events::{cutoff, events_path, load_all};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// 数据目录：`%LOCALAPPDATA%\jingwei`；`JINGWEI_DATA_DIR` 可覆盖（测试/隔离）。
@@ -77,6 +78,15 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
     let last_24h = snap.events.iter().filter(|e| e.at >= now - 86_400).count() as u64;
     let in_window = snap.events.iter().filter(|e| e.at >= cutoff(now)).count();
 
+    // **按天聚合**（2026-10-23，pro：日增量观测）。
+    // 只能从"还在文件里的事件"分天——已被压缩成计数的天数无从得知，所以下面会标窗口。
+    let mut per_day: BTreeMap<i64, u64> = BTreeMap::new();
+    for e in &snap.events {
+        *per_day.entry(e.at / 86_400).or_insert(0) += 1;
+    }
+    let mut daily: Vec<(i64, u64)> = per_day.into_iter().collect();
+    daily.sort_by_key(|(d, _)| std::cmp::Reverse(*d));
+    let daily: Vec<(i64, u64)> = daily.into_iter().take(14).collect();
     let state = if files.is_empty() { State::Unknown } else { State::Yes };
     let summary = if files.is_empty() {
         "目录在，但里面还没有文件".to_string()
@@ -99,6 +109,9 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
                 "total_bytes": total_bytes,
                 "files": files.iter().map(|(n, size, lines, mtime)| serde_json::json!({
                     "name": n, "bytes": size, "lines": lines, "mtime": mtime,
+                })).collect::<Vec<_>>(),
+                "daily": daily.iter().map(|(d, n)| serde_json::json!({
+                    "day": d, "n": n, "utc": fmt_day(*d),
                 })).collect::<Vec<_>>(),
                 "events": {
                     "total": total_events,
@@ -125,6 +138,15 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
     }
     if files.is_empty() {
         println!("  （空）");
+    }
+    println!();
+    if daily.is_empty() {
+        println!("  日增量：窗口内还没有事件");
+    } else {
+        println!("  日增量（只统计还在文件里的事件；已压缩的天数只算在长期计数里）：");
+        for (d, n) in daily.iter().take(7) {
+            println!("    {}  {n} 条", fmt_day(*d));
+        }
     }
     println!();
     println!(
@@ -180,4 +202,10 @@ fn 查不了(json: bool, path: &Path, what: &str, why: &str, how: &str, code: i3
         println!("  怎么补：{how}");
     }
     code
+}
+
+/// 第几天（1970 起）→ `MM-DD`（UTC；与其它地方一致，不假装本地时区）。
+fn fmt_day(days: i64) -> String {
+    let (_, m, d) = civil_from_days(days);
+    format!("{m:02}-{d:02}")
 }

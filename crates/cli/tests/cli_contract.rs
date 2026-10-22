@@ -2131,6 +2131,10 @@ fn data_stats_把每一份数据说清楚() {
     assert_eq!(ev["lines"].as_u64(), Some(2), "2 行事件：{ev}");
     assert_eq!(v1["events"]["total"].as_u64(), Some(2), "总数 2：{v1}");
     assert_eq!(v1["events"]["last_24h"].as_u64(), Some(1), "近 24 小时 1 条：{v1}");
+    let daily = v1["daily"].as_array().expect("要有 daily 数组");
+    assert_eq!(daily.len(), 2, "文件里两天各一条，日增量该分两天：{daily:?}");
+    let sum: u64 = daily.iter().filter_map(|d| d["n"].as_u64()).sum();
+    assert_eq!(sum, 2, "两天合计 2 条：{daily:?}");
     let _ = std::fs::remove_dir_all(&d);
 }
 

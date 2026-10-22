@@ -1816,3 +1816,65 @@ fn doctor_也说刚才() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **三处 "刚才" 必须同形**（2026-10-22）：next / handover / doctor 都从任务日志读同一条，
+/// 字段集合必须一模一样——谁加字段漏了别处，这条立刻红。
+///
+/// 这是一条**守不变量的测试**（当前实现本来就一致，所以没有"先红"）：它的价值在于以后。
+/// 写完之后做了一次**变异验证**：把 doctor 里的 elapsed_s 删掉，这条确实红了，恢复后绿。
+#[test]
+fn 三处_recent_task_同形() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("recent-shape");
+    std::fs::create_dir_all(d.join("src")).unwrap();
+    std::fs::write(d.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.1.0\"\n").unwrap();
+    std::fs::write(d.join("src/a.rs"), "pub fn f() {}\n").unwrap();
+    let p = d.to_str().unwrap().to_string();
+    let log = std::env::temp_dir().join(format!("jingwei-tasks-shape-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let b = bin().unwrap();
+    let idx = Command::new(&b)
+        .args(["index", "--root", &p])
+        .env("JINGWEI_TASKS_FILE", &log)
+        .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-shape.jsonl"))
+        .output()
+        .expect("跑不起来");
+    assert_eq!(idx.status.code(), Some(0), "索引应成功");
+
+    let mut keysets: Vec<(&str, Vec<String>)> = Vec::new();
+    for verb in ["next", "handover", "doctor"] {
+        let out = Command::new(&b)
+            .args([verb, "--root", &p, "--json"])
+            .env("JINGWEI_TASKS_FILE", &log)
+            .env("JINGWEI_USAGE_FILE", std::env::temp_dir().join("jw-usage-shape.jsonl"))
+            .output()
+            .expect("跑不起来");
+        let v: serde_json::Value = serde_json::from_str(&stdout(&out))
+            .unwrap_or_else(|e| panic!("{verb} --json 该是 JSON：{e}"));
+        let rt = &v["recent_task"];
+        assert!(rt.is_object(), "{verb} 该带上 recent_task：{v}");
+        let mut keys: Vec<String> = rt.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keysets.push((verb, keys));
+    }
+    let (first_verb, first) = &keysets[0];
+    for (verb, keys) in &keysets[1..] {
+        assert_eq!(
+            keys, first,
+            "{verb} 的 recent_task 字段与 {first_verb} 不一致：{keys:?} vs {first:?}"
+        );
+    }
+    assert_eq!(
+        first,
+        &vec![
+            "detail".to_string(),
+            "elapsed_s".to_string(),
+            "kind".to_string(),
+            "name".to_string(),
+            "state".to_string()
+        ],
+        "字段集合变了：要么三处一起改，要么改这条断言（别偷偷改一处）"
+    );
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

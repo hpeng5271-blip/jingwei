@@ -34,8 +34,7 @@ fn jingwei_exe() -> Option<PathBuf> {
     exe.exists().then_some(exe)
 }
 
-fn spawn(root: &str) -> Result<Chan, String> {
-    let exe = jingwei_exe().ok_or_else(|| "找不到同目录的 jingwei.exe".to_string())?;
+fn spawn(exe: &std::path::Path, root: &str) -> Result<Chan, String> {
     let mut child = std::process::Command::new(exe)
         .args(["serve", "--root", root])
         .stdin(Stdio::piped())
@@ -55,7 +54,8 @@ pub fn channel_start(root: String) -> Result<bool, String> {
     if g.is_some() {
         return Ok(false);
     }
-    *g = Some(spawn(&root)?);
+    let exe = jingwei_exe().ok_or_else(|| "找不到同目录的 jingwei.exe".to_string())?;
+    *g = Some(spawn(&exe, &root)?);
     Ok(true)
 }
 
@@ -64,7 +64,8 @@ pub fn channel_start(root: String) -> Result<bool, String> {
 pub fn channel_request(root: String, method: String) -> Result<serde_json::Value, String> {
     let mut g = slot().lock().map_err(|_| "锁坏了".to_string())?;
     if g.is_none() {
-        *g = Some(spawn(&root)?);
+        let exe = jingwei_exe().ok_or_else(|| "找不到同目录的 jingwei.exe".to_string())?;
+        *g = Some(spawn(&exe, &root)?);
     }
     let chan = g.as_mut().ok_or("通道没起来")?;
     let req = serde_json::json!({"id": 1, "method": method});
@@ -108,4 +109,43 @@ pub fn channel_stop() -> Result<(), String> {
         c.child.wait().ok();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! **进程级**断言（2026-10-22，pro：把第 5 条从行为级升到进程级）。
+    //!
+    //! 只测"生命周期"这一薄层：start 之后进程真的在、stop 之后真的没了。
+    //! 不测问答协议（那是 `cli_contract` 里 `serve_一问一答` 的事）。
+
+    use super::*;
+
+    fn jingwei_exe_for_test() -> Option<PathBuf> {
+        // 测试二进制在 target/debug/deps/，CLI 在 target/debug/
+        let mut dir = std::env::current_exe().ok()?;
+        dir.pop();           // deps
+        dir.pop();           // debug
+        let exe = dir.join(if cfg!(windows) { "jingwei.exe" } else { "jingwei" });
+        exe.exists().then_some(exe)
+    }
+
+    #[test]
+    fn start之后进程在_stop之后进程不在() {
+        let Some(exe) = jingwei_exe_for_test() else { return };
+        let root = std::env::temp_dir().join(format!("jw-chan-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        // start：直接走 spawn（与 channel_start 同一条路），再用 kill 判断是否活着
+        let mut chan = spawn(&exe, root.to_str().unwrap()).expect("该能起来");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let alive = chan.child.try_wait().ok().flatten().is_none();
+        assert!(alive, "start 之后进程该活着");
+
+        // stop：杀掉并 wait，之后 try_wait 必须给 Some
+        chan.child.kill().ok();
+        let st = chan.child.wait();
+        assert!(st.is_ok(), "wait 该成功");
+        assert!(chan.child.try_wait().ok().flatten().is_some(), "stop 之后进程不该还在");
+        std::fs::remove_dir_all(&root).ok();
+    }
 }

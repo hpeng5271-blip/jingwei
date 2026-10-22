@@ -431,7 +431,31 @@ fn run(used_cmd: &mut String) -> i32 {
         "inspect" | "doctor" | "check" => cmd_doctor(&root, json, want_check),
         "guide" | "howto" => cmd_guide(&root, json),
         "new" => cmd_new(&root, json, rest, template, parent_dir, python_exe, want_venv, want_git, purpose, lang_name),
-        "env" => cmd_env(&root, rest, venv_name, python_exe),
+        // **env 的写操作也要留痕**（2026-10-22，债 0.39 的延续）：init/use 会改契约，
+        // 改完角标上要能看到"刚才那次改绑/建环境"——不然只有探测留痕，读的人以为只有探测在干活。
+        "env" => {
+            let sub = rest.first().map(|s| s.as_str()).unwrap_or("status").to_string();
+            let log = jingwei_engine::understand::tasks::tasks_path();
+            let task = if sub == "init" || sub == "use" {
+                Some(jingwei_engine::understand::tasks::start(
+                    &log,
+                    jingwei_engine::understand::tasks::TaskKind::Env,
+                    &format!("jingwei env {sub}"),
+                ))
+            } else {
+                None
+            };
+            let code = cmd_env(&root, rest, venv_name, python_exe);
+            if let Some(id) = task {
+                jingwei_engine::understand::tasks::finish(
+                    &log,
+                    &id,
+                    code == 0,
+                    Some(if code == 0 { "改绑/建环境完成" } else { "没成功（原因见输出）" }),
+                );
+            }
+            code
+        }
         "note" => cmd_note(&root, rest, kind, purpose),
         "notes" | "log" => cmd_notes(&root, json),
         "test" => cmd_task(&root, "test", None),

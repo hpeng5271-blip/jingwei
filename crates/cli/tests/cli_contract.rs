@@ -1690,3 +1690,28 @@ fn envs_也留下真任务记录() {
     let _ = std::fs::remove_file(&log);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// **`env use` 这类写操作也留痕**（2026-10-22）：角标要能看出"刚才改绑过解释器"。
+/// 判据：跑完 `env use auto` 后日志里多一条 kind=env、name 含 "env use"、state=done。
+#[test]
+fn env_use_也留下任务记录() {
+    let Some(_) = bin() else { return };
+    let d = empty_dir("task-journal-envuse");
+    let p = d.to_str().unwrap().to_string();
+    let (out, log) = run_tasks(&["env", "use", "auto", "--root", &p], "journal-envuse");
+    assert_eq!(code(&out), 0, "env use auto 该成功：{}", stdout(&out));
+    let text = std::fs::read_to_string(&log).expect("env use 该留一条任务记录");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("任务日志该是 JSON 数组");
+    let t = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| {
+            t["kind"].as_str() == Some("env")
+                && t["name"].as_str().map(|s| s.contains("env use")).unwrap_or(false)
+        })
+        .unwrap_or_else(|| panic!("没有 name 含 env use 的 env 任务：{text}"));
+    assert_eq!(t["state"].as_str(), Some("done"), "成功该是 done：{t}");
+    let _ = std::fs::remove_file(&log);
+    let _ = std::fs::remove_dir_all(&d);
+}

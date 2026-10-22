@@ -40,6 +40,9 @@ fn 自动取数命令不写事件() {
         vec!["doctor", "--root", &root, "--json"],
         vec!["handover", "--root", &root, "--json"],
         vec!["events", "--json"],
+        // 2026-10-23 收口：读侧新增的两条也必须零污染
+        vec!["events", "progress", "--json"],
+        vec!["data", "--json"],
     ] {
         let out = Command::new(&bin)
             .args(&args)

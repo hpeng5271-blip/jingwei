@@ -45,6 +45,8 @@ function stubTauri() {
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
+    if (cmd === 'data_dir') return 'C:\\Users\\demo\\AppData\\Local\\jingwei';
+    if (cmd === 'open_path') { (globalThis.__opened ||= []).push(args && args.path); return null; }
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         window.__calls.push({ cmd, args });
         switch (cmd) {
@@ -841,6 +843,22 @@ try {
     return (document.getElementById('msgFeed') || {}).textContent || '';
   });
   check('消息阵列说了"重启会清空"', mh.includes('重启会清空'), mh.slice(0, 60));
+  // 数据目录（2026-10-22，D-20261022-03 Q1）：显示真实路径 + 一键打开。
+  const dd = await page.evaluate(async () => {
+    const panel = document.getElementById('settingsPanel');
+    if (panel) panel.hidden = false;
+    await renderDataDir();
+    await new Promise((r) => setTimeout(r, 100));
+    const el = document.getElementById('dataDir');
+    const text = el ? el.textContent : '';
+    globalThis.__opened = [];
+    const btn = document.getElementById('btnDataDir');
+    if (btn) btn.click();
+    await new Promise((r) => setTimeout(r, 150));
+    if (panel) panel.hidden = true;
+    return { text, opened: globalThis.__opened || [] };
+  });
+  check('数据目录：显示路径且能一键打开', /jingwei/.test(dd.text) && dd.opened.length === 1 && dd.opened[0] === dd.text, JSON.stringify(dd));
   // 聚焦模式（2026-10-22，D-20261022-03 Q2-A）：按钮上要看得见"后台剩几项"，且真的停。
   const fc = await page.evaluate(async () => {
     const btn = document.getElementById('btnFocus');

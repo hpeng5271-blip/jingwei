@@ -938,7 +938,8 @@ fn main() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        
+.invoke_handler(tauri::generate_handler![
             watch_start,
             watch_stop,
             graph::graph_index,
@@ -947,6 +948,8 @@ fn main() {
             graph::graph_runs,
             cli::cli_json,
             tasks::tasks_state,
+    data_dir,
+    open_path,
             notify::notify_gate,
             notify::msg_ingest,
             notify::msg_mark,
@@ -999,4 +1002,28 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("jingwei 外壳起不来");
+}
+
+/// **数据目录**（2026-10-22，D-20261022-03 Q1）：界面要显示它、并能一键打开。
+/// 为什么不放前端拼：路径约定属于后端（`%LOCALAPPDATA%\jingwei`），界面只显示不计算。
+#[tauri::command]
+fn data_dir() -> String {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("jingwei").display().to_string()
+}
+
+/// 在资源管理器里打开一个目录（只接受已存在的目录；不存在就报错，不猜）。
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_dir() {
+        return Err(format!("不是目录：{path}"));
+    }
+    std::process::Command::new("explorer")
+        .arg(p)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

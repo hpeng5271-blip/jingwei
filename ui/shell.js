@@ -1388,6 +1388,7 @@ function fmtDur(secs) {
 /// 设置页那行"最近一次环境动作"（2026-10-22）：数据就是 `tasks_state` 里的 `latest.env`，
 /// 不新增命令、不另存一份状态。
 function renderEnvLast(latest) {
+  renderDataDir();
   window.__latestEnv = (latest && latest.env) || null;   // 首屏那句要用（不新增命令）
   const el = document.getElementById('envLast');
   if (!el) return;
@@ -1514,4 +1515,28 @@ document.addEventListener('click', (e) => {
   if (!ref) return;
   if (typeof copyText === 'function') copyText(ref);
   else toast('来源：' + ref);
+});
+
+
+/// **数据目录**（2026-10-22，Q1）：显示后端给的真实路径，点按钮让资源管理器打开。
+async function renderDataDir() {
+  const el = document.getElementById('dataDir');
+  if (!el) return;
+  try {
+    const p = await invoke('data_dir');
+    el.textContent = p;
+    el.title = '任务日志、性能记录、缓存都在这里';
+  } catch (e) {
+    el.textContent = '查不了（' + (e && e.message ? e.message : e) + '）';
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('#btnDataDir') : null;
+  if (!b) return;
+  e.preventDefault();
+  const el = document.getElementById('dataDir');
+  const p = el ? el.textContent : '';
+  try { await invoke('open_path', { path: p }); }
+  catch (err) { if (typeof toast === 'function') toast('打不开：' + (err && err.message ? err.message : err)); }
 });

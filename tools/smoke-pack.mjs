@@ -7,12 +7,40 @@
 // 所以演示项目改成**脚本自己铺**（临时目录），断言不变：
 // ① `index` 真的解析了东西（有规模行）② `positions` 的"对不上"为 0 ③ `rename --write` 回读通过。
 // 用法：node tools/smoke-pack.mjs [--gui] [包目录或 zip 路径]
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
+
+/// WebView2 子进程数：Windows 上能用 CIM 查；别的平台返回 -1（不做这个断言）。
+async function countWebView2Children(pid) {
+  if (process.platform !== 'win32') return -1;
+  try {
+    const out = execSync(
+      `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ParentProcessId=${pid}' | Where-Object { $_.Name -eq 'msedgewebview2.exe' } | Measure-Object).Count"`,
+      { encoding: 'utf8', timeout: 20000 },
+    );
+    return Number(out.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/// 窗口标题：拿不到就回空串（不当成失败依据）。
+function winTitle(pid) {
+  if (process.platform !== 'win32') return '';
+  try {
+    const out = execSync(`powershell -NoProfile -Command "(Get-Process -Id ${pid}).MainWindowTitle"`, {
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+    return out.trim();
+  } catch {
+    return '';
+  }
+}
 const givePath = args.find((a) => !a.startsWith('--'));
 
 /// 最新的包：优先 `dist/<YYYY-MM-DD>/` 目录，其次 `dist/*.zip`。
@@ -94,7 +122,10 @@ try {
   });
   if (!/回读通过/.test(ren)) throw new Error(`rename 没回读通过：${ren.slice(0, 300)}`);
 
-  // GUI 也要能起来：起进程、等 3 秒、确认还活着，再杀掉。
+  // GUI 也要能起来：起进程、等 3 秒、确认**真的画出界面**，再杀掉。
+  //
+  // 2026-10-22 修：以前只断言'进程 3 秒没退'，而 WebView2 运行时缺失时窗口标题是 'Error'、
+  // 进程照样活着 —— 这条断言给了**假通过**。现在要求真有 WebView2 子进程。
   const gui = path.join(root, 'jingwei-gui.exe');
   if (args.includes('--gui')) {
     if (!fs.existsSync(gui)) throw new Error('包里没有 jingwei-gui.exe');
@@ -103,10 +134,16 @@ try {
     child.on('exit', () => {
       exited = true;
     });
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise((r) => setTimeout(r, 4000));
     if (exited) throw new Error('GUI 起来 3 秒内就退出了（起不来）');
+    // 真的画出界面 = 有 WebView2 子进程；没有就是运行时缺失（或窗口是 Error 页）。
+    const wv = await countWebView2Children(child.pid);
+    const title = winTitle(child.pid);
     child.kill();
-    console.log('  GUI 冒烟通过：起来 3 秒没退');
+    if (wv < 1) {
+      throw new Error(`GUI 进程活着但没画出界面（WebView2 子进程 0 个，窗口标题 '${title}'）`);
+    }
+    console.log(`  GUI 冒烟通过：起来 4 秒没退，WebView2 子进程 ${wv} 个，窗口 '${title}'`);
   }
 
   console.log(`包冒烟通过：${path.basename(root)}`);

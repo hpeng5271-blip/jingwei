@@ -1315,6 +1315,22 @@ function fmtDur(secs) {
   return Math.floor(n / 3600) + ' 小时 ' + Math.floor((n % 3600) / 60) + ' 分';
 }
 
+/// 设置页那行"最近一次环境动作"（2026-10-22）：数据就是 `tasks_state` 里的 `latest.env`，
+/// 不新增命令、不另存一份状态。
+function renderEnvLast(latest) {
+  const el = document.getElementById('envLast');
+  if (!el) return;
+  const e = latest && latest.env;
+  if (!e) {
+    el.textContent = '最近一次环境动作：还没有记录（跑一次 jingwei envs / env use 就有）';
+    return;
+  }
+  const when = e.running ? '正在跑 ' + fmtDur(e.elapsed_s) : '用时 ' + fmtDur(e.elapsed_s);
+  const ok = e.state === 'done' ? '' : (e.state === 'failed' ? '（没成功）' : '');
+  el.textContent = '最近一次环境动作：' + (e.name || 'env') + ' · ' + when + ok
+    + (e.detail ? ' · ' + e.detail : '');
+}
+
 async function renderTaskIcons() {
   let box = document.getElementById('taskIcons');
   if (!box) {
@@ -1344,6 +1360,7 @@ async function renderTaskIcons() {
         el.title = k + '：' + when + (t.detail ? ' · ' + t.detail : '');
       }
     }
+    renderEnvLast(latest);   // latest 在这个 try 里才在作用域内
   } catch (e) {
     /* 没有任务源不算错：图标保持 idle */
   }

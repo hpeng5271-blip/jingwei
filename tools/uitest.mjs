@@ -66,7 +66,7 @@ function stubTauri() {
             return { running: 1, latest: {
               index: { id: 'x', state: 'running', name: 'jingwei index', started_at: 1, ended_at: null,
                 detail: '正在索引', elapsed_s: 45, running: true },
-              env: { id: 'y', state: 'done', name: '环境探测', started_at: 1, ended_at: 4,
+              env: { id: 'y', state: 'done', name: 'jingwei env use', started_at: 1, ended_at: 4,
                 detail: '探到 3 项', elapsed_s: 3, running: false },
             } };
           case 'msg_ingest': {
@@ -464,6 +464,12 @@ try {
     return { idx: idx.title, env: env.title, deep: deep.title };
   });
   check('角标说得出用了多久', /已跑 45 秒/.test(tt2.idx) && /用时 3 秒/.test(tt2.env), JSON.stringify(tt2));
+  // 设置页的"最近一次环境动作"（2026-10-22）：数据来自 tasks_state，不新增命令。
+  const el2 = await page.evaluate(async () => {
+    await renderTaskIcons();
+    return (document.getElementById('envLast') || {}).textContent || '';
+  });
+  check('设置页说得出最近一次环境动作', /env use/.test(el2) && /用时 3 秒/.test(el2), el2);
   check('没接任务源的角标如实说', /还没接任务源/.test(tt2.deep), tt2.deep);
   check('任务角标：只有真任务源在跑', ti.running === 1, JSON.stringify(ti.states));
 

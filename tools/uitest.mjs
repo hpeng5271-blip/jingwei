@@ -52,6 +52,10 @@ function stubTauri() {
       return { files: 3, volume_bytes: 2048, lifecycle: { state: "recent", basis: "测试" } };
     }
     if (cmd === 'channel_stop') { globalThis.__chanStopped = (globalThis.__chanStopped || 0) + 1; return null; }
+    if (cmd === 'cli_json' && args && (args.args || []).join(' ') === 'events progress') {
+      (globalThis.__prog ||= []).push(1);
+      return { todo: ['src/a.rs', 'src/b.rs'], learned: ['src/c.rs'] };
+    }
     if (cmd === 'events_summary') {
       const k = args && args.key;
       if (!k) return { open: 0, edit: 0, check: 0, revisit: 0, last_check: null };
@@ -666,6 +670,7 @@ try {
   });
   check('文件历史：说得出打开/改动/检查次数与复访',
     /打开 3/.test(eh.text) && /改动 2/.test(eh.text) && /回来第 3 次/.test(eh.text) && eh.hidden === false, JSON.stringify(eh));
+
   check('编辑器：点计数跳第一处，没诊断就收起', dc.lncol.includes('第 2 行') && dc.hiddenAfter === true, JSON.stringify(dc));
   // 网络允许（2026-10-22）：列表来自 CLI 的 net status；点 × 走 net deny。
   const netSt = await page.evaluate(async () => {

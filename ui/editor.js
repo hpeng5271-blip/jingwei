@@ -714,10 +714,19 @@ async function edApply() {
   if (!S.root || !ED.path || !ED.dirty) return;
   const t0 = performance.now();
   await guard(async () => {
+    const beforeText = ED.disk || '';
+    const afterText = $('#edText').value;
+    const linesOf = (t) => (t ? t.split('\n').length : 0);
+    const linesBefore = linesOf(beforeText);
+    const linesAfter = linesOf(afterText);
     const r = await invoke('apply_edit', {
       root: S.root, path: ED.path, text: $('#edText').value,
       encoding: ED.encoding || 'utf-8', eol: ED.eol || 'lf',
     });
+    // **edit 事件**（2026-10-23）：保存成功且**行数变了**才记；只记行数，不记内容。
+    if (linesAfter !== linesBefore) {
+      noteEvent('edit', ED.path, '行数 ' + linesBefore + ' → ' + linesAfter);
+    }
     ED.disk = $('#edText').value;
     ED.dirty = false;
     if (r.opened) edDrafts = r.opened.drafts || edDrafts;

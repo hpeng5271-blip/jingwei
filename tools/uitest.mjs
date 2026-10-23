@@ -701,6 +701,20 @@ try {
   });
   check('检查会记一条 check 事件',
     ck.length === 1 && /error \d/.test(String(ck[0].detail || '')), JSON.stringify(ck));
+
+  // 保存写事件（2026-10-23）：改到行数变化后点应用，必须记一条 edit，且 detail 只有行数。
+  const edt = await page.evaluate(async () => {
+    globalThis.__events = [];
+    const area = document.getElementById('edText');
+    area.value = (ED.disk || '') + '\n// 追加一行';
+    ED.dirty = true;
+    await edApply();
+    await new Promise((r) => setTimeout(r, 300));
+    return (globalThis.__events || []).filter((e) => e.kind === 'edit');
+  });
+  check('保存会记 edit 事件（只记行数）',
+    edt.length === 1 && /行数 \d+ → \d+/.test(String(edt[0].detail || '')) && !/追加一行/.test(JSON.stringify(edt)),
+    JSON.stringify(edt));
   check('学习进度：说出待解决/已变绿并给出可点入口',
     /学习进度/.test(pr.text) && /已变绿 1/.test(pr.text) && pr.key === 'src/a.rs', JSON.stringify(pr));
   check('文件历史：说得出打开/改动/检查次数与复访',

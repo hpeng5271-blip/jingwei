@@ -1618,13 +1618,15 @@ async function renderProgress(root) {
   }
   try {
     const v = await fetchOnce(`progress:${root}`, 5000, () =>
-      channelFetch(root, 'progress'));
+      channelFetch(root, 'progress', { root }));
     const todo = (v && v.todo) || [];
     const learned = (v && v.learned) || [];
+    const mine = (v && v.mine) || [];
+    const unknown = (v && v.unknown) || [];
     if (!todo.length && !learned.length) { el.textContent = ''; return; }
     const head = [];
-    if (todo.length) head.push('待解决 ' + todo.length);
-    if (learned.length) head.push('已变绿 ' + learned.length);
+    if (mine.length) head.push('本项目 ' + mine.length);
+    if (unknown.length) head.push('未知项目 ' + unknown.length);
     el.innerHTML = '<span class="pp-dim">学习进度：' + head.join(' · ') + '</span>'
       + todo.slice(0, 3).map((k) => '<a class="pp-item" data-open-file="' + esc(k) + '">' + esc(k) + '</a>').join('');
   } catch (e) { el.textContent = ''; }

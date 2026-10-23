@@ -64,7 +64,18 @@ pub(crate) fn cmd_serve(root: &Path) -> i32 {
             "progress" => {
                 let snap = load_all(&events_path());
                 let (todo, learned) = snap.progress();
-                serde_json::json!({"id": id, "ok": true, "result": {"todo": todo, "learned": learned}})
+                let root = req.get("params").and_then(|p| p.get("root")).and_then(|r| r.as_str());
+                // 带 root 时按项目分组（2026-10-23）：本项目 / 未知项目，别的项目不显示。
+                let (mine, unknown) = match root {
+                    Some(r) if !r.trim().is_empty() => {
+                        let (_t, m, u) = snap.progress_in(r);
+                        (m, u)
+                    }
+                    _ => (Vec::new(), Vec::new()),
+                };
+                serde_json::json!({"id": id, "ok": true, "result": {
+                    "todo": todo, "learned": learned, "mine": mine, "unknown": unknown,
+                }})
             }
             "events_summary" => {
                 let key = req

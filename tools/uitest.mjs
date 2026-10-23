@@ -50,7 +50,11 @@ function stubTauri() {
       const m = args && args.method;
       (globalThis.__chan ||= []).push(m);
       if (globalThis.__chanFail) throw new Error("通道挂了");
-      if (m === 'progress') return { todo: globalThis.__progTodo || [], learned: globalThis.__progLearned || [] };
+      if (m === 'progress') {
+        const mine = globalThis.__progTodo || [];
+        const unknown = globalThis.__progUnknown || [];
+        return { todo: mine.concat(unknown), learned: globalThis.__progLearned || [], mine, unknown };
+      }
       if (m === 'events_summary') {
         return { key: args.params && args.params.key, open: 3, edit: 2, check: 1,
           revisit: 3, last_check: 'error 1 / warn 0' };
@@ -716,7 +720,22 @@ try {
     edt.length === 1 && /行数 \d+ → \d+/.test(String(edt[0].detail || '')) && !/追加一行/.test(JSON.stringify(edt)),
     JSON.stringify(edt));
   check('学习进度：说出待解决/已变绿并给出可点入口',
-    /学习进度/.test(pr.text) && /已变绿 1/.test(pr.text) && pr.key === 'src/a.rs', JSON.stringify(pr));
+    /学习进度/.test(pr.text) && /本项目 1/.test(pr.text) && pr.key === 'src/a.rs', JSON.stringify(pr));
+
+  // 分组口径（2026-10-23，pro 第三条验收）：本项目和未知项目分开算，别的项目不显示。
+  const grp = await page.evaluate(async () => {
+    globalThis.__progTodo = ['src/a.rs'];
+    globalThis.__progUnknown = ['old/legacy.rs'];
+    INFLIGHT.clear(); RECENT.clear();
+    await renderProgress(PS.sel);
+    await new Promise((r) => setTimeout(r, 200));
+    const el = document.getElementById('pdProgress');
+    const text = el ? el.textContent : '';
+    globalThis.__progUnknown = [];
+    return { text };
+  });
+  check('未知项目单独成组且可见',
+    /本项目 1/.test(grp.text) && /未知项目 1/.test(grp.text), JSON.stringify(grp));
   check('文件历史：说得出打开/改动/检查次数与复访',
     /打开 3/.test(eh.text) && /改动 2/.test(eh.text) && /回来第 3 次/.test(eh.text) && eh.hidden === false, JSON.stringify(eh));
 

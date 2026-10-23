@@ -286,6 +286,10 @@ pub fn should_record(source: Source, kind: &str) -> bool {
 /// 同一条 `open` 在这个窗口内不重复记（pro Q3：5 分钟）。
 pub const OPEN_DEDUP_SECS: i64 = 300;
 
+/// 同一个文件 **1 分钟内多次保存只记一条**（2026-10-23，pro 下一批 A）。
+/// 理由：编辑器里连续 Ctrl+S 是常态，逐次记会把事件流灌成噪声。
+pub const EDIT_DEDUP_SECS: i64 = 60;
+
 /// 复访判定窗口（pro Q3：30 分钟）。
 pub const REVISIT_GAP_SECS: i64 = 1800;
 
@@ -328,6 +332,15 @@ impl Recorder {
 
     /// 保存后内容变了：**只记行数变化，不记内容**（pro Q3 的硬边界）。
     pub fn edit_file(&self, path: &str, lines_before: usize, lines_after: usize, now: i64) -> bool {
+        // 1 分钟内同一个文件的多次保存只记一条（2026-10-23）
+        let recent = load(&self.path)
+            .iter()
+            .rev()
+            .take(50)
+            .any(|e| e.kind == "edit" && e.key == path && now - e.at < EDIT_DEDUP_SECS);
+        if recent {
+            return false;
+        }
         if lines_before == lines_after {
             return false; // 没变就不算"改动"
         }
@@ -482,6 +495,25 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
             Some(&2),
             "**计数还是 2**（滚出窗口不等于没发生过，也不许重复相加）"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// **采集噪声**（2026-10-23，pro 下一批 A）：1 分钟内连按三次保存，只记一条；
+    /// 过了窗口要能再记。
+    #[test]
+    fn 连续保存三次只记一条() {
+        let dir = std::env::temp_dir().join(format!("jw-edit-dedup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let rec = Recorder::new(f.clone());
+        let t0 = 1_900_000_000;
+        assert!(rec.edit_file("src/a.rs", 10, 11, t0), "第一次该记");
+        assert!(!rec.edit_file("src/a.rs", 11, 12, t0 + 10), "10 秒后再存，1 分钟内不该记");
+        assert!(!rec.edit_file("src/a.rs", 12, 13, t0 + 50), "50 秒后也不该记");
+        assert!(rec.edit_file("src/a.rs", 13, 14, t0 + EDIT_DEDUP_SECS + 1), "过窗口要记");
+        let n = load(&f).iter().filter(|e| e.kind == "edit").count();
+        assert_eq!(n, 2, "三次连存 + 一次过窗口 = 2 条，实际 {n}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

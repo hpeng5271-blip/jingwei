@@ -302,16 +302,27 @@ pub const REVISIT_GAP_SECS: i64 = 1800;
 /// 为什么集中在一处：如果界面和 CLI 各写各的判断，同一条规矩会被实现两遍，然后漂移。
 pub struct Recorder {
     path: PathBuf,
+    /// 这个 recorder 记的事件属于哪个项目（2026-10-23，pro 选 1）。
+    /// `None` 表示"不知道"——老调用点与测试仍走这条，事件里写 null。
+    root: Option<String>,
 }
 
 impl Recorder {
-    pub fn new(path: PathBuf) -> Self { Self { path } }
+    pub fn new(path: PathBuf) -> Self { Self { path, root: None } }
+
+    /// 带项目根的 recorder：之后写的事件都会带上 `root`（引擎层强制，不靠界面补）。
+    pub fn with_root(path: PathBuf, root: impl Into<String>) -> Self {
+        Self { path, root: Some(root.into()) }
+    }
 
     /// 用默认位置（`%LOCALAPPDATA%\jingwei\events.jsonl`）。
     pub fn with_default_path() -> Self { Self::new(events_path()) }
 
     /// 记一条事件；返回 `true` 表示真的写进去了（便于测试与自查）。
-    pub fn record(&self, ev: Event, source: Source) -> bool {
+    pub fn record(&self, mut ev: Event, source: Source) -> bool {
+        if ev.root.is_none() {
+            ev.root = self.root.clone();   // 引擎层强制写入（pro 的验收口径）
+        }
         if !should_record(source, &ev.kind) {
             return false;
         }
@@ -525,6 +536,28 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
 
     /// **兼容**（2026-10-23，pro 选 1）：老事件没有 `root` 字段也要能读出来，
     /// 读成 `None`（视图里归"未知项目"），不许报错、不许丢事件。
+    /// **root 由引擎写**（2026-10-23，pro 的验收口径）：带根的 recorder 写出来的每条都带 root；
+    /// 不带的仍是 null（老调用点），不是空字符串、也不是界面补的。
+    #[test]
+    fn 带项目根的recorder_每条都带_root() {
+        let dir = std::env::temp_dir().join(format!("jw-root-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let rec = Recorder::with_root(f.clone(), "D:/proj");
+        assert!(rec.open_file("src/a.rs", 1_900_000_000, Source::Human));
+        let es = load(&f);
+        assert_eq!(es.len(), 1);
+        assert_eq!(es[0].root.as_deref(), Some("D:/proj"), "引擎该把 root 写进去");
+
+        // 不带根的 recorder 仍是 None（老调用点行为不变）
+        let f2 = dir.join("e2.jsonl");
+        let rec2 = Recorder::new(f2.clone());
+        assert!(rec2.open_file("src/a.rs", 1_900_000_000, Source::Human));
+        assert!(load(&f2)[0].root.is_none(), "没有根就写 null，不伪造");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn 老事件没有_root_也能读() {
         let old = r#"{"at":1,"kind":"open","key":"x"}"#;

@@ -558,6 +558,25 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// **按项目分组**（2026-10-23，pro 第三条验收）：本项目的事件归本项目，
+    /// 没有根的归"未知项目"——可见、不隐藏，也不串到别的项目里。
+    #[test]
+    fn 切项目只显本项目与未知项目() {
+        let dir = std::env::temp_dir().join(format!("jw-scope-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("events.jsonl");
+        std::fs::remove_file(&f).ok();
+        let now = 1_900_000_000;
+        append(&f, &Event { at: now, kind: "check".into(), key: "mine.rs".into(), root: Some("D:/A".into()), detail: Some("error 0 / warn 0".into()) }).unwrap();
+        append(&f, &Event { at: now, kind: "check".into(), key: "other.rs".into(), root: Some("D:/B".into()), detail: Some("error 0 / warn 0".into()) }).unwrap();
+        append(&f, &Event { at: now, kind: "check".into(), key: "old.rs".into(), root: None, detail: Some("error 0 / warn 0".into()) }).unwrap();
+        let snap = load_all(&f);
+        let (_todo, mine, unknown) = snap.progress_in("D:/A");
+        assert_eq!(mine, vec!["mine.rs".to_string()], "只该有本项目的");
+        assert_eq!(unknown, vec!["old.rs".to_string()], "没根的归未知项目，且不隐藏");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn 老事件没有_root_也能读() {
         let old = r#"{"at":1,"kind":"open","key":"x"}"#;
@@ -626,6 +645,30 @@ impl Snapshot {
         out
     }
 
+    /// 按项目分组的进度（2026-10-23，pro：切项目只显"本项目 + 未知项目"两组）。
+    /// `root=None` 的事件归"未知项目"，**可见、不隐藏**。
+    pub fn progress_in(&self, root: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let (todo, learned) = self.progress();
+        let mut mine = Vec::new();
+        let mut unknown = Vec::new();
+        let mut all: Vec<String> = todo.iter().chain(learned.iter()).cloned().collect();
+        all.sort();
+        all.dedup();
+        for k in all {
+            let mine_hit = self
+                .events
+                .iter()
+                .any(|e| e.key == k && e.root.as_deref() == Some(root));
+            let has_root = self.events.iter().any(|e| e.key == k && e.root.is_some());
+            if mine_hit {
+                mine.push(k);
+            } else if !has_root {
+                unknown.push(k);   // 从来没记过项目 → 未知项目，可见
+            }
+            // 属于别的项目 → 不显示（不串项目）
+        }
+        (todo, mine, unknown)
+    }
     /// 学习进度：`复访 ≥3 且最后一次检查仍红` = 待解决；检查过且不红 = 已变绿。
     pub fn progress(&self) -> (Vec<String>, Vec<String>) {
         let mut todo = Vec::new();

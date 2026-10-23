@@ -25,7 +25,14 @@ if (document.getElementById('btnFocus')) {
 }
 
 function switchTab(name) {
+  const prevTab = PANEL.tab;   // 旧 tab 必须在赋值前记住（2026-10-23：否则"离开编辑器"永远判不到）
   PANEL.tab = name;
+  // **放弃**（2026-10-23）：离开编辑器、且没有未保存改动时问一次；
+  // 记不记由引擎判（打开后 30 秒内、期间没 edit 才算放弃）。
+  if (name !== 'editor' && prevTab === 'editor' && typeof ED !== 'undefined' && ED.path && !ED.dirty
+      && typeof noteEvent === 'function') {
+    noteEvent('abandon', ED.path);
+  }
   panelPolicy();
   document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));

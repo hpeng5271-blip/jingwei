@@ -971,6 +971,19 @@ try {
   // 打开时也要问一次 revisit（引擎按 30 分钟判据决定记不记）——界面只管问，判据在引擎。
   check('打开会同时问一次 revisit',
     (ev.afterOpen || []).some((e) => e.kind === 'revisit'), JSON.stringify(ev.afterOpen));
+  // 放弃也写事件（2026-10-23）：从编辑器切走时问一次，判据在引擎。
+  const ab = await page.evaluate(async () => {
+    globalThis.__events = [];
+    switchTab('editor');
+    await new Promise((r) => setTimeout(r, 150));
+    globalThis.__events = [];
+    switchTab('run');
+    await new Promise((r) => setTimeout(r, 250));
+    const list = (globalThis.__events || []).filter((e) => e.kind === 'abandon');
+    switchTab('home');
+    return { list, path: ED.path };
+  });
+  check('离开编辑器会问一次 abandon', ab.list.length >= 1 && ab.list[0].key === ab.path, JSON.stringify(ab));
   // 聚焦模式的**进程级证据**（2026-10-23）：控制组先手动渲染一次（证明计数器有效），
   // 再开聚焦等 3.6 秒（跨过 3 秒轮询点）——调用数不许增加。
   const fpv = await page.evaluate(async () => {

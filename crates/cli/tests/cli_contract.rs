@@ -2143,6 +2143,8 @@ fn data_stats_把每一份数据说清楚() {
     let daily = v1["daily"].as_array().expect("要有 daily 数组");
     assert_eq!(daily.len(), 2, "文件里两天各一条，日增量该分两天：{daily:?}");
     let sum: u64 = daily.iter().filter_map(|d| d["n"].as_u64()).sum();
+    let bytes: u64 = daily.iter().filter_map(|d| d["bytes"].as_u64()).sum();
+    assert!(bytes > 0, "每条事件都占字节，合计该 > 0：{daily:?}");
     assert_eq!(sum, 2, "两天合计 2 条：{daily:?}");
     let _ = std::fs::remove_dir_all(&d);
 }

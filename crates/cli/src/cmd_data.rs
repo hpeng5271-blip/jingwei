@@ -80,13 +80,16 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
 
     // **按天聚合**（2026-10-23，pro：日增量观测）。
     // 只能从"还在文件里的事件"分天——已被压缩成计数的天数无从得知，所以下面会标窗口。
-    let mut per_day: BTreeMap<i64, u64> = BTreeMap::new();
+    let mut per_day: BTreeMap<i64, (u64, u64)> = BTreeMap::new();   // (条数, 字节)
     for e in &snap.events {
-        *per_day.entry(e.at / 86_400).or_insert(0) += 1;
+        let bytes = serde_json::to_string(e).map(|x| x.len() as u64).unwrap_or(0);
+        let slot = per_day.entry(e.at / 86_400).or_insert((0, 0));
+        slot.0 += 1;
+        slot.1 += bytes;
     }
-    let mut daily: Vec<(i64, u64)> = per_day.into_iter().collect();
-    daily.sort_by_key(|(d, _)| std::cmp::Reverse(*d));
-    let daily: Vec<(i64, u64)> = daily.into_iter().take(14).collect();
+    let mut daily: Vec<(i64, u64, u64)> = per_day.into_iter().map(|(d, (n, b))| (d, n, b)).collect();
+    daily.sort_by_key(|(d, _, _)| std::cmp::Reverse(*d));
+    let daily: Vec<(i64, u64, u64)> = daily.into_iter().take(14).collect();
     let state = if files.is_empty() { State::Unknown } else { State::Yes };
     let summary = if files.is_empty() {
         "目录在，但里面还没有文件".to_string()
@@ -110,8 +113,8 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
                 "files": files.iter().map(|(n, size, lines, mtime)| serde_json::json!({
                     "name": n, "bytes": size, "lines": lines, "mtime": mtime,
                 })).collect::<Vec<_>>(),
-                "daily": daily.iter().map(|(d, n)| serde_json::json!({
-                    "day": d, "n": n, "utc": fmt_day(*d),
+                "daily": daily.iter().map(|(d, n, b)| serde_json::json!({
+                    "day": d, "n": n, "bytes": b, "utc": fmt_day(*d),
                 })).collect::<Vec<_>>(),
                 "events": {
                     "total": total_events,
@@ -144,8 +147,8 @@ pub(crate) fn cmd_data(rest: &[String], json: bool) -> i32 {
         println!("  日增量：窗口内还没有事件");
     } else {
         println!("  日增量（只统计还在文件里的事件；已压缩的天数只算在长期计数里）：");
-        for (d, n) in daily.iter().take(7) {
-            println!("    {}  {n} 条", fmt_day(*d));
+        for (d, n, b) in daily.iter().take(7) {
+            println!("    {}  {n} 条 / {b} B", fmt_day(*d));
         }
     }
     println!();

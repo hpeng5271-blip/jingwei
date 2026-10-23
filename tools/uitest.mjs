@@ -736,6 +736,17 @@ try {
   });
   check('未知项目单独成组且可见',
     /本项目 1/.test(grp.text) && /未知项目 1/.test(grp.text), JSON.stringify(grp));
+
+  // 封口（2026-10-23，pro ①）：渲染学习进度**不许写事件**（读侧不写，界面也不许补）。
+  const np = await page.evaluate(async () => {
+    globalThis.__events = [];
+    globalThis.__progTodo = ['src/a.rs'];
+    INFLIGHT.clear(); RECENT.clear();
+    await renderProgress(PS.sel);
+    await new Promise((r) => setTimeout(r, 250));
+    return (globalThis.__events || []).length;
+  });
+  check('渲染进度不写事件', np === 0, '事件条数=' + np);
   check('文件历史：说得出打开/改动/检查次数与复访',
     /打开 3/.test(eh.text) && /改动 2/.test(eh.text) && /回来第 3 次/.test(eh.text) && eh.hidden === false, JSON.stringify(eh));
 

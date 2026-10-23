@@ -316,6 +316,11 @@ async function runCheck() {
       msgIngest('check:' + (S.root || ''), errCount ? 'error' : 'status',
         '检查：' + (errCount + warnCount) + ' 处（error ' + errCount + ' / warn ' + warnCount + '）');
     }
+    // **check 事件**（2026-10-23）：只记当前打开的那个文件，且只记能说出口的计数。
+    // 这里用界面入口（`event_note`），不走 CLI——CLI 的自动检查不算人的动作（pro 裁定）。
+    if (typeof noteEvent === 'function' && typeof ED !== 'undefined' && ED.path) {
+      noteEvent('check', ED.path, 'error ' + errCount + ' / warn ' + warnCount);
+    }
     const errs = list.filter((d) => d.level === 'error').length;
     feedback(list.length ? (errs ? 'block' : 'warn') : 'info',
       list.length ? '检查出 ' + list.length + ' 条（' + errs + ' 个错误）' : '编译检查干净',

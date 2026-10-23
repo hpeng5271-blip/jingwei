@@ -692,6 +692,15 @@ try {
     const link = el ? el.querySelector('[data-open-file]') : null;
     return { text, key: link ? link.dataset.openFile : '' };
   });
+  // 检查写事件（2026-10-23）：跑一次检查，必须记一条 check（只给当前文件）。
+  const ck = await page.evaluate(async () => {
+    globalThis.__events = [];
+    await runCheck();
+    await new Promise((r) => setTimeout(r, 300));
+    return (globalThis.__events || []).filter((e) => e.kind === 'check');
+  });
+  check('检查会记一条 check 事件',
+    ck.length === 1 && /error \d/.test(String(ck[0].detail || '')), JSON.stringify(ck));
   check('学习进度：说出待解决/已变绿并给出可点入口',
     /学习进度/.test(pr.text) && /已变绿 1/.test(pr.text) && pr.key === 'src/a.rs', JSON.stringify(pr));
   check('文件历史：说得出打开/改动/检查次数与复访',

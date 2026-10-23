@@ -1039,13 +1039,23 @@ fn open_path(path: String) -> Result<(), String> {
 /// 只由**界面**调用（人点了什么），所以来源固定为 Human；GUI 为了显示而 spawn 的取数
 /// **不走这里**——那类调用是 `cli_json`，pro 明确列为"绝不记"。
 #[tauri::command]
-fn event_note(kind: String, key: String, detail: Option<String>) -> Result<bool, String> {
-    use jingwei_engine::understand::events::{Event, Recorder, Source};
+fn event_note(
+    kind: String,
+    key: String,
+    detail: Option<String>,
+    root: Option<String>,
+) -> Result<bool, String> {
+    use jingwei_engine::understand::events::{events_path, Event, Recorder, Source};
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let rec = Recorder::with_default_path();
+    // 项目根由界面传进来，引擎写进事件（2026-10-23，pro 选 1）：
+  // 没有根的调用仍然写 null，不伪造。
+  let rec = match root.as_deref() {
+      Some(r) if !r.trim().is_empty() => Recorder::with_root(events_path(), r),
+      _ => Recorder::with_default_path(),
+  };
     let ev = Event { at: now, kind: kind.clone(), key: key.clone(), root: None, detail };
     match kind.as_str() {
         "open" => Ok(rec.open_file(&key, now, Source::Human)),
@@ -1098,14 +1108,14 @@ mod event_tests {
         std::fs::remove_file(&f).ok();
         std::env::set_var("JINGWEI_EVENTS_FILE", &f);
 
-        assert_eq!(event_note("open".into(), "src/a.rs".into(), None).ok(), Some(true));
+        assert_eq!(event_note("open".into(), "src/a.rs".into(), None, None).ok(), Some(true));
         assert_eq!(
-            event_note("open".into(), "src/a.rs".into(), None).ok(),
+            event_note("open".into(), "src/a.rs".into(), None, None).ok(),
             Some(false),
             "5 分钟内同一个 open 不该再记"
         );
         assert_eq!(
-            event_note("edit".into(), "src/a.rs".into(), Some("行数 10 → 12".into())).ok(),
+            event_note("edit".into(), "src/a.rs".into(), Some("行数 10 → 12".into()), None).ok(),
             Some(true)
         );
 
@@ -1113,6 +1123,14 @@ mod event_tests {
         assert_eq!(text.lines().filter(|l| !l.trim().is_empty()).count(), 2, "该有 2 条：{text}");
         assert!(text.contains("\"kind\":\"edit\""), "edit 要写进去：{text}");
         assert!(!text.contains("pub fn"), "不许写文件内容：{text}");
+        // 带根写一条：界面上报项目时，事件里必须真有 root（2026-10-23）
+        std::fs::remove_file(&f).ok();
+        assert_eq!(
+            event_note("open".into(), "src/b.rs".into(), None, Some("D:/proj".into())).ok(),
+            Some(true)
+        );
+        let text2 = std::fs::read_to_string(&f).unwrap_or_default();
+        assert!(text2.contains("\"root\":\"D:/proj\""), "界面写的事件带项目根：{text2}");
         std::env::remove_var("JINGWEI_EVENTS_FILE");
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -362,7 +362,7 @@ function edPaintCrumb(path) {
 
 /// 记一条使用事件（2026-10-22）：**失败静默**，记不上不能挡住用户操作。
 function noteEvent(kind, key, detail) {
-  try { invoke('event_note', { kind, key, detail: detail || null }); } catch (err) { /* 记不上就算了 */ }
+  try { invoke('event_note', { kind, key, detail: detail || null, root: (typeof S !== 'undefined' && S.root) || null }); } catch (err) { /* 记不上就算了 */ }
 }
 
 async function edOpen(path) {

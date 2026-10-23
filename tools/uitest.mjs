@@ -947,7 +947,8 @@ try {
     const afterFetch = (globalThis.__events || []).length;
     return { afterOpen, afterFetch };
   });
-  check('使用事件：打开文件记一条 open', ev.afterOpen.length === 1 && ev.afterOpen[0].kind === 'open', JSON.stringify(ev));
+  check('使用事件：打开文件记一条 open',
+    (ev.afterOpen || []).filter((e) => e.kind === 'open').length === 1, JSON.stringify(ev));
   // 单飞 + 去抖（2026-10-22）：连点三次只起一次 CLI；过了 500 ms 才允许再取。
   const sf = await page.evaluate(async () => {
     globalThis.__chan = []; globalThis.__cli = [];
@@ -964,7 +965,12 @@ try {
   });
   check('单飞去抖：并发三次只发一次，500ms 内复用，过期才再取',
     sf.concurrent === 1 && sf.withinTtl === 1 && sf.afterTtl === 2, JSON.stringify(sf));
-  check('使用事件：GUI 自己取数不记（绝不记清单）', ev.afterFetch === 1, JSON.stringify(ev));
+  check('使用事件：GUI 自己取数不记（绝不记清单）',
+    (ev.afterOpen || []).length === ev.afterFetch, JSON.stringify(ev));
+
+  // 打开时也要问一次 revisit（引擎按 30 分钟判据决定记不记）——界面只管问，判据在引擎。
+  check('打开会同时问一次 revisit',
+    (ev.afterOpen || []).some((e) => e.kind === 'revisit'), JSON.stringify(ev.afterOpen));
   // 聚焦模式的**进程级证据**（2026-10-23）：控制组先手动渲染一次（证明计数器有效），
   // 再开聚焦等 3.6 秒（跨过 3 秒轮询点）——调用数不许增加。
   const fpv = await page.evaluate(async () => {

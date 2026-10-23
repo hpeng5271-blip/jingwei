@@ -375,6 +375,7 @@ async function edOpen(path) {
     const o = await invoke('open_file', { root: S.root, path });
     ED.path = path;
     ED.disk = o.text || '';
+    noteEvent('revisit', path);   // 引擎按 30 分钟判据决定记不记；刚打开会被丢掉
     noteEvent('open', path);
     ED.text = o.text || '';
     ED.dirty = false;

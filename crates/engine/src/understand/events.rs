@@ -35,6 +35,10 @@ pub struct Event {
     pub kind: String,
     /// 关于谁（路径或 id）。
     pub key: String,
+    /// 这个事件属于哪个项目（2026-10-23，pro 裁定选 1）：**引擎层强制写入**。
+    /// 老事件没有这个字段，读出来是 `None` —— 视图里归"未知项目"，不隐藏。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
     /// 说得出的一句话；旧事件的 detail 会被丢掉，只剩计数。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub detail: Option<String>,
@@ -188,7 +192,7 @@ mod tests {
     use super::*;
 
     fn ev(at: i64, kind: &str, key: &str, detail: Option<&str>) -> Event {
-        Event { at, kind: kind.into(), key: key.into(), detail: detail.map(|s| s.to_string()) }
+        Event { at, kind: kind.into(), key: key.into(), root: None, detail: detail.map(|s| s.to_string()) }
     }
 
     #[test]
@@ -327,7 +331,7 @@ impl Recorder {
         if recent {
             return false;
         }
-        self.record(Event { at: now, kind: "open".into(), key: path.into(), detail: None }, source)
+        self.record(Event { at: now, kind: "open".into(), key: path.into(), detail: None, root: None }, source)
     }
 
     /// 保存后内容变了：**只记行数变化，不记内容**（pro Q3 的硬边界）。
@@ -350,7 +354,8 @@ impl Recorder {
                 at: now,
                 kind: "edit".into(),
                 key: path.into(),
-                detail: Some(format!("行数 {lines_before} → {lines_after}（{delta:+}）")),
+                root: None, detail: Some(format!("行数 {lines_before} → {lines_after}（{delta:+}）")),
+
             },
             Source::Human,
         )
@@ -363,7 +368,8 @@ impl Recorder {
                 at: now,
                 kind: "check".into(),
                 key: path.into(),
-                detail: Some(format!("error {errors} / warn {warns}")),
+                root: None, detail: Some(format!("error {errors} / warn {warns}")),
+
             },
             Source::Human,
         )
@@ -379,7 +385,7 @@ impl Recorder {
         match last {
             Some(t) if now - t < REVISIT_GAP_SECS => false,
             _ => self.record(
-                Event { at: now, kind: "revisit".into(), key: path.into(), detail: None },
+                Event { at: now, kind: "revisit".into(), key: path.into(), detail: None, root: None },
                 Source::Human,
             ),
         }
@@ -400,7 +406,7 @@ impl Recorder {
             return false;
         }
         self.record(
-            Event { at: now, kind: "abandon".into(), key: path.into(), detail: None },
+            Event { at: now, kind: "abandon".into(), key: path.into(), detail: None, root: None },
             Source::Human,
         )
     }
@@ -477,8 +483,8 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         let f = dir.join("events.jsonl");
         std::fs::remove_file(&f).ok();
         let now = 2_100_000_000;
-        append(&f, &Event { at: now - 120 * DAY, kind: "edit".into(), key: "src/a.rs".into(), detail: Some("很旧的".into()) }).unwrap();
-        append(&f, &Event { at: now - DAY, kind: "edit".into(), key: "src/a.rs".into(), detail: Some("新的".into()) }).unwrap();
+        append(&f, &Event { at: now - 120 * DAY, kind: "edit".into(), key: "src/a.rs".into(), root: None, detail: Some("很旧的".into()) }).unwrap();
+        append(&f, &Event { at: now - DAY, kind: "edit".into(), key: "src/a.rs".into(), root: None, detail: Some("新的".into()) }).unwrap();
 
         let (t1, k1) = compact(&f, now).unwrap();
         assert_eq!((t1, k1), (2, 1), "压完该留 1 条详情");
@@ -515,6 +521,18 @@ pub const ABANDON_WINDOW_SECS: i64 = 30;
         let n = load(&f).iter().filter(|e| e.kind == "edit").count();
         assert_eq!(n, 2, "三次连存 + 一次过窗口 = 2 条，实际 {n}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// **兼容**（2026-10-23，pro 选 1）：老事件没有 `root` 字段也要能读出来，
+    /// 读成 `None`（视图里归"未知项目"），不许报错、不许丢事件。
+    #[test]
+    fn 老事件没有_root_也能读() {
+        let old = r#"{"at":1,"kind":"open","key":"x"}"#;
+        let e: Event = serde_json::from_str(old).expect("老格式必须还能读");
+        assert!(e.root.is_none(), "老事件该读成 None");
+        let new = r#"{"at":2,"kind":"open","key":"x","root":"D:/p"}"#;
+        let n: Event = serde_json::from_str(new).expect("新格式要能读");
+        assert_eq!(n.root.as_deref(), Some("D:/p"));
     }
 
     #[test]

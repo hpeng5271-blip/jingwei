@@ -1046,7 +1046,7 @@ fn event_note(kind: String, key: String, detail: Option<String>) -> Result<bool,
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let rec = Recorder::with_default_path();
-    let ev = Event { at: now, kind: kind.clone(), key: key.clone(), detail };
+    let ev = Event { at: now, kind: kind.clone(), key: key.clone(), root: None, detail };
     match kind.as_str() {
         "open" => Ok(rec.open_file(&key, now, Source::Human)),
         "revisit" => Ok(rec.revisit(&key, now)),

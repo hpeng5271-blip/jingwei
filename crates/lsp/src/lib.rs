@@ -449,6 +449,14 @@ pub fn check(root: &Path, files: &[PathBuf], timeout: Duration) -> Result<CheckR
             .iter()
             .any(|w| std::fs::canonicalize(w).map(|c| c == dp).unwrap_or(false) || dp.ends_with(w.file_name().unwrap_or_default()))
     });
+    // RA 会把同一条诊断拆成多条（message 多行、附带 `#[warn(...)]` 代码片段），
+    // 原始计数会虚高一个数量级。这里按「文件:行:列:级别」去重，只留第一条，message 取首行。
+    let mut seen_keys: std::collections::HashSet<(String, u32, u32, String)> =
+        std::collections::HashSet::new();
+    report.diagnostics.retain_mut(|d| {
+        d.message = d.message.lines().next().unwrap_or("").trim().to_string();
+        seen_keys.insert((d.file.clone(), d.line, d.col, d.severity.clone()))
+    });
     report.recount();
     s.shutdown();
     Ok(report)

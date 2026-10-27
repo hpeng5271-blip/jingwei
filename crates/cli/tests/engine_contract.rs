@@ -335,7 +335,28 @@ fn serve_scan_matches_facade() {
 
     let mut top: Vec<&str> = facade.as_object().unwrap().keys().map(|s| s.as_str()).collect();
     top.sort();
-    assert_eq!(top, vec!["depth", "items", "parent", "scanned_dirs"]);
+    // §4.4：scan 必须带 scope 三件套 + residue（dry-run 数字）
+    assert_eq!(
+        top,
+        vec![
+            "depth",
+            "files_considered",
+            "items",
+            "next_cursor",
+            "parent",
+            "residue",
+            "scanned_dirs",
+            "scope",
+            "truncated"
+        ]
+    );
+    assert!(
+        matches!(facade["scope"].as_str(), Some("file") | Some("module") | Some("project") | Some("multi")),
+        "scope 越界：{}",
+        facade["scope"]
+    );
+    assert_eq!(facade["truncated"], false, "fixture 只有一个小项目，不该截断");
+    assert_eq!(facade["residue"]["apply"], false, "残渣报告默认 dry-run");
     for it in facade["items"].as_array().unwrap() {
         let mut keys: Vec<&str> = it.as_object().unwrap().keys().map(|s| s.as_str()).collect();
         keys.sort();

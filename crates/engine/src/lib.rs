@@ -311,12 +311,60 @@ pub fn scan_dir(parent_path: &Path, depth: u32, limit: usize) -> Result<serde_js
         }
     }
     items.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+    // §4.4 承载力：**每个特色返回都必须带 scope 三件套**，截断要显式（为什么截、怎么继续）。
+    let n_items = items.len();
+    let truncated = n_items >= limit;
+    let files_considered: u64 = items
+        .iter()
+        .map(|it| it["files"].as_u64().unwrap_or(0))
+        .sum();
+    // 父目录里 ≥2 个项目 → multi；1 个 → project；0 个 → 也算 multi（还没选到项目）
+    let scope = if n_items <= 1 { "project" } else { "multi" };
+    let next_cursor = if truncated {
+        serde_json::json!(n_items as u64)
+    } else {
+        serde_json::Value::Null
+    };
     Ok(serde_json::json!({
         "parent": parent_path.to_string_lossy(),
         "depth": depth,
         "scanned_dirs": scanned,
+        "scope": scope,
+        "files_considered": files_considered,
+        "truncated": truncated,
+        "next_cursor": next_cursor,
+        "residue": residue_at(&parent_path),
         "items": items,
     }))
+}
+
+/// §4.5 残渣 dry-run：**只数不删**。三类最多、最容易长出来的（派生数据）。
+/// 统计范围是父目录一层：扫整棵树去数 target 会把这一刀变成"再走一遍盘"。
+pub fn residue_at(parent: &Path) -> serde_json::Value {
+    let mut jingwei = 0u64;
+    let mut targets = 0u64;
+    let mut caches = 0u64;
+    if let Ok(rd) = std::fs::read_dir(parent) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            match name.as_str() {
+                ".jingwei" => jingwei += 1,
+                "target" => targets += 1,
+                "node_modules" | "__pycache__" | "dist" => caches += 1,
+                _ => {}
+            }
+        }
+    }
+    serde_json::json!({
+        "jingwei_dirs": jingwei,
+        "target_dirs": targets,
+        "cache_dirs": caches,
+        "apply": false,
+    })
 }
 
 /// 旧 `project::manifest_kind`（18 种）。

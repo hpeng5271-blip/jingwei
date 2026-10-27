@@ -698,3 +698,11 @@ D:\jingwei-archive-20261024\research-20261024\
 - 实测：`crates/lsp/src/lib.rs` → **errors=0 warnings=0 exit 0**；临时 crate 插类型错 → **errors=1 exit 1**。全量 **275 tests / 0 failed**；warnings **109**（持平）。
 - 两个坑写进注释：① clap 里加 `LspCheck` 变体会让 `jw --help` 栈溢出 → 改**手写分发**（改动小可回滚，理由记录在 `review-L2.md`）；② `workspace_root` 相对路径产生空祖先 → 先 canonicalize，并优先选带 `[workspace]` 的最外层。
 - 证据：`.pro/exp/out/review-L2.md`、`l2-green3.txt`、`l2-red.txt`、`l2-debug.err.txt`
+
+### R1 · 审查工具链（2026-10-28 收）
+
+- 三件齐：`crates/lsp` + `jw lsp-check`（绿 0/0 exit0；红 1 error exit1）、`jw --debug` 五类事件（serve.call/scan.start/scan.end/env.probe/lsp.check）、`scripts/review.ps1`（诊断数 + 关键日志 + 截图清单 → `review-<step>.md`）。
+- 证据：`.pro/exp/out/review-R1.md`（files=2 errors=0 warnings=0）、`review-L2.md`。
+- 坑（已修）：PowerShell 5.1 读**无 BOM 的 UTF-8 .ps1** 会把中文读坏 → 所有 `.ps1` 统一存 UTF-8 **带 BOM**；`review.ps1` 的 `-Files` 支持逗号串，`--debug` 放在子命令之后。
+- 调研：`.pro/exp/out/research-20261028.md`（三表、8 来源、6 行如实标「未核实」）。
+- git：本地 commit `1f9a39f`、`72d7e3d`；push 走代理 `127.0.0.1:23333` 成功（直连 443 失败，已按 best-effort 处理，不再重试）。

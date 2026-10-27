@@ -1,481 +1,416 @@
-# 经纬（jingwei）最终态完整设计 · 架构 · 决策记录
+# 经纬（jingwei）· 设计实现总稿（2026-10-28 重写版）
 
-> 版本基线：`jw 0.4.0 (rules 27)` ｜ 文档日期：2026-10-27 ｜ 状态：0.4.1-rc 前夜
-> 本文是"最终态"的完整图景：**产品定位、原则、架构、数据模型、判定模型、协议、LSP、UI/UX、壳与引擎的边界、质量体系、发布、路线图、决策记录、风险**。
-> **本文是"目标态"**；**"当前态"只认 `HANDOFF.md` 与 `.pro/exp/out/` 证据**。
+> 版本基线：`jw 0.4.1 (rules 27)` ｜ 文档日期：2026-10-28 ｜ 状态：拆解重建中
+> **本文取代 2026-10-27 版**（旧版归档于 `docs/reference/_archive/`）。旧版的 §18 运行时契约、附录 A 暗坑、差距表、ADR 增补**已并入本文 §9 / §14 / §12 / §15**，未丢项。
+> **当前态只认** `HANDOFF.md` 与 `.pro/exp/out/` 证据；**目标态**认本文。
 > 冲突裁决顺序：**代码与证据 > HANDOFF > 本文**。
-> 单一真相：`HANDOFF.md` + 本文（目标态）+ `session-handoff-2026-10-27.md` + `.pro/exp/out/`。
+> 图（mermaid）按代码对待：改图 = 改契约，必须同步改判据与测试。
 
 ---
 
-## 0. 一句话
+## 0. 一句话与定位
 
-**经纬是一个"可验证的代码理解工具"**：它不替人猜，而是把"关于代码的判断"连同证据、边界、失败原因一起呈现；
-桌面壳（Tauri）负责"看得懂、点得动"，内核（datacore/collect）负责"算得准、说得清"。
+**经纬是一个"能跑起来、看得见过程、判断有据"的本地开发工作台。**
+它不替开发者猜结论，而是把"关于代码与构建的判断"连同**证据、权重、失败原因、可观测过程**一起呈现，并且**随时能跑**。
 
-产品三档定位：**作品集 > 产品 > 商品**。因此取舍一律偏向"可复跑、可解释、可维护"，而不是功能数量。
+定位三档：**作品集 > 产品 > 商品**。取舍偏向可复跑、可解释、可维护，而不是功能数量。
+
+**与 10-27 版的关键差异**：旧版定位是"可验证的代码理解工具"（静态理解 + 图谱）；本版定位是**工作台**——写码、构建、测试、运行、诊断、观测是主线，静态理解是其中的判断层。**图谱画布不是产品形态**（§7 / ADR-3）。
 
 ---
 
-## 1. 设计原则（不可协商）
+## 1. 从"重写失败"里学到的六条（都有当天证据）
+
+| # | 失败 | 证据 | 现在的规矩 |
+|---|---|---|---|
+| E1 | 把"UI 是否还调用"当删除判据，删掉 `scan/list_projects/inspect` → 用户打开软件没有项目可点 | T5 分诊表、HANDOFF 15:00 段 | 删除决策多一问：**这是不是用户打开软件第一眼要走的路径** |
+| E2 | 验收只断言"页面里有没有这段文字"，31 条全绿而产品不可用 | 上一轮 `smoke 31/31` 与实机对比 | 验收必须有一条**端到端用户路径**（输入→动作→结果） |
+| E3 | pro 只看执行器自述，没核过一张运行截图 | 本轮往复 | **截图与日志由 pro 逐张核**，不接受"PASS"字样 |
+| E4 | 测试数用"手工加前 N 条"得 213，真值 247 | `t2-baseline.txt` 沿革 | 数字一律**整份日志/脚本求和**，口径写死 |
+| E5 | 门禁与其它 cargo / `jw.exe` 并发 → 假红 4 次 | `t31-*`、`t33_gate_red.py` | 门禁前断言 `jw/jingwei-gui/rust-analyzer` 进程=0，忙则 `exit 2` |
+| E6 | 唯一副本在删除瞬间被覆盖（467 行 view.rs 丢过一次） | `.pro/bak/` 沿革 | 改前备份 + 改后立刻双备份 + 校验字节数/sha |
+
+---
+
+## 2. 设计原则（8 条，不可协商）
 
 | # | 原则 | 含义 | 反例（禁止） |
 |---|---|---|---|
-| P1 | **三态，不二值** | 判定只有 `held / refuted / uncertain`；`uncertain` 必须带理由 | 用"没找到"冒充"不存在" |
-| P2 | **证据先于结论** | 任何结论都要能指到 evidence/edge/位置 | 模型口头推断当证据 |
-| P3 | **只读优先** | 分析层只读；写操作（rename/apply）默认不做 | 分析命令偷偷改文件 |
-| P4 | **壳核分离** | 壳只管 UI/交互；分析只在 `datacore`+`collect` | 壳里再实现一套索引 |
-| P5 | **一处实现** | 同一能力只有一份实现（CLI / serve / 壳共用 `engine`） | 两份 LSP / 两份 card |
-| P6 | **失败要显式** | 降级必须 `skip` + `source` + `precision`；不静默 | 空数组当"没有" |
-| P7 | **安全默认关** | 未信任不 spawn、外部操作 deny、单实例 | 双击弹一堆窗口 |
-| P8 | **可复跑** | 每个结论有命令 + 数字 + 文件 | "我验证过了" |
+| P1 | **三态，不二值** | 只有 `held / refuted / uncertain`；`uncertain` 必须带理由 | 用"没找到"冒充"不存在" |
+| P2 | **证据先于结论** | 结论能指到 evidence/edge/位置/命令输出 | 口头推断当证据 |
+| P3 | **只读优先** | 分析层只读；写操作（rename/apply/install）默认不做 | 分析命令偷偷改文件 |
+| P4 | **壳核分离** | 壳只管交互；分析只在 datacore + collect + engine | 壳里再实现一套索引 |
+| P5 | **一处实现** | 同一能力只有一份实现（CLI / serve / 壳共用） | 两份 LSP、两份 card |
+| P6 | **失败要显式** | 降级必须 `skip` + `source` + `weight` | 空数组当"没有"、`unwrap_or(0)` 吞错 |
+| P7 | **安全默认关** | 未信任不 spawn、外部操作 deny、单实例、窗口 ≤4 | 双击弹一堆窗口 |
+| P8 | **中心不是核心** | `judgment` 是**中心**不是顶端：所有数据绕它循环（§3） | 把判定做成树根、单向推导 |
 
 ---
 
-## 2. 总架构
+## 3. 核心抽象：judgment 为中心的环形网络
+
+### 3.1 节点与环
+
+```mermaid
+flowchart LR
+    OBS["观测 observation<br/>命令 / 构建 / 运行 / 文件 / LSP"] --> EV["证据 evidence<br/>premise + polarity + weight"]
+    EV --> JD["判定 judgment<br/>held / refuted / uncertain"]
+    JD --> ACT["动作 action<br/>跳转 / 重跑 / 聚焦 / 建议"]
+    ACT --> OBS
+    JD --> MSG["事件 event<br/>推送 / 订阅"]
+    MSG --> OBS
+    CH["变更 change<br/>git / 文件 / 修改记录"] --> EV
+    CH --> JD
+    JD --> W["权重与冲突<br/>weight + at + source"]
+    W --> JD
+```
+
+**环上四条边**：观测→证据→判定→动作→（回到）观测；变更同时喂证据与判定；判定自带权重与时间，参与下一轮裁决。
+
+### 3.2 为什么是环而不是树
+
+- 树假定"结论一旦产生就固定"；环允许**新观测推翻旧判定**，且推翻本身留痕（§4.2）。
+- 消息推送不是"从根广播"，而是**环上事件的订阅**：谁关心哪类事件就订哪条边，避免全量刷新。
+- UI 刷新粒度 = 环上最近一次变化，不是整页重算。
+
+### 3.3 消息模型
+
+```mermaid
+sequenceDiagram
+    participant W as 观测源
+    participant R as 环
+    participant U as UI
+    W->>R: event {kind, span, at, weight}
+    R->>R: 更新证据 / 判定
+    R-->>U: diff {node, before, after}
+    U->>R: focus {span}
+    R-->>U: 该 span 的分层明细
+```
+
+**硬约束**：事件必须带 `at`（unix 秒）与 `span`（可定位），否则无法回放；UI 只做 diff 合并，不做全量重绘。
+
+---
+
+## 4. 数据模型与权重分级
+
+### 4.1 四层权重
+
+| 层 | 来源 | 权重 | 举例 | 谁能推翻它 |
+|---|---|---|---|---|
+| **L1 一手** | 本机直接观测 | **1.0** | 命令退出码、stdout、文件内容 sha、git 事实、进程表 | 只有新的一手观测 |
+| **L2 核心模型** | datacore 合成（compose） | **0.7** | held/refuted/uncertain、覆盖率、冲突对 | L1，且必须留痕 |
+| **L3 外部工具** | LSP / 编译器 / 外部服务 | **0.4** | RA 诊断、hover、引用、DB 版本 | L1/L2；**不写进判定历史链** |
+| **L4 推断** | 启发式 / 候选排序 | **0.2** | "最可能候选"、经验偏好 | 只用于排序，不作结论 |
+
+**存储要求**：每条记录带 `{source, weight, at, precision, span}`；冲突按 `weight` 降序、同权按 `at` 降序；**分歧显式保留**（`conflict` 表），不许静默择一。
+**LSP 特殊规则**：进记录但不进判定历史链，`lsp_in_history=0` 仍是硬不变量；`weight=0.4`、`source="lsp"`，UI 用更弱的视觉权重（灰/细线）表达。
+
+### 4.2 修改记录 journal：改好也记，改坏也记
 
 ```mermaid
 flowchart TB
-  subgraph UI["桌面壳 / Web（只做展示与交互）"]
-    T["Tauri v2 窗口<br/>六页：home/run/editor/note/machine/clean"]
-    W["Web 工作台<br/>tools/web（兼容保留）"]
-  end
-
-  subgraph FACADE["engine（门面，唯一对外分析 API）"]
-    E["Engine::open(repo)<br/>card / edges / impact / tests_for / cite<br/>stats / check / files / read_file / projects / machine"]
-  end
-
-  subgraph CORE["分析内核（唯一真相）"]
-    DC["datacore<br/>模型 / store(SQLite) / compose / query / capability"]
-    CO["collect<br/>git / docs / parse(Rust,TS,Python,Go) / record / gap"]
-  end
-
-  subgraph LSP["LSP 客户端（只读，共用一份）"]
-    LS["trust gate → session(单例) → capability 判定"]
-    RA["rust-analyzer（外部进程）"]
-  end
-
-  subgraph CLI["命令行（jw）"]
-    C1["card/edges/impact/tests-for/cite/find/check"]
-    C2["serve（NDJSON 协议 v1）"]
-    C3["web（HTTP + bridge）"]
-  end
-
-  T -->|invoke: engine_*| E
-  W -->|POST /rpc| E
-  C1 --> E
-  C2 --> E
-  C3 --> E
-  E --> DC
-  E --> CO
-  E --> LS
-  LS --> RA
-  DC --> DB[("SQLite .jingwei/jingwei.db")]
-  CO --> GIT[("git 仓库")]
+    M["一次修改<br/>人 / AI / 工具"] --> J["journal 行<br/>intent + diff_hash + files"]
+    J --> T["执行结果<br/>exit / 诊断 / 截图"]
+    T --> Q{"质量判定"}
+    Q -->|"通过"| OK["accepted<br/>weight 保持"]
+    Q -->|"退回"| BAD["rejected<br/>降权 + 打标"]
+    OK --> H["历史链（只进不改）"]
+    BAD --> H
 ```
 
-**边界规则**
-- 壳（Tauri）**不允许**直接读 SQLite、不允许自己解析代码；只能调 `engine_*`。
-- `engine` 是**唯一** facade；CLI、serve、壳三者行为必须一致（同输入同输出）。
-- LSP 结果**只进 now 缓存**，不写 judgment/edge/evidence/history。
+**journal 必填**：`id, actor, intent, before_sha, after_sha, files[], diff_stat, evidence[], result(ok/red), tags[]`。
+**规则**：① 任何文件修改（含 AI 与工具）自动落 journal；② 红灯也必须落（"没改好也进记录"）；③ 同一 intent 连续失败 3 次 → 标 `thrash`。
+
+### 4.3 低质量提交鉴别（规则表，可执行）
+
+| 规则 | 判据 | 处置 |
+|---|---|---|
+| 无证据 | `evidence[]` 空且无日志/截图 | 拒绝入历史，标 `no_evidence` |
+| 巨 diff 无拆分 | `diff_stat > 800 行` 且 `files > 10` | 要求拆分，标 `too_big` |
+| 只改测试不改实现 | 改动集全在 `tests/` 且无对应实现改动 | 标 `test_only` |
+| message 与 diff 不符 | message 关键词与改动文件零交集 | 标 `message_mismatch` |
+| 反复回滚 | 同一文件 24h 内 `revert ≥ 2` | 标 `churn`，降该文件后续权重 |
+| 跳门禁 | 带 `--no-verify` 或跳过 gates | 直接拒绝 |
+
+> 这套规则同时用于"我们自己的提交"和"评估外部贡献/子智能体产出"。
 
 ---
 
-## 3. 仓库与目录
+## 5. 过程可观测（认知科学 → 降级工程）
 
-**引擎源（唯一分析源）**
+### 5.1 六层观测模型（从 01 到用户动作）
+
+```mermaid
+flowchart TB
+    L5["L5 用户动作<br/>点击 / 键入 / 命令"] --> L4["L4 应用日志<br/>jw --debug / 壳日志"]
+    L4 --> L3["L3 编译器 / 构建<br/>cargo 诊断、步骤耗时"]
+    L3 --> L2["L2 进程 / 线程<br/>PID、CPU、内存、子进程树"]
+    L2 --> L1["L1 系统调用 / IO<br/>文件读写、网络、锁等待"]
+    L1 --> L0["L0 字节 / 管道<br/>stdin/stdout/stderr 流"]
+```
+
+**原则**：计算机里没有"不可观测"，只有"没结构化"。每层都产出**结构化事件**，不是自由文本。
+
+### 5.2 结构化事件（一行一事件）
+
+```
+{ts, layer:L0..L5, span_id, parent_span, actor, kind, ref:{file,line,symbol,pid}, payload, weight}
+```
+
+- `span_id` 串起"一次运行"；`parent_span` 支持下钻。
+- 大输出（编译日志）只存首尾各 N 行 + 全文路径，正文落文件。
+
+### 5.3 三个观测窗口（"认知科学降级工程"的落点）
+
+| 窗口 | 回答的问题 | 数据 | 交互 |
+|---|---|---|---|
+| **时间轴** | 刚才发生了什么、什么顺序 | L5→L0 全层事件按 `ts` 排序 | 缩放、拖动、点 span 看详情 |
+| **层级镜** | 这一层为什么慢/错 | 单层聚合（如 L3 每步耗时） | 选层、折叠、聚焦 |
+| **聚焦器** | 只看我关心的 | 按 `span/file/symbol/pid/time` 过滤 | 保存筛选为视图 |
+
+**判据**：任选一次构建，必须**3 次点击内**定位到"哪一步最慢 / 哪条诊断导致失败"。
+
+---
+
+## 6. 外部工具边界（不集成，只适配）
+
+> 用户原话："像 IDEA 那样，可以兼容很多工具链，但是本体并不集成它们。"
+
+| 外部件 | 我们做什么 | 我们不做什么 |
+|---|---|---|
+| **工具链**（rustc/cargo/node/python/go/java/…） | 探测（实跑 `--version`，超时 2s）、记录来源（pin/shim/common/path）、生成复现命令 | 不安装、不改 PATH、不代管版本 |
+| **git** | **强制外部 git**；探测、blame、log、状态；吸收其模型（§6.1） | 不内嵌 libgit2、不自建版本库、不替用户 commit/push、不写 hooks |
+| **LSP**（rust-analyzer 等） | 自建客户端直连：initialize → didOpen → 六能力；超时/降级 | 不把结果写进判定历史链；不安装 RA |
+| **外置服务 / DB** | 只探测：host/port/kind/reachable/version；凭据只存引用 | 不启停服务、不代管数据、不落明文凭据 |
+| **shell / 终端** | 内嵌 PowerShell，白名单 + 显式确认 + 输出落盘 | 不自动执行构建/测试以外的命令 |
+
+### 6.1 从 git 吸收的四个机制
+
+1. **内容寻址**：缓存键 = `blob sha`（文件内容）+ `rules` 版本 + 依赖锁 SHA；不用 mtime。
+2. **不可变快照 + 时间轴**：`snapshot/change` 对齐 `git log`；判定/证据只进不改，变更用新行表达。
+3. **三态改动映射**：未保存 → 草稿 → 已落盘 ↔ git 的 worktree / index / HEAD。
+4. **提交即证据**：`cite` 的 `commit:path:line` 是证据锚点。
+
+---
+
+## 7. 功能需求矩阵（爱用 / 难用 / 没必要 / 待核实）
+
+> "爱用/难用"两列来自本轮真实使用与旧壳实测；"待核实"列须由外部可靠来源补充（flash 收集，**禁止把猜测写成结论**）。
+
+| 档 | 功能 | 现状 |
+|---|---|---|
+| **爱用（必须有）** | 扫描父目录 → 项目卡 → 点开即用 | 旧壳有，换芯中（对账 15==15 已通） |
+| | 卡片明细：类型 / 最近改动 / 契约 / 待处理 / 卫生 / 怎么跑 + 一句理由 | 旧壳有（`inspect`），待换芯 |
+| | 四步运行：装依赖→构建→测试→运行（实时输出 + 退出码 + 内存） | 旧壳有，待换芯 |
+| | 文件树 + 打开文件 + 改动草稿 + 应用 | 旧壳有，待换芯 |
+| | 跳转（定义/引用/行尾引用数）与单层 preview | 已做并验过 |
+| | 报错行一键定位、终端输出可点路径 | 新增，低成本高感知 |
+| | inlay hints / 诊断（LSP） | CLI 已有，壳待接（R4） |
+| **难用（必须改）** | 扁平报错无上下文 | → 分层观测（§5） |
+| | 窗口堆叠 / 焦点被抢 | → 窗口 ≤4 + z-order（§8） |
+| | 环境跑不起来且说不清为什么 | → 环境契约 + 复现命令（§6） |
+| | 改完不知道发生了什么 | → journal + 事件流（§4.2、§9.6） |
+| **没必要（砍）** | 单项目统一图谱画布 | 砍（ADR-3 改口） |
+| | AI 自动改码 / rename / apply | 不做（P3） |
+| | 跨仓 / 联网检索 / 云同步 | 不做 |
+| | Tauri 额外插件生态 | 不做 |
+| **待核实（需外部来源）** | 快捷键分布偏好、终端 scrollback 需求强度、布局持久化优先级、依赖管理信息的常用粒度 | flash 收集，带出处与年份 |
+
+---
+
+## 8. 窗口与交互模型（≤4）
+
+```mermaid
+flowchart LR
+    M["main 主窗<br/>文件树 + 编辑器 + 终端"] --- D["dock 副槽<br/>Tab: 结构 / 过程 / 预览"]
+    M --- S["structure 结构窗<br/>模块·文件·符号计数（列表，不画布）"]
+    M --- P["process 过程窗<br/>时间轴 + 层级镜 + 聚焦器"]
+```
+
+- **上限 4**：main / dock / structure / process；同类**只许 1 个**实例；都能关，关后记住状态。
+- **z-order**：main < dock < structure < process；浮窗 `show_inactive` **不抢焦点**；点主窗空白不自动关（有 pin 才留）。
+- **卡片**：main 内浮层，**最多 1 个**，点新关旧，无子卡片、无继承层级。
+- **缓存节流**：键入/文件变 → 500ms 静默 + 空闲 2s 才允许一次重算；**构建/运行期间冻结缓存**。
+
+---
+
+## 9. 运行时契约
+
+### 9.1 CLI 日志
+- **stdout 只放数据**（`--json` 必须是纯 JSON）；日志一律 stderr。
+- 级别 `error/warn/info/debug/trace`；`--debug` 或 `JW_LOG=debug`；关闭时零分配。
+- 落盘 `%LOCALAPPDATA%\jingwei\logs\jw-YYYYMMDD.log`，按天滚，留 7 天，`JW_LOG_FILE=1` 才写。
+- 脱敏：token/密码/连接串 → `***`。
+- 固定事件：`scan.start/end`、`card.hit/miss`、`serve.call`、`lsp.spawn/req/timeout`、`env.probe`、`run.step`。
+
+### 9.2 IPC 与子进程
+- 壳 ↔ 新内核：`jw serve` 子进程 + NDJSON（一行一消息）；**写后 flush**；坏行丢弃 + warn。
+- `stdout` / `stderr` **都必须持续排空**（stderr 留最后 20 行用于报错）；只读 stdout 会管道满双死锁。
+- 超时 5s：超时即 kill + wait + 重置通道；不留僵死子进程。
+- 关窗顺序：`channel_stop()` → `engine_chan::stop()` → `app.exit(0)`；`Drop` 幂等兜底。
+- **已知缺口**：强杀 GUI 会留 `jw` 孤儿 → R7 用 Job Object（`KILL_ON_JOB_CLOSE`）解决。
+
+### 9.3 单实例与窗口证据
+- 回环 `127.0.0.1:7960` 互斥 + `PING/PONG` 握手；第二实例 `exit(2)` 且**先判后建窗**；端口被外人占则继续启动（记 `tag=port-squatted`）。
+- 每次窗口变化写 `%TEMP%\jingwei-gui-windows.txt`（`windows/pid/argv/exe/ts/tag`）。
+
+### 9.4 SQLite
+- WAL + `wal_autocheckpoint=1000`，写后 `checkpoint(TRUNCATE)`；写收敛单线程批量事务；读不饿死写（`busy_timeout`）。
+- 只读打开用 `Store::open_existing`（**无库即错、绝不建库**）。
+
+### 9.5 安全
+- 未 trust → 0 spawn（`%APPDATA%/jw/trust.json` + `audit.log`）；`source ∈ {lsp, db, sys}`。
+- 外部操作（open_url/shell/launch/apply_*）deny-list 双端；UI 显示"未实现"。
+- `pin`（工具路径）只接受存在的文件/目录，拒绝 `& | > < ^ " \` $ ;` 等元字符。
+
+### 9.6 事件与刷新
+- 事件必须带 `{at, span, weight}`；UI 只做 diff 合并；长任务（scan/parse/run）可取消，或至少"只认最后一次结果"。
+
+---
+
+## 10. 架构与仓库结构
+
+```mermaid
+flowchart TB
+    subgraph UI["桌面壳 / Web（只展示与交互）"]
+      T["Tauri v2 窗口<br/>main / dock / structure / process"]
+    end
+    subgraph ENGINE["engine 门面"]
+      E["Engine::open<br/>card / edges / impact / tests_for / cite<br/>stats / check / files / read_file / scan / inspect<br/>env_probe / lsp_*"]
+    end
+    subgraph CORE["分析内核"]
+      DC["datacore<br/>model / store / compose / query"]
+      CO["collect<br/>git / docs / parse / env / gap"]
+      LS["lsp 客户端（计划独立 crate）"]
+    end
+    T -->|invoke engine_*| E
+    E --> DC
+    E --> CO
+    E --> LS
+    LS --> RA["rust-analyzer（外部）"]
+    DC --> DB[(".jingwei/jingwei.db")]
+    CO --> GIT[("git 仓库（外部）")]
+```
 
 ```
 D:\projects\jingwei
-  Cargo.toml                  # workspace
-  crates/
-    datacore/                 # 模型 + store + 查询 + 组合
-    collect/                  # git / 文档 / 解析 / 记录 / 缺口
-    engine/                   # 只读门面（CLI/壳共用；T2 新增）
-    lsp/                      # LSP 客户端（计划 T6，共用一份）
-    cli/                      # bin jw（CLI + serve + web）
-  tools/web/                  # web 工作台 + smoke
-  scripts/                    # package.ps1 / check-split.ps1
-  docs/reference/             # architecture/frontend/serve-protocol/lsp-matrix/ui-spec/sop
-  .pro/exp/                   # 实验原始证据（不入发布包）
-```
-
-**产品壳**
-
-```
+  Cargo.toml            # workspace: datacore / collect / engine / cli / control
+  crates/{datacore,collect,engine,cli,control}
+  docs/reference/       # 本文 + 操作细节 + 暗坑手册
+  scripts/              # check-split / package / review
+  tools/web/            # web 工作台 + smoke
+  .pro/exp/             # 实验与审查证据（不进包）
 D:\projects\jingwei-shell
-  ui/                         # 12 个文件（已删 graph.js）
-  src-tauri/                  # 旧内核（T5 逐个替换后删除）
+  ui/                   # archive 原样（12 文件）
+  src-tauri/src/        # 旧内核（逐页换芯后删除）
 ```
-
-**只读参考**
-
-```
-D:\jingwei-archive-20261024\jingwei   # 0.3.0，禁止修改
-```
-
-## 4. 数据模型
-
-```mermaid
-erDiagram
-  FILE ||--o{ SYMBOL : contains
-  SYMBOL ||--o{ EDGE : "src"
-  SYMBOL ||--o{ JUDGMENT : "subject"
-  JUDGMENT ||--o{ EVIDENCE : "supports/refutes"
-  EDGE }o--|| SYMBOL : "dst"
-  CHANGE ||--o{ SNAPSHOT : "belongs"
-  FILE {
-    string path PK
-    string lang
-    string sha
-  }
-  SYMBOL {
-    string subject PK "symbol:path#name / type:path#name"
-    string kind
-    int line
-  }
-  JUDGMENT {
-    string subject PK
-    string state "held|refuted|uncertain"
-    string reason
-    string rules
-  }
-  EVIDENCE {
-    int id PK
-    string judgment_id FK
-    string instrument
-    string premise
-    string polarity
-  }
-  EDGE {
-    string src PK
-    string dst PK
-    string kind "use|mod|impl|import|test|test_macro|call"
-    int line
-  }
-```
-
-**Subject 规范**：`file:<rel>`、`symbol:<rel>#<name>`、`type:<rel>#<name>`（impl 源统一用 type）、`test:<rel>#<name>`、`range:<rel>:<a>-<b>`、`doc:<rel>`、`dep:<name>`。
 
 ---
 
-## 5. 判定模型 Γ ⊢ J
+## 11. 路线图（R 系列）
 
-```mermaid
-stateDiagram-v2
-  [*] --> held
-  [*] --> refuted
-  [*] --> uncertain
-  held: held（证据充分）
-  refuted: refuted（有反证）
-  uncertain: uncertain（证据不足）
-  note right of uncertain
-    必须带 reason：
-    no_data / expired / conflict /
-    coverage_short / no_capability
-  end note
-```
-
-- 规则集版本 `PARSE_RULES_VERSION=27`；rules 变化 → 边重建。
-- 边的三种精度来源：解析（`parse`）、调用解析（`call`）、LSP（只读，不落库）。
-- 关键裁决：**调用图不依赖 LSP**（离线可用）；LSP 只用于 hover/def/refs/hints/actions 的即时查询。
-
----
-
-## 6. 查询面（view 投影）
-
-| 命令 | 输入 | 输出（要点） | 证据 | 状态 |
-|---|---|---|---|---|
-| `jw card` | 文件/符号/范围/模块/依赖 | `state/verdict + groups + edges + tests + history` | judgments/evidence/edges | 已实现 |
-| `jw edges` | 文件/符号/`--to`/`--stats` | 出边/入边/种类统计 | edge 表 | 已实现 |
-| `jw impact` | 符号/文件/范围 | 反向闭包 + 受影响测试 | call/use/test 边 | 已实现 |
-| `jw tests-for` | 文件/符号 | 可达测试列表（含不确定） | test 边 | 已实现 |
-| `jw cite` | 符号/文件 | permalink（commit + 行号） | git blame + 表 | 已实现 |
-| `jw find` | 关键词 | 文件/符号/证据命中 | FTS + 表 | 已实现 |
-| `jw check` | repo | 12 项计数（含 `lsp_in_history=0`） | 全库 | 已实现 |
-
-输出必须是**稳定 JSON**（供 SHA 回归）：字段顺序、排序、`null` 语义固定。
-
----
-
-## 7. serve 协议 v1
-
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant S as jw serve
-  C->>S: {"id":1,"method":"hello"}
-  S-->>C: {"proto":1,"features":[...],"rules":"27","write_seq":N}
-  C->>S: {"id":2,"method":"card","path":"..."}
-  S-->>C: {"id":2,"ok":true,"result":{...}}
-  loop 500ms
-    S-->>C: {"type":"event","event":"db_changed"}
-  end
-  C->>S: {"id":3,"method":"events_since","since":N}
-  S-->>C: {"events":[...],"gap":false,"oldest_seq":...}
-  C->>S: {"id":4,"method":"ack","seq":N}
-```
-
-- 方法：`hello / events_since / ack / card / edges / find / impact / tests_for / cite / check / stats / projects / files / read_file / machine / lsp_*`。
-- 未知方法 → `ok:false`，进程存活。
-- 事件环：`REPLAY_CAP=256`、`RING_CAP=1024`；`db_changed` 由 `write_seq` 轮询触发。
-
----
-
-## 8. LSP 子架构（只读）
-
-```mermaid
-flowchart LR
-  A[engine::lsp_*] --> B{trust?}
-  B -- 否 --> X["ok:false reason=untrusted_workspace<br/>spawned:false"]
-  B -- 是 --> C{capability?}
-  C -- 未声明 --> Y["skip=no_capability"]
-  C -- 声明 --> D[RaSession 单例]
-  D --> E[初始化 initialize/initialized + didOpen]
-  E --> F[请求 + 短轮询]
-  F -->|结果| G["{source:'lsp', at, capability, seq}"]
-  F -->|超时/崩溃| H["skip=server_down → source:'db', precision:'low'"]
-  G --> I[now 缓存，不落库]
-```
-
-**六能力**：`diagnostics(pull) / hover / definition / references / inlayHint / codeAction(只展示)`。
-**硬不变量**：`check` 第 12 项 `lsp_in_history=0`；未信任 0 spawn；进程树 `taskkill /T /F`；`source` 只允许 `lsp|db|sys`。
-
----
-
-## 9. UI/UX 设计
-
-### 9.1 信息架构（六页，graph 已删）
-
-```
-┌──────────────┬───────────────────────────────────────────────┐
-│ 左栏（导航）  │ 主区（main）                                   │
-│  home        │  概览：结论 / 待处理 / 项目健康                  │
-│  run         │  运行：命令、输出、失败行（终端，P1）             │
-│  editor      │  编辑器：文件树 / 代码 / 问题 / hover / 引用      │
-│  note        │  记录：文档 / 笔记 / 运行日志                    │
-│  machine     │  机器：OS/CPU/内存/环境                         │
-│  clean       │  清理：可删 / 需权限 / 别碰（check 十二项）      │
-└──────────────┴───────────────┬───────────────────────────────┘
-                               │ 右 dock：preview（+ pinned 栈）
-                               │ 底部 inspector（卡片/引用/问题/终端）
-                               │ 状态栏：repo · rules · write_seq · RA
-```
-
-### 9.2 四槽与跳转模型
-
-```mermaid
-flowchart LR
-  M[main<br/>当前工作] -->|打开| P[preview<br/>跳转目标]
-  P -->|pin| N[pinned 栈]
-  P -->|Esc 一次| O[origin<br/>只存一层]
-  I[inspector<br/>底栏] -.->|卡片/引用/问题| M
-```
-
-规则：**一跳=替换 preview**；`origin` 单层；`history≤2`；多目标先出候选、选中仍算一跳；`Esc` 回 origin；禁止嵌套跳转。
-
-### 9.3 交互契约
-
-| 交互 | 触发 | 结果 | 降级 |
-|---|---|---|---|
-| hover | 停留 300ms | 380px 卡：type/doc + `source: lsp` | `类型未知` + `db` |
-| definition | 双击/`g` | 单目标替换 preview；多目标候选 | `precision: low` |
-| references | `r` / 行尾 | 按文件分组、点击一跳 | `coverage{resolved,unresolved}` |
-| inlayHint | `Alt+H` | 可视区、150ms 去抖、上限 200、stale 丢弃 | 不显示，badge `db` |
-| codeAction | Problems 行 | chips 只展开，**不 apply** | 无 chips |
-| 主题 | 设置/`?theme=mc` | 双主题，bbox 不变 | — |
-
-### 9.4 视觉
-
-- 默认"密"主题；Minecraft 风可切换；`--bw/--radius` token 化，切主题不改布局。
-- 状态用形状 + 颜色双编码（三态不只靠颜色）。
-- 键盘优先：`/` 搜索、`1-4` 槽、`Enter` 打开、`p` 钉、`Esc` 返回、`Alt+H` hints、`r` 引用。
-
----
-
-## 10. 壳与引擎的边界（Tauri）
-
-```mermaid
-sequenceDiagram
-  participant U as 用户
-  participant T as Tauri 窗口
-  participant C as src-tauri commands
-  participant E as engine::Engine
-  participant D as datacore::Store
-  U->>T: 双击 jingwei-gui.exe <repo>
-  T->>C: invoke("engine_card", {path})
-  C->>E: Engine::open(repo).card(path)
-  E->>D: 只读查询
-  D-->>E: rows
-  E-->>C: JSON（与 jw card --json 同构）
-  C-->>T: 渲染
-```
-
-- 壳内旧内核（graph/scan/projects/...）按 T5 顺序**替换后删除**，最终 `src-tauri/src` 只剩 `main/lib/commands/trust/lsp`。
-- 外部操作（`open_in/open_path/open_url/shell/pick_folder/launch_project/run_task/apply_*`）**deny-list**：JS 层 + Rust command 层双保险；UI 显示"未实现"。
-- 单实例：回环端口互斥；第二实例 exit 2；窗口数证据写 `%TEMP%\jingwei-gui-windows.txt`（必须为 1）。
-
----
-
-## 11. 安全与隐私
-
-| 面 | 措施 |
-|---|---|
-| 信任 | 用户级 `%APPDATA%/jw/trust.json` + `audit.log`；未信任 0 spawn |
-| 进程 | 无 shell 拼接；`env_clear` + 白名单；`taskkill /T /F`；单实例 |
-| 外部程序 | deny-list（双端）+ capabilities 最小 |
-| 数据 | 仓库内不写信任库；LSP 不落库；`lsp_in_history=0` |
-| 发布 | dist 只带 gui/CLI/docs；不带 bench/docs-shots/skills |
-
----
-
-## 12. 质量体系
-
-```
-单元/集成: cargo test --workspace                 （247 passed）
-fixture  : card/edges ×3 仓 SHA 3/3 等
-UI       : smoke --shell（headless DOM，6 tabs，11 checks）
-LSP      : smoke --lsp-gate/diag/real/hover/def/ref/hint/action
-文档     : b94_docs_consistency.py（版本/数字/sha 同源）
-门禁     : gate-control.ps1（rg/tauri/nushell 三仓 ok，对称差 0/0）
-拆分     : scripts/check-split.ps1（tests + 3 SHA + 版本 + 行数 + 警告）
-打包     : scripts/package.ps1（内容清单 + ASCII + architecture hash + zip sha）
-```
-
-原则：**红就是红**；flake 不放过；SKIP ≠ PASS；截图/文件必须新鲜。
-
----
-
-## 13. 发布
-
-- 版本：`0.4.x`；`rules=27`；`jw --version` 与包内文档一致。
-- 包名随版本：当前 `0.4.1-rc` → `dist/jingwei-v0.4.1.zip`（gui + CLI + docs + web/ui），`.sha256` 同目录；`m14.json` 记 tests/smoke/gate/v1/sha。
-- 标签：GUI 未人工验收时标 **`0.4.1-rc` / "GUI 运行未验"**；用户手动双击通过才去 rc。
-
----
-
-## 14. 路线图（pro 派发顺序）
-
-| 任务 | 内容 | 验收 |
+| 阶段 | 内容 | 判据 |
 |---|---|---|
-| T2.3 | `card_value` + 最小助手 → `engine::view`；cli 只改调用 | 3 SHA 3/3、247 绿、warnings≤124、版本不变 |
-| T2.4 | `Engine::open` / `module_map` + 只读命令面 | `cargo test -p engine` |
-| T3 | shell 加 path dep，`engine_*` 与旧命令并存 | 双 build 绿 |
-| T4 | 六页逐个切真数据 | 每页 ≥1 真数据 |
-| T5 | 删旧内核（graph→scan/projects/machine/notes/run），每删一 build | 双 build 绿、grep 无旧命令 |
-| T6 | impact/tests_for/cite/problems + `crates/lsp` 共用 | fixture 单测 |
-| T7 | 单实例 + deny-list + 窗口数证据 | 人工一次开窗=1，关窗 PID=0 |
-| T8 | 打磨 + `0.4.1-rc` 打包 | 全量验收 + sha 同步 |
+| **R0 基线** | 旧壳可用版（8 页、单实例、关窗 0） | `.pro/bak/usable-shell-20261027/`；parity 12/12 |
+| **R1 审查工具链** | `jw lsp-check` + `scripts/review.ps1` + `jw --debug` | 故意插类型错 → error≥1 且退出码 1；基线 error=0 |
+| **R2 换芯（7 页）** | `scan → inspect → run → editor → note → machine → clean`（graph 删） | 每页"旧 vs 新"集合/字段相等 + 截图 + 无回归 |
+| **R3 环境适配** | `Engine::env_probe`（已做）+ 外置服务探测 + machine/报告 | 8 项工具；缺工具给 repro；服务只探测 |
+| **R4 LSP 独立件** | `crates/lsp` 抽取（只搬不改）→ `Engine::lsp_*` → 壳接 hover/def/diag | 264 测试不掉；warming → `uncertain(lsp_warming_up)`；`lsp_in_history=0` |
+| **R5 观测窗口** | 时间轴 / 层级镜 / 聚焦器 + journal + 事件流 | 3 次点击定位"最慢一步/失败诊断" |
+| **R6 UI 合并** | 四容器 + z-order + 持久化；结构窗替代图谱 | 线框先审；窗口 ≤4；关窗 0 残留 |
+| **R7 收口** | 0.4.1-rc2：单实例、deny-list、Job Object、打包、b94/m14 同源 | 验收表每行"值 + 证据文件" |
+| **R8 判断层增强** | 权重裁决 UI、冲突可视化、低质量提交报告 | 冲突必须显式可见，不静默择一 |
 
-P1：终端底栏（cwd 跟随）、布局/会话恢复、行内 git blame、外部改动重载、键盘选择复制、命令面板。
-P2：鼠标组合键、终端点路径、scrollback 搜索。
-
----
-
-## 15. 决策记录（ADR 摘要）
-
-| ID | 决策 | 理由 | 代价 |
-|---|---|---|---|
-| ADR-1 | 壳用 Tauri v2（不用 wry） | 底座现成、UI/UX 成熟 | 依赖较重 |
-| ADR-2 | 引擎整块替换为 datacore+collect | 旧内核不够坚实 | 迁移工作量大 |
-| ADR-3 | 画图全砍 | 不是核心价值，维护贵 | 少一个卖点 |
-| ADR-4 | LSP 只读、六能力 | 价值高、风险可控 | 不做 rename |
-| ADR-5 | 外部操作 deny-list | 防窗口风暴/越权 | 部分功能暂缺 |
-| ADR-6 | 一处实现（engine facade） | 防 CLI/壳漂移 | 改造期双轨 |
-| ADR-7 | 三态判定 + 证据 | 产品灵魂 | 实现更重 |
-| ADR-8 | 发布含用户路径验收 | CLI 可用≠用户可用 | 验收更慢 |
+**每次只做一刀**（≤45 分钟），四段式：依据 → 最小实现 → 判据 → 证据。
 
 ---
 
-## 16. 风险与已知限制
-
-- **GUI 运行未验**：只做了 headless DOM；用户实机曾出现多窗口（已加 deny-list/单实例/窗口数证据，待人工复核）。
-- **39 个 UI 命令未映射**（静态；加载触发约 12）：UI 显示"未映射（M15）"。
-- 六页中 run/note 仍为部分数据；终端底栏未做。
-- `main.rs` 未拆（6,490 行 → 目标 <800，check-split 已就绪）。
-- LSP 依赖外部 RA；无 RA 时降级（显式 skip）。
-- 跨仓/联网/rename 明确不做。
-
----
-
-## 17. 术语表
-
-| 词 | 含义 |
-|---|---|
-| Subject | 被判断的对象（file/symbol/type/test/range/doc/dep） |
-| Judgment | 关于 Subject 的三态结论 + 理由 |
-| Evidence | 支撑/反驳判定的证据行（instrument + premise + polarity） |
-| Edge | Subject 之间的关系（use/mod/impl/import/test/call） |
-| now 缓存 | 只读即时结果（LSP），不落库 |
-| skip | 显式降级原因（no_server/server_down/no_capability/...） |
-| 四槽 | main / preview / pinned / inspector |
-| rules | 解析规则版本（27），变化触发重建 |
-
----
-
-## 18. 运行时契约（目标态；标 [rc] 的进 0.4.1-rc）
-
-- [rc] 18.1 **壳内同步 DB 调用必须离开 async 线程**：Tauri command 里 `Engine::*`（rusqlite 同步）一律经 `spawn_blocking`；CPU 密集（AST/闭包）同。
-- [rc] 18.2 **子进程 stdout/stderr 持续排空**（LSP/CLI/serve 三处），结束 `taskkill /T /F` 并按 PID 树复查 0。
-- [rc] 18.3 **NDJSON 每条写完 flush**；坏行丢弃 + warn，不 unwrap。
-- [rc] 18.4 **弱仓体检**：浅克隆/detached HEAD 在 `Engine::open` 检出 → `cite` 降级 `skip=shallow`，不 panic。
-- [rc] 18.5 **LSP 未就绪返回 `uncertain(lsp_warming_up)`**，不得返 `no_data`（P1）。
-- 18.6 监听：notify + 300ms 防抖，忽略 `.git/target/node_modules`；rename 区分"保存"与"删除"。
-- 18.7 指纹 = 文件 SHA + rules 版本（**不含**编译器版本）；规则变更触发边重建。
-- 18.8 反向依赖：符号改名/删除 → 引用方即使内容未变也重算，绝不留僵尸边。
-- 18.9 SQLite：WAL + `wal_autocheckpoint`；写收敛单线程批量事务；读不饿死写（busy_timeout 2s）。
-- 18.10 日志 `%APPDATA%/jw/logs` 按天；panic hook 落盘 + CLI 非零退出。
-- 18.11 配置三层（全局 / `.jingwei/config.json` / env），标注热/冷重载（主题热、LSP 开关冷）。
-- 18.12 大 payload：列表接口带 `limit/offset`；大文件用 `read_file_range`；二进制 IPC 用 Uint8Array。
-
-## 附录 A：工程暗坑（2026-10-27，全部本轮真实踩到，带证据）
-
-1. `String::truncate` 非字符边界 **panic**（serve read_file 原样）→ 只读前 N+4 字节 + `is_char_boundary` 回退。
-2. `store.count("<表>")` 有白名单（store.rs:2229），白名单外的 `unwrap_or(0)` → **恒 0**（serve stats files/symbols 长期 0）。
-3. INNER JOIN 吞悬空行 → 安全不变量假 0；用 LEFT JOIN + `ifnull`，并用 `foreign_keys=OFF` 直插造红测。
-4. `read_dir(root.join(rel))` **无越界检查**（serve files）→ 传 `..\..` 可列仓库外；canonicalize+starts_with 必做。
-5. tree-sitter 有 `links="tree-sitter"`，**全图只能一版**；靠"语法包不依赖 core（只依赖 tree_sitter-language）"实现版本收敛。
-6. `shutil.copy2` 保留旧 mtime → "停手门/mtime 判活"会失效；一律用 **sha256**。
-7. cargo test/build 并行 → binary 被占用 → **假红**（97 passed + SPLIT_FAIL）；门禁不并行。
-8. `pub fn store()` 把 Store 交给壳 = 壳可写库，破 doc:78 边界。
-9. 状态写进代码注释（"2.3a 已回滚"）＝假台账；状态只进 HANDOFF。
-10. 备份时机错：应"改前复制 + 改后立刻双备份 + 校验字节数/sha"，而不是"稍后再存"（467 行差点丢）。
-
-### 15.1 ADR 增补（2026-10-27）
-
-| ID | 决策 | 理由 | 代价 |
-|---|---|---|---|
-| ADR-9 | tree-sitter 收敛 0.27 单版 | links 冲突无解，只能一版；语法包不动故 parse 树不变 | 主仓 core 升级 |
-| ADR-10 | facade 契约 = serve `result` 内层 | CLI/serve/壳同输入同输出（doc:79） | 信封由调用方加 |
-| ADR-11 | check 12 项为唯一真源 | doc:195/258；serve 4 项 stub 废弃 | 旧 UI 显示变化 |
-| ADR-12 | 安全不变量必须"能红" | lsp_in_history 长期假 0 的教训 | 每条不变量配违规构造测试 |
-| ADR-13 | 静默降级零容忍 | 3 个实例（stats/lsp/read_file） | T2.5 全仓审计 |
-
-### 16.1 差距表（当前态 vs 目标态，2026-10-27）
+## 12. 差距表（当前态 vs 目标态）
 
 | 项 | 当前 | 目标 | 何时 |
 |---|---|---|---|
-| main.rs 行数 | 5,431 | <800 | T8（不在门里，未达须如实标） |
-| shell 旧内核 | src-tauri 54 处 `jingwei_engine` + 4 个 crate | 只剩转接层 | T5a/T5b |
-| UI 命令映射 | 84 invoke / 7 死命令 / 39 未映射（doc:394） | 六页全真数据 | T4 |
-| GUI 验收 | headless DOM only | 人工一次开窗=1、关窗 PID=0 | T7 |
-| LSP 进程树 | taskkill /T | Job Object | T7 |
-| 统计口径 | stats/check 已接 facade | 壳显示同源 | T4 |
-| edges 口径 | 11 结构边（use/mod/impl，UI 显式标注） | 58 全量（含 call/test） | T6 |
-| `#railProjs`（启动历史） | 空 div（display:none） | T6/T8 决定实现或删除 | —— |
-| note 写入（event_note/save_note/delete_note） | 已删 | T6 若恢复需接新库 | —— |
-| 项目创建（create_project） | 已删 | ADR-5 deny | —— |
-| 草稿/应用（apply_edit/snapshot_file/restore_draft/contract_save） | 已删 | P3 只读优先 | —— |
-| 配置档（profiles） | 已删/T6 | 旧路径 %LOCALAPPDATA%\jingwei | T8 三层配置时再设计 |
-| 默认编辑器偏好（default_opener/set_default_opener） | 已删/T6 | 写旧 LOCALAPPDATA 设置 | 外部操作偏好，P7 deny |
-| 状态栏实时 CPU/内存采样 | T6 | 旧内核 sys::machine 180-250 行 FFI + windows-sys，不进壳；将来在 engine 实现 | —— |
-| 编辑器检测（detect/App） | T6 | 150 行注册表+PATH 扫描；无打开能力后价值低，T6/T8 在 engine 侧实现 | —— |
-| impact 符号级反向闭包 | **已验**：fixture（a() 调 b()）parse 后 `direct` 非空且为符号级（`symbol:src/a.rs#a` → `symbol:src/b.rs#b`） | 无差距（主仓 `card` 的 direct 空是选样问题，不是 call 边缺失） | —— |
+| graph 画布 | 旧壳有入口，可画 8719 节点/16953 边 | **删入口**，只留结构列表 | R2/R6 |
+| 七页换芯 | 0/7（scan 对账 15==15 已通） | 7/7 集合/字段相等 | R2 |
+| 状态栏实时 CPU | 旧内核 FFI（180–250 行） | engine 提供，或标"未提供" | R3 后 |
+| 编辑器检测 / 默认编辑器 | 旧内核 150 行注册表扫描 | engine 侧实现或不做 | R3 后 |
+| LSP 进壳 | 无（仅 CLI） | hover/def/diag 可用 | R4 |
+| 观测窗口 | 无 | 三层可聚焦 | R5 |
+| journal / 低质量提交 | 无 | 自动落记录 + 规则判定 | R5 |
+| 四容器窗口 | 3 区（main/dock/inspector） | 4 容器 + z-order | R6 |
+| 孤儿进程 | 强杀 GUI 留 `jw` | Job Object | R7 |
+| edges 口径 | 11 结构边（use/mod/impl，UI 已标注） | 58 全量（含 call/test） | R4 后 |
+| `#railProjs`（启动历史） | 空 div（display:none） | 实现或删除 | R6 |
+| 配置档 profiles | 已删/T6（旧路径 `%LOCALAPPDATA%\jingwei`） | 三层配置时再设计 | R7 |
+| 测试数口径 | `--all-targets` 求和 264 | 同口径持续 | 全程 |
+| warnings | debug 109 / release 0 | ≤109 | 全程 |
 
-### 18.1 外部工程建议的处置（2026-10-27，用户转来 31 条）
+---
 
-- **rc 前必做 5 条**：5 异步隔离、13 stdio 排空、14 NDJSON flush、15 弱仓体检、23 LSP warming_up。
-- **纳入目标态（T4–T8）**：1 监听/防抖、3 反向依赖、4 WAL/单写、6 日志/panic、7 配置三层、8 性能预算、9 生命周期、10 Job Object、11 schema 迁移、12 大 payload、18 路径归一（补大小写）、19 锁纪律、20 STRICT 表、21 FTS5 拆词、22 AST 显式栈、24 now 缓存键、25 降级链、27 证据链默认收起、28 单激活卡。
-- **已覆盖**：14 flush（复核即可）、17 symlink 防护（T2.4 已做）、29 不自动 apply、30 文档/实况不符（T5b 已裁）、31 外部验证（check-split）。
-- **否决 4 条**：2 指纹加编译器版本（应由 rules 表达）、16 GBK/encoding_rs（rc 只做 BOM 嗅探）、26 壳后置/CLI 优先（与六页 GUI 方向冲突；MCP 可作 T8 后增量）、31 的 agent 流程项（不进产品文档）。
+## 13. 工作流与验收
 
+**低流**：每刀 `刀名 | 关键数字 | 证据文件`，≤3 行；不贴长日志、不复述设计。
+**review 三件套**：`jw lsp-check <改过的文件>` + `jw --debug <该步命令> 2>log`（关键事件 ≤20 行）+ 截图（该页/该功能）。
+**验收门**：
+1. 该刀对照（集合/字段相等）；
+2. 8 页 parity 不回归；
+3. `cargo test -p jw` 相关子集绿（全量 `--all-targets` 每 3–4 刀一次）；
+4. 开窗类：`windows=1`、关窗 `jingwei-gui=0` 且 `jw=0`；
+5. 数字变化必须解释（口径写死）。
+**提交**：`<type>(<范围>): 一句话` + body 三行（为什么/改了什么/证据）；每刀一提交，攒批 ≤3 刀推 GitHub（`HTTPS_PROXY=http://127.0.0.1:23333`），push 失败记"待重试"不阻塞。
+**禁止**：先删成红树；无证据宣称完成；并行 cargo / 并发开窗；用 `Stop-Process` 代替"点 X"验证关窗。
+
+---
+
+## 14. 暗坑手册（本节持续追加，每条都要有当天证据）
+
+1. `String::truncate` 非字符边界 **panic**（read_file）→ 只读前 N+4 字节 + `is_char_boundary` 回退。
+2. `store.count("<表>")` 有白名单；白名单外 + `unwrap_or(0)` → **恒 0**（stats files/symbols 长期假 0）。
+3. INNER JOIN 吞悬空行 → 安全不变量假 0；用 LEFT JOIN + `ifnull`，用 `foreign_keys=OFF` 直插造红测。
+4. `read_dir(root.join(rel))` 无越界检查（files）→ 必须 canonicalize + starts_with。
+5. tree-sitter 有 `links`，全图只能一版；靠"语法包只依赖 `tree_sitter-language`"实现收敛。
+6. `shutil.copy2` 保留旧 mtime → 用 sha256 判活，不用 mtime。
+7. cargo / `jw.exe` 并发 → 假红（tests 掉到 109）；门禁前断言进程 0。
+8. `pub fn store()` 把 Store 交给壳 = 壳能写库，破边界 → `pub(crate)`。
+9. 状态写进代码注释（"2.3a 已回滚"）＝假台账；状态只进 HANDOFF。
+10. 备份时机错：必须"改前复制 + 改后立刻双备份 + 校验字节数/sha"。
+11. Tauri v2 参数是 **camelCase**：Rust `root_ready` ↔ JS `rootReady`，否则永远 false（已踩）。
+12. UIA 点不到 WebView 里的按钮 → 用 CDP（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`）注入点击，不改产品代码。
+13. `jw serve` 启动先吐一行问候，客户端要跳过非响应行再匹配 `ok`。
+14. `.cmd/.bat` 不能直接 spawn，需 `cmd /C call "<path>"`；`pin` 必须拒绝 shell 元字符。
+
+---
+
+## 15. ADR 摘要
+
+| ID | 决策 | 理由 | 代价 |
+|---|---|---|---|
+| ADR-1 | 壳用 Tauri v2 | 底座现成、UI 成熟 | 依赖较重 |
+| ADR-2 | 引擎整块替换为 datacore+collect | 旧内核不够坚实 | 迁移量大 |
+| ADR-3 | **图谱不作为产品形态**（删入口） | 大厂已占、看不过来、成本高 | 少一个卖点；`.jingwei/graph.db` 文件保留 |
+| ADR-4 | LSP 只读、六能力、**不进判定历史链** | 价值高、风险可控 | 权重降为 L3 |
+| ADR-5 | 外部操作 deny-list | 防窗口风暴/越权 | 部分功能暂缺 |
+| ADR-6 | 一处实现（engine facade） | 防 CLI/壳漂移 | 改造期双轨 |
+| ADR-7 | 三态 + 证据 + **权重分级** | 产品灵魂 | 实现更重 |
+| ADR-8 | 发布含用户路径验收 | CLI 可用≠用户可用 | 验收更慢 |
+| ADR-9 | 新内核以 **`jw serve` 子进程**接入壳 | 进程隔离、换芯=路由切换、可 A/B 对账 | 需管子进程与孤儿 |
+| ADR-10 | **git 强制外部**，内部只吸收模型 | 不自建版本库 | 依赖用户环境有 git |
+| ADR-11 | 环境"兼容不集成"（探测 + 契约 + 复现命令） | 不装环境，也不能装 | 无法保证一定能跑 |
+| ADR-12 | judgment 是**中心**不是核心（环网） | 新观测可推翻旧判定 | 数据与 UI 更复杂 |
+| ADR-13 | **静默降级零容忍** | stats/lsp/read_file 三个实例 | 需全仓审计与红测 |
+| ADR-14 | edges 只给结构边（0.4.1 期） | 全量改动面大，先诚实标注 | 与 `jw edges` 全量口径不一致，R4 后统一 |
+
+---
+
+## 16. 术语
+
+| 词 | 含义 |
+|---|---|
+| **judgment** | 关于 subject 的三态结论 + 理由 + 权重，环网中心 |
+| **weight** | 数据权重（L1 1.0 / L2 0.7 / L3 0.4 / L4 0.2），参与冲突裁决 |
+| **journal** | 修改记录（改好改坏都进），含意图 / diff / 结果 / 证据 |
+| **span** | 一次可定位的过程片段，供时间轴与下钻 |
+| **layer L0–L5** | 六层观测模型（字节 → 用户动作） |
+| **四容器** | main / dock / structure / process |
+| **now 缓存** | 只读即时结果（LSP），不落库、不进历史链 |
+| **skip** | 显式降级原因（no_server / server_down / no_capability / no_git / shallow_clone） |
+| **rules** | 解析规则版本（27），变化触发重建 |

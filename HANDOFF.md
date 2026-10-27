@@ -691,3 +691,10 @@ D:\jingwei-archive-20261024\research-20261024\
 
 1. **LSP 4 条 flaky 是既有的**：`lsp_def/hint/hover/real` 在全量并行跑时返回 `skip:"server_down"`；单跑 `cargo test -p jw --test product lsp_` → 8/8 过。**全量跑前先确认 `Get-Process rust-analyzer` = 0**（并行抢 RA 是根因）。
 2. **`serve_scan_matches_facade` 的 keys 修正属补欠账**：S3 换 `Engine::scan` 时加了 `kind/has_git/has_contract/has_index`，旧断言没跟着改，I2 顺手补齐（记在 S3 那刀下，不算 I2 新债）。
+
+### L2 · `crates/lsp` + `jw lsp-check`（2026-10-28）
+
+- 新增 `crates/lsp`（诊断专用客户端：Content-Length 帧 / stderr 排空留 50 行 / initialize→initialized→didOpen / shutdown→exit→taskkill /T）+ `jw lsp-check <路径…>`（有 error 退出 1，查不了退出 2）。
+- 实测：`crates/lsp/src/lib.rs` → **errors=0 warnings=0 exit 0**；临时 crate 插类型错 → **errors=1 exit 1**。全量 **275 tests / 0 failed**；warnings **109**（持平）。
+- 两个坑写进注释：① clap 里加 `LspCheck` 变体会让 `jw --help` 栈溢出 → 改**手写分发**（改动小可回滚，理由记录在 `review-L2.md`）；② `workspace_root` 相对路径产生空祖先 → 先 canonicalize，并优先选带 `[workspace]` 的最外层。
+- 证据：`.pro/exp/out/review-L2.md`、`l2-green3.txt`、`l2-red.txt`、`l2-debug.err.txt`

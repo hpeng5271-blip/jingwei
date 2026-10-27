@@ -417,6 +417,7 @@ fn should_pause(argc: usize, is_tty: bool) -> bool {
 
 /// `jw lsp-check` 的手写入口（不经 clap）。参数：
 /// `--json`、`--root <dir>`、`--limit <n>`、`--debug`，其余按路径收。
+#[allow(dead_code)] // gui bin 复用本文件但不走这些入口
 fn lsp_check_entry() -> ExitCode {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut root: Option<PathBuf> = None;
@@ -5224,6 +5225,7 @@ fn cmd_trust(action: &str, root: &PathBuf, json: bool) -> anyhow::Result<ExitCod
 }
 
 /// D7：用 rust-analyzer 审查一批文件。**有 error → 退出码 1；查不了 → 2**（三态分开）。
+#[allow(dead_code)] // gui bin 复用本文件但不走这些入口
 fn cmd_lsp_check(
     paths: &[PathBuf],
     root: Option<&PathBuf>,
@@ -5301,6 +5303,7 @@ fn cmd_lsp_check(
     Ok(ExitCode::SUCCESS)
 }
 
+#[allow(dead_code)] // gui bin 复用本文件但不走这些入口
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>, limit: usize) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {

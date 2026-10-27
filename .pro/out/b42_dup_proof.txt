@@ -1,0 +1,35 @@
+== 29 条差：REPLACE 级联假设的验证 ==
+
+symbol:crates/cli/src/main.rs#setup_console
+  bak-1325: ['def:crates/cli/src/main.rs:861:fn']
+  current : ['def:crates/cli/src/main.rs:836:fn:1792900700', 'def:crates/cli/src/main.rs:861:fn:1792900700']
+
+symbol:crates/cli/src/sandbox_allow.rs#tmp
+  bak-1325: ['def:crates/cli/src/sandbox_allow.rs:290:fn']
+  current : ['def:crates/cli/src/sandbox_allow.rs:138:fn:1792900700', 'def:crates/cli/src/sandbox_allow.rs:290:fn:1792900700']
+
+symbol:crates/engine/src/graph/file_life.rs#fmt
+  bak-1325: ['def:crates/engine/src/graph/file_life.rs:76:fn']
+  current : ['def:crates/engine/src/graph/file_life.rs:51:fn:1792900700', 'def:crates/engine/src/graph/file_life.rs:76:fn:1792900700']
+
+symbol:crates/engine/src/graph/index.rs#edge
+  bak-1325: ['def:crates/engine/src/graph/index.rs:1193:fn']
+  current : ['def:crates/engine/src/graph/index.rs:1193:fn:1792900700', 'def:crates/engine/src/graph/index.rs:145:fn:1792900700']
+
+symbol:crates/engine/src/graph/rename.rs#plan_rename
+  bak-1325: ['def:crates/engine/src/graph/rename.rs:368:fn']
+  current : ['def:crates/engine/src/graph/rename.rs:368:fn:1792900700', 'def:crates/engine/src/graph/rename.rs:56:fn:1792900700']
+
+symbol:crates/engine/src/state/scaffold.rs#id
+  bak-1325: ['def:crates/engine/src/state/scaffold.rs:61:fn']
+  current : ['def:crates/engine/src/state/scaffold.rs:40:fn:1792900700', 'def:crates/engine/src/state/scaffold.rs:61:fn:1792900700']
+
+symbol:crates/engine/src/state/scaffold.rs#parse
+  bak-1325: ['def:crates/engine/src/state/scaffold.rs:52:fn']
+  current : ['def:crates/engine/src/state/scaffold.rs:30:fn:1792900700', 'def:crates/engine/src/state/scaffold.rs:52:fn:1792900700']
+
+symbol:crates/engine/src/sys/clean.rs#open_exclusive_ok
+  bak-1325: ['def:crates/engine/src/sys/clean.rs:1199:fn']
+  current : ['def:crates/engine/src/sys/clean.rs:1155:fn:1792900700', 'def:crates/engine/src/sys/clean.rs:1199:fn:1792900700']
+
+判据：旧库每个 subject 只剩 1 条（较后行号）→ 假设成立；current 2 条 → 新写入不再吃证据。

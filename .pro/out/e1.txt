@@ -1,0 +1,70 @@
+== E1 · 人工记录 → judgment 映射的判别力 ==
+db=D:\projects\demo\.jingwei\jingwei.db
+record_glob=D-*.md  at=1792901663  seed=0（无随机）
+
+记录总数=11
+
+-- 逐条解析（可复核）--
+  D-20261019-01                   1133B  verdict=uncertain alts=2 fb_opts=0 paths=3 cmds=2
+      why=状态行=- 状态：**部分完成**（基线脚本已落并跑出可复现数字；整盘冷缓存仍未验证）
+      alt_secs=['为什么不是别的']
+  D-20261019-02                   1600B  verdict=held      alts=0 fb_opts=0 paths=2 cmds=0
+      why=状态行=- 状态：**两项都已实现**（`__main__` 块 → File→Symbol calls；装饰器 → `register
+      alt_secs=['为什么不是"全收"']
+  D-20261020-03                   1281B  verdict=held      alts=0 fb_opts=0 paths=0 cmds=0
+      why=状态行=- 状态：**两步都已实现**（`jingwei watch` + `discover --journal`）；Node 版 `
+      alt_secs=[]
+  D-20261020-04                   2808B  verdict=held      alts=7 fb_opts=0 paths=0 cmds=0
+      why=状态行=- 状态：**已实现（2026-10-20 06:05，走 A 路线）**——pro 判定"模块级常量是 Python 真项目的
+      alt_secs=['必须放弃（一律 Unknown，不猜）', '不做']
+  D-20261021-05-主路径八动词            1099B  verdict=held      alts=3 fb_opts=0 paths=1 cmds=0
+      why=状态行=- 状态：**已落地**（`crates/cli/src/main.rs`）
+      alt_secs=['为什么不直接删 28 个']
+  D-20261021-06-命令调用记录            6349B  verdict=uncertain alts=0 fb_opts=51 paths=10 cmds=1
+      why=状态行=- 状态：**设计已定；3 处待实施、1 处待人口径**（每个决策点标在"状态"里）
+      alt_secs=[]
+  D-20261022-01-测试失败定位             634B  verdict=uncertain alts=0 fb_opts=0 paths=1 cmds=0
+      why=无状态行/无法归一 → uncertain（不猜）
+      alt_secs=[]
+  D-20261022-02-消息阵列保留策略           528B  verdict=uncertain alts=0 fb_opts=0 paths=2 cmds=0
+      why=无状态行/无法归一 → uncertain（不猜）
+      alt_secs=[]
+  D-20261022-03-资源预算与文件聚焦         3486B  verdict=held      alts=0 fb_opts=0 paths=3 cmds=7
+      why=状态行=**状态**：**已裁定**（pro `971be04a`，2026-10-22 17:40）· 人确认“全部按 pro 说的来
+      alt_secs=[]
+  D-20261022-04-上下文与技能治理          2281B  verdict=held      alts=0 fb_opts=0 paths=10 cmds=2
+      why=状态行=**状态**：已裁定（pro `971be04a`，2026-10-22 18:20）· 人指定"由 pro 来做"。
+      alt_secs=[]
+  D-20261023-05-事件的项目归属           1204B  verdict=held      alts=3 fb_opts=0 paths=0 cmds=0
+      why=无状态行；有「落地」表且含 commit → held（兜底规则，逐条打印）
+      alt_secs=['三个选项与取舍']
+
+-- 可核对性（路径口径，三桶分开）--
+  路径提及去重=27
+  resolved（库里能直接对上 file:）= 19
+  quoted_mismatch（文件在、库被 git C-quote 成 file:"..."）= 0
+  in_repo_missing（文件在、库完全没有该 subject）= 8
+  absent（文件也不在，可能是记录里的旧路径/生成物）= 0
+  名义命中率 = 19/27 = 0.704
+  修 quoted 后的可核对率 = 19/27 = 0.704
+  [in_repo_missing] ['bench/scan.json', 'crates/model/src/lib.rs', 'tools/bench-scan.mjs', 'tools/check_facts.mjs', 'tools/collect_facts.mjs', 'tools/ctx-cost.mjs', 'tools/gates.json', 'tools/skills-doctor.mjs']
+
+-- 选项（alternative_of 的原料）--
+  显式 option 总数=15  有显式选项的记录=4/11
+  fallback（只在正文 ①② 里出现的「选项：」）= 51，单列、不计入显式
+  无显式选项（淘汰，不进 alternative_of）=7 ['D-20261019-02', 'D-20261020-03', 'D-20261021-06-命令调用记录', 'D-20261022-01-测试失败定位', 'D-20261022-02-消息阵列保留策略', 'D-20261022-03-资源预算与文件聚焦', 'D-20261022-04-上下文与技能治理']
+
+-- 写入 after 库 --  decision=11 option=15 记录→代码证据=23
+
+-- D_code：记录证据是否改变代码 subject 的结论 --
+  受测 subject=19  结论改变=0  结论不变=19
+
+-- D_rec：记录命名空间（只证明映射写得进库，不算判别力）--
+  decision: no_data -> 有结论  11/11
+  option:   no_data -> 有结论  15/15
+
+== 判定 ==
+H1（D_code>=1）: 不成立  (D_code=0, D_rec=26)
+结论：记录→judgment 在代码命名空间判别力为 0；记录只能进记录命名空间（自证）。
+      要让它有判别力，必须走「记录 → 可机械核对的谓词 → checker → supports/contradicts」。
+      可核对原料：路径 名义 19/27，修 quoted 后 19/27；显式选项记录 4/11。

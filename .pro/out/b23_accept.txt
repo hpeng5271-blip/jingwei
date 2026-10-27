@@ -1,0 +1,28 @@
+﻿
+imported 11 records (11 decisions, 15 hypotheses) into D:\projects\demo\.jingwei\jingwei.db
+paths: raw=44 unique=27 existing=27; alts=15; decisions=11 hypotheses=15
+--- alt-list 19-01 ---
+candidate hypothesis:demo#D-20261019-01/2
+candidate hypothesis:demo#D-20261019-01/1
+--- alt-list 21-05 ---
+candidate hypothesis:demo#D-20261021-05-主路径八动词/2
+candidate hypothesis:demo#D-20261021-05-主路径八动词/3
+candidate hypothesis:demo#D-20261021-05-主路径八动词/1
+--- ask 21-06 ---
+uncertain: decision:demo#D-20261021-06-命令调用记录（verdict_uncertain）
+  judgment demo:j:decision: kind=decision verdict=uncertain coverage=0/0
+  scope=decision objects=10 env=2
+  <- [supports] record:D-20261021-06-命令调用记录 (record)
+--- stat ---
+repo        demo
+db          D:\projects\demo\.jingwei\jingwei.db
+judgment    4040
+evidence    4040
+source      207
+change      1921
+snapshot    200
+conflict    0
+false_cov   0
+--- check ---
+false_coverage=0 refuted_without_full=0 orphan_evidence=0 orphan_alternative=0
+ok

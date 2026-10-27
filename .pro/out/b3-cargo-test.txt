@@ -1,0 +1,106 @@
+﻿cargo : warning: linker stdout: 正在创建库 D:\projects\jingwei\target\debug\deps\jw.lib 和对象 D:\projects\jingwei\target\debug
+\deps\jw.exp
+所在位置 行:1 字符: 153
++ ... ($false); cd D:\projects\jingwei; cargo test --workspace 2>&1 | Out-F ...
++                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: linker...bug\deps\jw.exp:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `jw` (bin "jw") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src\lib.rs (target\debug\deps\collect-87a9123569b476a7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\git_paths.rs (target\debug\deps\git_paths-e81810d60d953280.exe)
+
+running 1 test
+test git_log_keeps_utf8_paths ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests\record_parse.rs (target\debug\deps\record_parse-9facfe2b78d03aae.exe)
+
+running 4 tests
+test bare_filenames_are_not_paths ... ok
+test table_header_is_not_an_alternative ... ok
+test status_line_has_three_shapes ... ok
+test second_table_header_in_same_section_is_skipped ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\datacore-16692ed7c156be76.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\core.rs (target\debug\deps\core-29c60ee9901cd8ce.exe)
+
+running 19 tests
+test compose_no_data ... ok
+test compose_conflict_gate ... ok
+test compose_held_when_covered ... ok
+test conflict_requires_opposite_and_full_coverage ... ok
+test compose_coverage_gate ... ok
+test hash_is_stable_and_distinct ... ok
+test record_verdict_maps_status ... ok
+test collection_kinds_registered ... ok
+test ddl_blocks_refuted_without_full_coverage ... ok
+test expire_by_id_targets_that_judgment ... ok
+test alternative_requires_existing_judgments ... ok
+test as_of_uses_t_for_expiry ... ok
+test scope_roundtrip ... ok
+test resolve_without_conflict_is_no_conflict ... ok
+test expired_judgment_is_filtered ... ok
+test reimport_does_not_wipe_verdict_or_evidence ... ok
+test resolve_clears_conflict ... ok
+test scan_skips_expired ... ok
+test check_flags_orphan_evidence ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\main.rs (target\debug\deps\jw-cabda42f40385377.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\collect.rs (target\debug\deps\collect-4ba6b5ecc923bde0.exe)
+
+running 4 tests
+test ask_no_data_has_own_label ... ok
+test record_alternatives_link_to_decision ... ok
+test record_import_end_to_end ... ok
+test record_import_is_stable ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\verify_resolve.rs (target\debug\deps\verify_resolve-1c208012a6028ff0.exe)
+
+running 5 tests
+test expire_by_id_rejects_foreign_id ... ok
+test resolve_requires_by_and_why ... ok
+test resolve_without_conflict_is_no_conflict ... ok
+test verify_after_delete_turns_refuted ... ok
+test verify_writes_new_judgment_not_update ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
+
+   Doc-tests collect
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests datacore
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

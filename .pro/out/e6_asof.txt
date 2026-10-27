@@ -1,0 +1,14 @@
+== E6 · as_of 时间旅行 ==
+  [PASS] init  expect=0  got=0
+  [PASS] docs v1  expect=1 docs  got=ingested 1 docs into .\.jingwei\jingwei.db
+  [PASS] v1 当前 = held(A)  expect=held + a.md:A  got=held: doc:a.md
+  [PASS] docs v2  expect=1 docs  got=ingested 1 docs into .\.jingwei\jingwei.db
+  [PASS] as-of T1+1 = held 且依据是 v1  expect=a.md:A  got=held: doc:a.md |   judgment repo:j:doc:1792904987:15aedd6907088e87 kind=doc verdict=held coverage=1/1 |   scope=file objects=1 env=1 |   <- [supports] doc:a.md:
+  [PASS] as-of T2+1 = held 且依据是 v2  expect=a.md:B  got=held: doc:a.md |   judgment repo:j:doc:1792905037:15aedd6907088e87 kind=doc verdict=held coverage=1/1 |   scope=file objects=1 env=1 |   <- [supports] doc:a.md:
+  [PASS] now = held 且依据是 v2  expect=a.md:B  got=held: doc:a.md |   judgment repo:j:doc:1792905037:15aedd6907088e87 kind=doc verdict=held coverage=1/1 |   scope=file objects=1 env=1 |   <- [supports] doc:a.md:
+  judgments: [('held', 1792904987, 1792905037), ('held', 1792905037, None)]
+  [PASS] 两条判断都在（v1 过期不删）  expect=2 条且 v1.exp=1792905037  got=[('held', 1792904987, 1792905037), ('held', 1792905037, None)]
+  [PASS] v1 仍是 held（历史没被改写）  expect=held  got=held
+
+== 汇总 ==
+  9/9 PASS

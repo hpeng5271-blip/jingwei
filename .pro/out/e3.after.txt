@@ -1,0 +1,110 @@
+== E3 v2 · B3 之后：verify / 冲突 / resolve ==
+work=D:\projects\jingwei\.pro\tmp\e3
+
+-- 1. 场景 --
+  git log: 0a610e2 1792810800 c2 | 715868c 1792807200 c1
+
+-- 2. init + ingest --
+  $ jw init   [root=repo]
+    initialized repo at .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ingest --limit 10   [root=repo]
+    ingested 2 commits, 3 file-changes into .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ask file:b.txt   [root=repo]
+    held: file:b.txt
+      judgment repo:j:change:1792807200:0caf4f34ecb912fd kind=change verdict=held coverage=1/1
+      scope=file objects=1 env=1
+      <- [supports] commit:715868cac74fafdebee6f86ee49aa7a2de0937af (git)
+    (exit=0)
+  [ingest 后] file:b.txt judgments:
+    id=…ecb912fd verdict=held      at=1792807200 cov=1/1 exp=None
+  [ingest 后] evidence: [('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+
+-- 3. 删 b.txt（单历史）+ verify → H3a' --
+  $ jw verify file:b.txt   [root=repo]
+    refuted: file:b.txt（新判断 at=1792904491；旧判断过期 1 条）
+    (exit=1)
+  verify 前: id=…ecb912fd verdict=held
+  verify 后: id=…ecb912fd verdict=held exp=1792904491
+  verify 后: id=…ecb912fd verdict=refuted exp=None
+  $ jw ask file:b.txt   [root=repo]
+    refuted: file:b.txt
+      judgment repo:j:change:1792904491:0caf4f34ecb912fd kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:1792904491:file:b.txt (verify)
+    (exit=1)
+
+-- 4. 删 a.txt（多历史）+ verify --
+  $ jw verify file:a.txt   [root=repo]
+    refuted: file:a.txt（新判断 at=1792904491；旧判断过期 2 条）
+    (exit=1)
+  $ jw ask file:a.txt   [root=repo]
+    refuted: file:a.txt
+      judgment repo:j:change:1792904491:dfda62208f397e48 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:1792904491:file:a.txt (verify)
+    (exit=1)
+  [verify 后] file:a.txt judgments:
+    id=…8f397e48 verdict=held      at=1792807200 cov=1/1 exp=1792904491
+    id=…8f397e48 verdict=held      at=1792810800 cov=1/1 exp=1792904491
+    id=…8f397e48 verdict=refuted   at=1792904491 cov=1/1 exp=None
+  [verify 后] evidence: [('contradicts', 'recheck:1792904491:file:a.txt'), ('supports', 'commit:0a610e27c8b337139ff3225b28c214a07edcb05a'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+
+-- 5. conflicts：已过期的对不该被报（H3d'）--
+  $ jw conflicts   [root=repo]
+    scanned, found 0 conflict pair(s), 0 unresolved
+    (exit=0)
+
+-- 6. 造一对活冲突，跑 resolve（H3b'）--
+  SQL 夹具: file:c.txt 两条判断 at=1792904490(held)/1792904491(refuted)，各带极性证据
+  $ jw ask file:c.txt   [root=repo]
+    conflict: file:c.txt
+      judgment repo:j:change:1792904491:db31ce421bbebc1e kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] fixture:missing:file:c.txt (fixture)
+    (exit=2)
+  $ jw conflicts   [root=repo]
+    scanned, found 1 conflict pair(s), 1 unresolved
+      repo:j:change:1792904491:db31ce421bbebc1e  <->  repo:j:change:1792904490:db31ce421bbebc1e
+    (exit=0)
+  $ jw resolve file:c.txt --verdict held --by pro --why 人工核对：文件仍在   [root=repo]
+    resolved: file:c.txt -> held by pro（旧判断过期 2 条）
+    (exit=0)
+  $ jw ask file:c.txt   [root=repo]
+    held: file:c.txt
+      judgment repo:j:change:1792904492:db31ce421bbebc1e kind=change verdict=held coverage=1/1
+      scope=file objects=1 env=1
+      <- [supports] resolve:cf:repo:j:change:1792904491:db31ce421bbebc1e:repo:j:change:1792904490:db31ce421bbebc1e:人工核对：文件仍在 (resolve)
+    (exit=0)
+  $ jw conflicts   [root=repo]
+    scanned, found 0 conflict pair(s), 0 unresolved
+    (exit=0)
+  [resolve 后] file:c.txt judgments:
+    id=…1bbebc1e verdict=held      at=1792904490 cov=1/1 exp=1792904492
+    id=…1bbebc1e verdict=refuted   at=1792904491 cov=1/1 exp=1792904492
+    id=…1bbebc1e verdict=held      at=1792904492 cov=1/1 exp=None
+  [resolve 后] evidence: [('contradicts', 'fixture:missing:file:c.txt'), ('supports', 'fixture:ok:file:c.txt'), ('supports', 'resolve:cf:repo:j:change:1792904491:db31ce421bbebc1e:repo:j:change:1792904490:db31ce421bbebc1e:人工核对：文件仍在')]
+  resolve 依据: [('resolve:cf:repo:j:change:1792904491:db31ce421bbebc1e:repo:j:change:1792904490:db31ce421bbebc1e:人工核对：文件仍在',)]
+
+-- 7. 分支 A/B（同一快照）："过期谁"决定结论 --
+  分支 A：expire 最新那条（现有 CLI 只能点最新）
+  $ jw expire file:a.txt --at 1792904493   [root=repoA]
+    expired: file:a.txt at 1792904493
+    (exit=0)
+  $ jw ask file:a.txt --as-of 1792904502   [root=repoA]
+    expired: file:a.txt
+    (exit=2)
+  分支 B：SQL 只过期老判断（id=…8f397e48，模拟 expire --id）
+  $ jw ask file:a.txt --as-of 1792904502   [root=repoB]
+    refuted: file:a.txt
+      judgment repo:j:change:1792904491:dfda62208f397e48 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:1792904491:file:a.txt (verify)
+    (exit=1)
+
+== 判定 ==
+H3a'：第 3 步 ask 应为 refuted
+H3b'：第 6 步 resolve 后 ask=held、conflicts 0 unresolved、旧判断 exp 非空
+H3c'：分支 A=expired、分支 B=refuted → 只能靠"新判断+旧全过期"
+H3d'：第 5 步 conflicts 应为 0 pair（已过期的对不报）

@@ -1,0 +1,49 @@
+== E5 · M0 端到端验收 ==
+  [PASS] 1 init
+         expect: exit 0
+  [PASS] 2 ingest 2 commits
+         expect: 2 commits
+  [PASS] 3 change 判断 = 4（a.txt×2 + b.rs + a.md×1？按实际）
+         expect: >=3
+  [PASS] 4 ask file:a.txt = held
+         expect: held
+  [PASS] 5 docs 跑通
+         expect: exit 0
+  [PASS] 6 ask doc:a.md = held
+         expect: held
+  [PASS] 7 parse 跑通
+         expect: exit 0
+  [PASS] 8 ask symbol:b.rs#f = held
+         expect: held
+  [PASS] 9 record 跑通
+         expect: 2 records
+  [PASS] 10 ask decision = held
+         expect: held
+  [PASS] 11 alt-list = 3
+         expect: 3
+  [PASS] 12 why 与 ask 首行一致
+         expect: held: file:a.txt
+  [PASS] 13 verify 删掉的符号 = refuted
+         expect: refuted
+  [PASS] 14 verify 后 ask = refuted
+         expect: refuted
+  [PASS] 15 expire 跑通
+         expect: exit 0
+  [PASS] 16 过期后 ask = expired
+         expect: expired
+  [PASS] 17 conflicts 无对
+         expect: 0 unresolved
+  [PASS] 18 check 四项全 0
+         expect: ok
+  [PASS] 19 无冲突时 resolve = no_conflict
+         expect: no_conflict
+  [PASS] 20 stat.judgment = 各 kind 之和
+         expect: 17 == 17
+  [PASS] 21 evidence >= judgment（每判断至少 1 依据）
+         expect: >= judgment
+
+== 汇总 ==
+  21/21 PASS
+
+  kind 分布: {'change': 6, 'decision': 2, 'doc': 3, 'hypothesis': 3, 'symbol': 3}
+  stat: {'judgment': 17, 'evidence': 17, 'source': 7, 'change': 6, 'snapshot': 2, 'conflict': 0, 'false_cov': 0, 'alt': 3}

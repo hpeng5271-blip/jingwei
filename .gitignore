@@ -1,0 +1,30 @@
+# 构建产物与本地状态：都不进库
+/target/
+/dist/
+/.jingwei/
+*.db
+*.db-shm
+*.db-wal
+*.exe
+*.zip
+
+# 本地工作区：备份 / 实验输出 / 临时 / 抓取原文 / 打包验收残留
+/.pro/tmp/
+/.pro/bak/
+/.pro/release/
+/.pro/exp/out/
+/.pro/exp/zipcheck/
+/.pro/exp/research/
+/.pro/exp/__pycache__/
+
+# .pro/exp 默认全收口，只放行**审查工具链**本身（其余都是实验脚本/日志）
+/.pro/exp/*
+!/.pro/exp/parity-check.ps1
+!/.pro/exp/cdp_step.py
+!/.pro/exp/cdp_eval.py
+
+# 编辑器
+/.idea/
+
+# 依赖
+node_modules/

@@ -1,0 +1,41 @@
+== evidence 4040→4069 审计 ==
+
+[current]
+  judgment=4040 evidence=4069
+  symbol judgment=1971  symbol evidence=2000
+  evidence by instrument=[('tree-sitter', 2000), ('git', 1921), ('docs', 122), ('record', 26)]
+  symbol 判断里依据>1 的 subject 数=29
+    2  symbol:crates/cli/src/main.rs#setup_console
+    2  symbol:crates/cli/src/sandbox_allow.rs#tmp
+    2  symbol:crates/engine/src/graph/file_life.rs#fmt
+    2  symbol:crates/engine/src/graph/index.rs#edge
+    2  symbol:crates/engine/src/graph/rename.rs#plan_rename
+    2  symbol:crates/engine/src/state/scaffold.rs#id
+    2  symbol:crates/engine/src/state/scaffold.rs#parse
+    2  symbol:crates/engine/src/sys/clean.rs#open_exclusive_ok
+  symbol 判断里 subject 多行的=0
+
+[bak-1235(重建后)]
+  judgment=4017 evidence=4024
+  symbol judgment=1971  symbol evidence=1971
+  evidence by instrument=[('tree-sitter', 1971), ('git', 1921), ('docs', 122), ('issue', 10)]
+  symbol 判断里依据>1 的 subject 数=0
+  symbol 判断里 subject 多行的=0
+
+[bak-1250(孤儿修复后)]
+  judgment=4017 evidence=5286
+  symbol judgment=1971  symbol evidence=1971
+  evidence by instrument=[('git', 3183), ('tree-sitter', 1971), ('docs', 122), ('issue', 10)]
+  symbol 判断里依据>1 的 subject 数=0
+  symbol 判断里 subject 多行的=0
+
+[bak-1325(B4.2 前)]
+  judgment=4040 evidence=4040
+  symbol judgment=1971  symbol evidence=1971
+  evidence by instrument=[('tree-sitter', 1971), ('git', 1921), ('docs', 122), ('record', 26)]
+  symbol 判断里依据>1 的 subject 数=0
+  symbol 判断里 subject 多行的=0
+
+== 结论线索 ==
+若 bak-1325 的 symbol evidence=1971 且 current=2000，则差异来自「新 parse 多观测到 29 个同名符号」，
+不是旧代码吃数据——要看 demo 工作树是否变过（git status 只显示备份目录，源树干净）。

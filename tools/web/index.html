@@ -1,0 +1,920 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8" />
+<title>经纬 · 理解层工作台</title>
+<style>
+  :root { --bg:#0f1115; --panel:#151a24; --fg:#e6e8ee; --dim:#8b93a7; --line:#232838; --acc:#7cc4ff; --ok:#5ddc8a; --warn:#ffcf6b; --bad:#ff7a7a; --handle:6px; --bw:1px; --radius:4px; }
+  html[data-theme="mc"] { --bg:#1b1b1b; --panel:#2b2b2b; --fg:#f2f2f2; --dim:#b8b8b8; --line:#000000; --acc:#55ff55; --ok:#55ff55; --warn:#ffaa00; --bad:#ff5555; --bw:1px; --radius:0; }
+  html[data-theme="mc"] #statusbar, html[data-theme="mc"] #left, html[data-theme="mc"] #right, html[data-theme="mc"] #bottom { box-shadow: inset 0 0 0 1px var(--line); }
+  html[data-theme="mc"] #statusbar { background-image:repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 2px, transparent 2px 4px); }
+  html[data-theme="mc"] .muted:empty, html[data-theme="mc"] #hits:empty { background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.05) 0 4px, transparent 4px 8px); }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.55 ui-monospace, Consolas, monospace; display:flex; flex-direction:column; }
+  #statusbar { height:24px; display:flex; gap:12px; align-items:center; padding:0 10px; border-bottom:var(--bw) solid var(--line); color:var(--dim); font-size:12px; }
+  #statusbar b { color:var(--acc); }
+  #shell { flex:1; display:grid; grid-template-columns: 300px var(--handle) 1fr var(--handle) 360px; min-height:0; }
+  #right { display:flex; flex-direction:column; min-height:0; border-left:var(--bw) solid var(--line); }
+  #preview { flex:1; min-height:0; overflow:auto; padding:10px 12px; }
+  #pinned { border-top:var(--bw) solid var(--line); max-height:45%; display:flex; flex-direction:column; }
+  #pinned-tabs { display:flex; gap:6px; padding:6px 8px; border-bottom:var(--bw) solid var(--line); overflow:auto; }
+  #pinned-tabs .tab { padding:2px 8px; border:var(--bw) solid var(--line); border-radius:var(--radius); color:var(--dim); cursor:pointer; white-space:nowrap; }
+  #pinned-tabs .tab.active { border-color:var(--acc); color:var(--fg); }
+  #pinned-body { flex:1; overflow:auto; padding:8px 12px; }
+  #bottom { height:240px; border-top:var(--bw) solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  #bottom.hidden { display:none; }
+  #bottom-tabs { display:flex; gap:8px; padding:4px 8px; border-bottom:var(--bw) solid var(--line); color:var(--dim); font-size:12px; }
+  #bottom-body { flex:1; overflow:auto; padding:8px 12px; }
+  aside#left { min-height:0; overflow:auto; padding:10px; border-right:var(--bw) solid var(--line); }
+  main#main { min-height:0; overflow:auto; padding:12px 16px; }
+  .handle { background:transparent; cursor:col-resize; }
+  .handle:hover { background:#1b2130; }
+  #vhandle { cursor:row-resize; height:var(--handle); }
+  input, button { background:var(--panel); color:var(--fg); border:var(--bw) solid var(--line); border-radius:var(--radius); padding:6px 8px; font:inherit; }
+  button { cursor:pointer; } button:hover { border-color:var(--acc); }
+  .row { display:flex; gap:8px; margin-bottom:8px; }
+  .hit { padding:5px 7px; border:1px solid transparent; border-radius:var(--radius); cursor:pointer; }
+  .hit:hover, .hit.sel { border-color:var(--line); background:var(--panel); }
+  .k, .muted { color:var(--dim); }
+  .v-held { color:var(--ok); } .v-refuted { color:var(--bad); } .v-uncertain { color:var(--warn); }
+  h2 { font-size:13px; margin:0 0 6px; color:var(--acc); font-weight:600; }
+  h3 { font-size:12px; margin:14px 0 5px; color:var(--dim); font-weight:600; }
+  table { border-collapse:collapse; width:100%; }
+  td, th { text-align:left; padding:2px 10px 2px 0; vertical-align:top; }
+  th { color:var(--dim); font-weight:400; }
+  pre { background:var(--panel); border:var(--bw) solid var(--line); border-radius:6px; padding:8px; overflow:auto; }
+  .pill { font-size:11px; border:var(--bw) solid var(--line); border-radius:999px; padding:0 7px; color:var(--dim); }
+  #palette { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding-top:12vh; }
+  #palette.open { display:flex; }
+  #palette-box { width:min(640px, 90vw); background:var(--panel); border:var(--bw) solid var(--line); border-radius:8px; padding:10px; }
+  #selftest { display:none; }
+  .hover-card { position:fixed; width:380px; z-index:50; background:var(--panel); border:var(--bw) solid var(--line); border-radius:var(--radius); padding:8px 10px; box-shadow:0 6px 18px rgba(0,0,0,.35); }
+  .hover-card .hv-src { float:right; font-size:11px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:0 6px; }
+  .hover-card .hv-type { color:var(--fg); white-space:pre-wrap; margin:4px 0; }
+  .hover-card .hv-doc { color:var(--dim); border-top:1px dashed var(--line); padding-top:4px; white-space:pre-wrap; font-size:12px; }
+  .hover-card .hv-type.unknown { color:var(--warn); }
+  .hint { color:var(--dim); background:rgba(124,196,255,.08); border-left:2px solid var(--line); margin-left:6px; padding:0 3px; font-style:italic; }
+  .hint[data-src="db"] { border-left-color:var(--warn); }
+  .code-row td { padding:0 8px 0 0; }
+  .code-row .ln { color:var(--dim); text-align:right; width:48px; user-select:none; }
+  .code-row.cur { background:var(--panel); }
+  .code-row.err .src { text-decoration:underline wavy var(--bad); text-underline-offset:3px; }
+  .code-row.warn .src { text-decoration:underline wavy var(--warn); text-underline-offset:3px; }
+  .src .k { color:#7cc4ff; } .src .s { color:#5ddc8a; } .src .c { color:#6b7280; font-style:italic; }
+  #crumb { color:var(--dim); font-size:12px; margin-bottom:6px; }
+  #cur-symbol { color:var(--acc); font-size:12px; margin-bottom:8px; }
+  #bottom-tabs button { background:none; border:var(--bw) solid var(--line); color:var(--dim); border-radius:var(--radius); padding:1px 8px; font-size:12px; }
+  #bottom-tabs button.on { border-color:var(--acc); color:var(--fg); }
+  .pb-item { padding:3px 6px; cursor:pointer; }
+  .pb-item:hover { background:var(--panel); }
+  .chip { display:inline-block; margin-left:6px; padding:0 6px; border:var(--bw) solid var(--line); border-radius:999px; color:var(--acc); font-size:11px; cursor:pointer; }
+  .ca-detail { display:block; margin-top:4px; color:var(--dim); font-size:11px; }
+</style>
+<header id="statusbar">
+  <b>经纬</b><span id="conn">connecting…</span><span id="repo" class="muted"></span>
+  <span style="flex:1"></span><span id="statline" class="muted"></span><button id="theme-btn" title="切换主题（t）">密</button>
+</header>
+<div id="shell">
+  <aside id="left">
+    <div class="row"><input id="q" placeholder="找符号 / 文件 / 目录…" style="flex:1" /><button id="search">搜</button></div>
+    <div id="hits" class="muted">输入名字；`/` 聚焦，Enter 打开，p 钉住</div>
+    <h3>仓库概览</h3><div id="overview" class="muted">…</div>
+  </aside>
+  <div class="handle" id="hleft"></div>
+  <main id="main"><div class="muted">从左边搜一个名字，或点概览统计。</div></main>
+  <div class="handle" id="hright"></div>
+  <aside id="right">
+    <div id="preview"><div class="muted">preview 槽（单占；跳转 = 替换，不嵌套）</div></div>
+    <div id="pinned">
+      <div id="pinned-tabs"><span class="muted">pinned（可多个，p 键钉住）</span></div>
+      <div id="pinned-body" class="muted">—</div>
+    </div>
+  </aside>
+</div>
+<div id="vhandle" class="handle"></div>
+<div id="bottom">
+  <div id="bottom-tabs"><span class="tab">检查器</span><span class="tab muted">终端（M3 占位，M4 接）</span></div>
+  <div id="bottom-body" class="muted">选中卡片的测试 / 影响 / 证据会落在这里。</div>
+</div>
+<div id="palette"><div id="palette-box"><div class="row"><input id="pq" placeholder="搜索一切（文件/符号/测试/文档）" style="flex:1" /></div><div id="presults" class="muted"></div></div></div>
+<pre id="selftest">{}</pre>
+<script>
+const $ = (s) => document.querySelector(s);
+const SELFTEST = new URLSearchParams(location.search).get("selftest");
+let REPO = "?";
+const LAYOUT_KEY = () => `jw:${REPO}:1`;
+const S = { preview: null, pinned: [], origin: null, focus: "main", ratio: { right: 360, bottom: 240 }, collapsed: { bottom: false } };
+
+async function rpc(action, extra = {}) {
+  const r = await fetch("/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || j.result?.reason || "rpc failed");
+  return j.result;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const money = (n) => Number(n || 0).toLocaleString();
+const vclass = (v) => "v-" + (v === "held" || v === "refuted" ? v : "uncertain");
+
+// ---------- 布局持久化（只存本地） ----------
+function saveLayout() {
+  try {
+    localStorage.setItem(LAYOUT_KEY(), JSON.stringify({ ratio: S.ratio, pinned: S.pinned.map((p) => p.subject), collapsed: S.collapsed }));
+    return true;
+  } catch { return false; }
+}
+function loadLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY());
+    if (!raw) return false;
+    const v = JSON.parse(raw);
+    if (v.ratio) S.ratio = { right: v.ratio.right || 360, bottom: v.ratio.bottom || 240 };
+    if (Array.isArray(v.pinned)) S.pinned = v.pinned.map((subject) => ({ subject }));
+    if (v.collapsed) S.collapsed = v.collapsed;
+    applyLayout();
+    return true;
+  } catch { return false; }
+}
+function applyLayout() {
+  $("#shell").style.gridTemplateColumns = `300px var(--handle) 1fr var(--handle) ${S.ratio.right}px`;
+  $("#bottom").style.height = `${S.ratio.bottom}px`;
+  $("#bottom").classList.toggle("hidden", !!S.collapsed.bottom);
+}
+
+// ---------- 槽位与跳转（单层 origin，不许嵌套） ----------
+function setFocus(slot) {
+  S.focus = slot;
+  document.querySelectorAll("#main,#preview,#pinned,#left,#bottom").forEach((el) => el.classList.remove("focused"));
+  const sel = { main: "#main", preview: "#preview", pinned: "#pinned", left: "#left", bottom: "#bottom" }[slot];
+  if (sel) $(sel).classList.add("focused");
+}
+function openSubject(subject, slot = "preview") {
+  slot = slot || "preview";
+  if (slot === "main") { openInMain(subject); return; }
+  if (S.preview && S.preview.subject !== subject) S.origin = { ...S.preview }; // 只留一层
+  S.preview = { subject, scroll: 0 };
+  renderPreview();
+  setFocus("preview");
+  saveLayout();
+  return S.preview;
+}
+function back() {
+  if (S.origin) {
+    const o = S.origin;
+    S.origin = null;
+    S.preview = o;
+    renderPreview();
+    if (o.subject && o.subject.startsWith("file:")) {
+      const p = o.subject.replace(/^file:/, "").split("#")[0];
+      showCodeView(p, o.line || 1);
+    }
+    setFocus("preview");
+    return true;
+  }
+  return false;
+}
+function pin(subject) {
+  const s = subject || (S.preview && S.preview.subject);
+  if (!s) return false;
+  if (!S.pinned.some((p) => p.subject === s)) S.pinned.push({ subject: s });
+  renderPinned();
+  saveLayout();
+  return true;
+}
+function unpin(subject) {
+  S.pinned = S.pinned.filter((p) => p.subject !== subject);
+  renderPinned();
+  saveLayout();
+}
+function renderPreview() {
+  const subj = S.preview && S.preview.subject;
+  $("#preview").innerHTML = subj
+    ? `<div class="muted">preview · ${esc(subj)}</div>${cardShell(subj)}`
+    : `<div class="muted">preview 槽（Esc 返回 origin；只留一层）</div>`;
+  if (subj && getComputedStyle(document.getElementById("selftest")).display !== "none") hydrate("#preview", subj);
+  else if (subj) hydrate("#preview", subj);
+}
+function renderPinned() {
+  const tabs = $("#pinned-tabs");
+  tabs.innerHTML = `<span class="muted">pinned</span>` + S.pinned.map((p, i) =>
+    `<span class="tab ${i === 0 ? "active" : ""}" data-s="${esc(p.subject)}">${esc(p.subject.split("#").pop())}</span>`).join("");
+  tabs.querySelectorAll(".tab[data-s]").forEach((el) => el.onclick = () => { S.preview = { subject: el.dataset.s, scroll: 0 }; renderPreview(); });
+  $("#pinned-body").innerHTML = S.pinned.length ? S.pinned.map((p) => cardShell(p.subject)).join("<hr/>") : "—";
+  S.pinned.forEach((p) => hydrate("#pinned-body", p.subject));
+}
+function cardShell(subj) {
+  return `<div class="muted">${esc(subj)}</div><div data-card="${esc(subj)}" class="muted">载入…</div>`;
+}
+async function openInMain(subject) {
+  const path = subject.replace(/^file:/, "").replace(/^symbol:/, "").split("#")[0];
+  if (subject.startsWith("file:") || subject.startsWith("symbol:")) { await showCodeView(path); return; }
+  $("#main").innerHTML = `<h2>${esc(subject)}</h2>`;
+  setFocus("main");
+}
+async function renderMain(subject) {
+  $("#main").innerHTML = `<h2>${esc(subject)}</h2><div class="muted">main 槽 · ${esc(subject)}</div>`;
+}
+async function hydrate(rootSel, subject) {
+  const slot = $(rootSel);
+  const target = slot.querySelector(`[data-card="${CSS.escape(subject)}"]`);
+  if (!target) return;
+  try {
+    if (subject.startsWith("file:") || subject.startsWith("symbol:")) {
+      const path = subject.replace(/^file:/, "").replace(/^symbol:/, "").split("#")[0];
+      const [cardResp, imp, tfor] = await Promise.all([
+        rpc("card", { path }).catch(() => null),
+        rpc("impact", { target: subject }).catch(() => null),
+        subject.startsWith("symbol:") ? rpc("tests_for", { target: subject }).catch(() => null) : Promise.resolve(null),
+      ]);
+      const card = (cardResp && cardResp.card) || {};
+      const syms = card.symbols || {}, tests = card.tests || {};
+      target.innerHTML = `
+        <table>
+          <tr><th>路径</th><td>${esc(path)}</td></tr>
+          <tr><th>判定</th><td><span class="${vclass((card.state || "").split("(")[0])}">${esc(card.state || "no_data")}</span></td></tr>
+          <tr><th>符号</th><td>${money(syms.definitions)} 定义 / ${money(syms.judgments)} 判断</td></tr>
+          <tr><th>测试</th><td>${money(tests.n)}${tests.macro_n ? `（macro ${money(tests.macro_n)}）` : ""}</td></tr>
+          <tr><th>影响</th><td>${imp && !imp.reason ? `direct ${money((imp.direct || []).length)} · trans ${money((imp.transitive || []).length)} · tests ${money((imp.tests || {}).items?.length || 0)}（file 级）` : "—"}</td></tr>
+          <tr><th>可能的测试</th><td>${tfor && !tfor.reason ? money((tfor.tests || []).length) + " 个（静态可达）" : "—"}</td></tr>
+        </table>`;
+    } else {
+      target.textContent = subject;
+    }
+  } catch (e) {
+    target.textContent = "载入失败：" + e.message;
+  }
+}
+
+// ---------- 代码视图 + Problems（P0-1 / P0-3） ----------
+const CODE = { path: null, line: 1, problems: [], filter: "all", source: "db" };
+const KW = /\b(fn|pub|struct|enum|impl|trait|let|mut|use|mod|match|if|else|for|while|loop|return|self|Self|crate|super|async|await|move|ref|where|dyn|const|static|type|unsafe|extern|in|as|break|continue)\b/g;
+function hl(line) {
+  let s = esc(line);
+  s = s.replace(/(\/\/.*)$/, '<span class="c">$1</span>');
+  s = s.replace(/(&quot;[^&]*?&quot;)/g, '<span class="s">$1</span>');
+  s = s.replace(KW, '<span class="k">$&</span>');
+  return s;
+}
+function sevOf(problems, line) {
+  let sev = "";
+  for (const p of problems) {
+    if (p.line !== line) continue;
+    if (p.severity === "error") return "err";
+    if (p.severity === "warning") sev = "warn";
+    else if (!sev) sev = "info";
+  }
+  return sev;
+}
+async function showCodeView(path, line = 1) {
+  CODE.path = path;
+  const wantReal = new URLSearchParams(location.search).get("lsp") === "real";
+  if (wantReal) { const b = $("#pb-src"); if (b) b.textContent = "分析中…"; }
+  const real = wantReal ? await rpc("lsp_real", { path }).catch(() => null) : null;
+  const [f, pr, card, lsp] = await Promise.all([
+    rpc("file", { path, start: 1, end: 400 }).catch(() => null),
+    rpc("problems", { path }).catch(() => null),
+    rpc("card", { path }).catch(() => null),
+    rpc("lsp_diagnostics", { path, mode: "push" }).catch(() => null),
+  ]);
+  // 优先 lsp；降级时保留 db/fixture 并显式标注（不混来源）
+  if (real && !real.degraded && (real.items || []).length) {
+    CODE.problems = real.items;
+    CODE.source = "lsp（" + (real.provider || "ra") + " / " + (real.capabilities_used || "pull") + "）";
+  } else if (real && (real.skip || real.degraded)) {
+    CODE.problems = (pr && pr.items) || [];
+    CODE.source = "db（降级：" + (real.skip || "server_down") + "）";
+  } else if (lsp && !lsp.degraded && (lsp.items || []).length) {
+    CODE.problems = lsp.items;
+    CODE.source = "lsp";
+  } else {
+    CODE.problems = (pr && pr.items) || [];
+    CODE.source = lsp && lsp.degraded ? "db（降级：" + (lsp.reason || "server_down") + "）" : "db";
+  }
+  CODE.line = line;
+  const syms = (card && card.card && card.card.symbols) || {};
+  const total = (f && f.total) || 0;
+  $("#main").innerHTML = `
+    <div id="crumb">${esc(path)}${total ? " · " + total + " 行" : ""}</div>
+    <div id="cur-symbol">当前符号：${esc((syms.kinds && Object.keys(syms.kinds)[0]) || "—")} ｜ 符号 ${money(syms.definitions)} 定义</div>
+    <table id="code-table">${((f && f.lines) || []).map((l, i) => {
+      const n = i + 1 + ((f && f.start) || 1) - 1;
+      return `<tr class="code-row ${sevOf(CODE.problems, n)} ${n === CODE.line ? "cur" : ""}" data-line="${n}"><td class="ln">${n}</td><td class="src">${hl(l)}</td></tr>`;
+    }).join("")}</table>
+    ${f && f.truncated ? '<div class="muted">（只显示前 400 行）</div>' : ""}
+    <div id="problems-panel" class="muted">诊断 ${CODE.problems.length} 条 · 来源 <span class="pill" id="problems-source">${esc(CODE.source)}</span></div>`;
+  document.querySelectorAll(".code-row").forEach((tr) => tr.onclick = () => setCodeLine(Number(tr.dataset.line)));
+  const hintBtn = document.createElement("button");
+  hintBtn.id = "hint-btn";
+  hintBtn.textContent = "类型提示 (Alt+H)";
+  hintBtn.style.marginLeft = "8px";
+  hintBtn.onclick = () => toggleHints();
+  $("#cur-symbol").appendChild(hintBtn);
+  const hintBadge = document.createElement("span");
+  hintBadge.id = "hint-src";
+  hintBadge.className = "pill";
+  hintBadge.textContent = HINTS.on ? "hints: …" : "hints: off";
+  hintBadge.style.marginLeft = "8px";
+  $("#cur-symbol").appendChild(hintBadge);
+  const refBtn = document.createElement("button");
+  refBtn.id = "ref-btn";
+  refBtn.textContent = "引用 (r)";
+  refBtn.style.marginLeft = "8px";
+  refBtn.onclick = () => showReferences(path, CODE.line, 9);
+  $("#cur-symbol").appendChild(refBtn);
+  bindHover(document.getElementById("code-table"), path);
+  document.querySelectorAll(".code-row").forEach((tr) => {
+    tr.addEventListener("dblclick", (e) => {
+      const col = Math.max(1, Math.floor((e.offsetX || 0) / 7.6) + 1);
+      jumpToDef(Number(tr.dataset.line), col);
+    });
+  });
+  renderProblems();
+  setFocus("main");
+  const mainEl = $("#main");
+  mainEl.onscroll = () => {
+    if (!HINTS.on) return;
+    clearTimeout(HINTS.timer);
+    HINTS.timer = setTimeout(() => fetchHints(), 150);
+  };
+  return { lines: (f && f.lines) || [], problems: CODE.problems, src: (pr && pr.source) || "db" };
+}
+function setCodeLine(n) {
+  CODE.line = n;
+  document.querySelectorAll(".code-row").forEach((tr) => tr.classList.toggle("cur", Number(tr.dataset.line) === n));
+  const el = document.querySelector('.code-row[data-line="' + n + '"]');
+  if (el) el.scrollIntoView({ block: "center" });
+}
+function renderProblems() {
+  const list = CODE.filter === "all" ? CODE.problems : CODE.problems.filter((p) => p.severity === CODE.filter);
+  $("#bottom-body").innerHTML = `
+    <div class="row" id="problems-filter">
+      ${["all", "error", "warning", "info"].map((f) => `<button data-f="${f}" class="${CODE.filter === f ? "on" : ""}">${f === "all" ? "全部" : f} (${f === "all" ? CODE.problems.length : CODE.problems.filter((p) => p.severity === f).length})</button>`).join("")}
+      <span class="pill" id="pb-src">source: ${esc(CODE.source)}</span>
+    </div>
+    <div id="problems-list">${list.length ? list.map((p) => `<div class="pb-item" data-line="${p.line}"><span class="${p.severity === "error" ? "v-refuted" : p.severity === "warning" ? "v-uncertain" : "muted"}">${esc(p.severity)}</span> ${esc(p.message)} <span class="muted">:${p.line}</span></div>`).join("") : '<div class="muted">无诊断</div>'}</div>`;
+  document.querySelectorAll("#problems-filter button").forEach((b) => b.onclick = () => { CODE.filter = b.dataset.f; renderProblems(); });
+  document.querySelectorAll(".pb-item").forEach((el) => el.onclick = () => {
+    setCodeLine(Number(el.dataset.line));
+    const p = CODE.problems.find((x) => x.line === Number(el.dataset.line)) || CODE.problems[0];
+    if (p) attachActions(el, CODE.path, p.line, p.col || 1, p.message || "", p.severity === "error" ? 1 : p.severity === "warning" ? 2 : 3);
+  });
+}
+
+// ---------- RA codeAction（只读展示：chips 在 Problems 行尾；点击只展开，不 apply） ----------
+const ACTIONS = { requests: 0, applied: 0, chips: 0 };
+window.__JW_ACTIONS = ACTIONS;
+async function attachActions(problemEl, path, line, col, message, severity) {
+  if (!(CODE.source || "").startsWith("lsp")) return null;
+  ACTIONS.requests++;
+  const r = await rpc("lsp_actions", { path, line, col, message, severity }).catch(() => null);
+  const actions = (r && r.actions) || [];
+  let box = problemEl.querySelector(".ca-chips");
+  if (!box) { box = document.createElement("span"); box.className = "ca-chips"; problemEl.appendChild(box); }
+  box.innerHTML = actions.map((a, i) =>
+    `<span class="chip" data-i="${i}" title="${esc(a.kind)} · ${esc(a.source)}">${esc(a.title)}</span>`).join("");
+  ACTIONS.chips = actions.length;
+  box.querySelectorAll(".chip").forEach((chip) => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      const a = actions[Number(chip.dataset.i)];
+      let det = box.querySelector(".ca-detail");
+      if (det && det.dataset.i === chip.dataset.i) { det.remove(); return; }
+      if (!det) { det = document.createElement("div"); det.className = "ca-detail"; box.appendChild(det); }
+      det.dataset.i = chip.dataset.i;
+      det.textContent = `${a.title} · kind=${a.kind} · source=${a.source}`;
+      // 只展开；绝不 apply（applied 恒为 0）
+    };
+  });
+  return r;
+}
+
+// ---------- RA inlay hints（Alt+H；可视区；150ms 去抖；seq 丢弃 stale） ----------
+const HINTS = { on: false, seq: 0, timer: null, last: { start: 0, end: 0 }, stats: { requests: 0, stale: 0, applied: 0, rendered: 0 } };
+window.__JW_HINTS = HINTS;
+function visibleRange() {
+  const main = $("#main");
+  const rowH = 20;
+  const first = Math.max(1, Math.floor((main.scrollTop || 0) / rowH) + 1);
+  const visible = Math.ceil((main.clientHeight || 600) / rowH) + 2;
+  const total = document.querySelectorAll(".code-row").length || visible;
+  const last = Math.min(total || first + visible, first + visible);
+  return [first, Math.max(first, last)];
+}
+function clearHints() {
+  document.querySelectorAll(".code-row .hint").forEach((el) => el.remove());
+  HINTS.stats.rendered = 0;
+}
+function applyHints(hints, seq, source = "lsp") {
+  if (seq !== HINTS.seq) { HINTS.stats.stale++; return false; }
+  clearHints();
+  let n = 0;
+  for (const h of hints || []) {
+    const row = document.querySelector(`.code-row[data-line="${h.line}"] .src`);
+    if (!row) continue;
+    const span = document.createElement("span");
+    span.className = "hint";
+    span.dataset.src = source;
+    span.textContent = h.label;
+    row.appendChild(span);
+    n++;
+  }
+  HINTS.stats.applied++;
+  HINTS.stats.rendered = n;
+  return true;
+}
+window.__hintApply = applyHints;
+async function fetchHints() {
+  if (!HINTS.on) return { requests: 0, skipped: "off" };
+  const seq = ++HINTS.seq;
+  HINTS.stats.requests++;
+  const [start, end] = visibleRange();
+  HINTS.last = { start, end };
+  const r = await rpc("lsp_hints", { path: CODE.path, start, end }).catch(() => null);
+  const badge = document.getElementById("hint-src");
+  if (!r) { if (badge) badge.textContent = "hints: db"; return null; }
+  if (r.source === "lsp") {
+    applyHints(r.hints, seq, "lsp");
+    if (badge) badge.textContent = `hints: lsp${r.truncated ? " · 截断 200" : ""}`;
+  } else {
+    applyHints([], seq, "db");
+    if (badge) badge.textContent = `hints: db (${r.skip || "降级"})`;
+  }
+  return r;
+}
+function toggleHints() {
+  HINTS.on = !HINTS.on;
+  clearTimeout(HINTS.timer);
+  if (!HINTS.on) { clearHints(); const b = document.getElementById("hint-src"); if (b) b.textContent = "hints: off"; return false; }
+  fetchHints();
+  return true;
+}
+window.__jwToggleHints = toggleHints;
+
+// ---------- RA references（inspector 按文件分组；点击=一跳；只读） ----------
+function groupRefs(targets) {
+  const groups = new Map();
+  for (const t of targets) {
+    const f = t.file || "?";
+    if (!groups.has(f)) groups.set(f, []);
+    groups.get(f).push(t);
+  }
+  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+async function jumpToTarget(tgt, meta) {
+  if (!tgt) return false;
+  const cur = (S.preview && S.preview.subject) || (CODE.path ? `file:${CODE.path}` : null);
+  const subj = `file:${tgt.file}`;
+  if (cur && (cur !== subj || CODE.line !== tgt.line)) {
+    S.origin = S.preview ? { ...S.preview } : { subject: cur, line: CODE.line };
+  }
+  S.preview = { subject: subj, scroll: 0, line: tgt.line };
+  $("#preview").innerHTML = `<div class="muted">preview · ${esc(tgt.file)}:${esc(tgt.line)} ${defBadge(meta?.source || "lsp", meta?.precision || "high", meta?.skip)}</div>`;
+  await showCodeView(tgt.file, tgt.line);
+  setFocus("preview");
+  return true;
+}
+async function showReferences(file, line, col) {
+  const box = $("#bottom-body");
+  box.innerHTML = `<span class="muted">分析中…（RA references）</span>`;
+  const t0 = performance.now();
+  const r = await rpc("lsp_ref", { path: file, line, col }).catch(() => null);
+  const ms = performance.now() - t0;
+  if (!r) { box.innerHTML = `<span class="muted">引用不可用</span>`; return null; }
+  const groups = groupRefs(r.targets || []);
+  const total = (r.targets || []).length;
+  const cov = r.coverage ? ` · 覆盖 ${r.coverage.resolved}/${r.coverage.resolved + r.coverage.unresolved}` : "";
+  box.innerHTML = `
+    <div class="row">${defBadge(r.source, r.precision, r.skip)}
+      <span class="muted" id="ref-meta">${total} 条 · ${groups.length} 文件 · ${ms.toFixed(0)}ms${cov}${r.skip ? " · " + esc(r.skip) : ""}</span></div>
+    <div id="ref-groups">${groups.map(([f, items]) => `
+      <div class="ref-group" data-file="${esc(f)}">
+        <div class="muted">${esc(f)} ×${items.length}</div>
+        ${items.map((x) => `<div class="hit" data-file="${esc(x.file)}" data-line="${esc(x.line)}" data-col="${esc(x.col || 1)}">${esc(x.line)}:${esc(x.col || 1)}</div>`).join("")}
+      </div>`).join("") || '<div class="muted">没有引用（skip: ' + esc(r.skip || "none") + "）</div>"}</div>`;
+  document.querySelectorAll("#ref-groups .hit").forEach((el) => el.onclick = () => {
+    jumpToTarget({ file: el.dataset.file, line: Number(el.dataset.line), col: Number(el.dataset.col) }, r);
+  });
+  return { ...r, ms, groups: groups.length };
+}
+
+// ---------- RA definition（接 jump 模型：单目标=替换 preview；多目标=候选，选中仍算一跳） ----------
+function defBadge(source, precision, skip) {
+  return `<span class="pill" id="def-src">source: ${source}${precision ? " · " + precision : ""}${skip ? " · " + skip : ""}</span>`;
+}
+async function jumpToDef(line, col = 1) {
+  const path = CODE.path;
+  if (!path) return false;
+  const r = await rpc("lsp_def", { path, line, col }).catch(() => null);
+  const targets = (r && r.targets) || [];
+  if (!targets.length) {
+    $("#preview").innerHTML = `<div class="muted">没有定义可跳（${esc((r && r.skip) || "no_definition")}）</div>`;
+    return false;
+  }
+  if (targets.length === 1) {
+    const tgt = targets[0];
+    const cur = (S.preview && S.preview.subject) || (CODE.path ? `file:${CODE.path}` : null);
+    if (cur && (cur !== `file:${tgt.file}` || CODE.line !== tgt.line)) {
+      S.origin = S.preview ? { ...S.preview } : { subject: cur, line: CODE.line };
+    }
+    S.preview = { subject: `file:${tgt.file}`, scroll: 0, line: tgt.line };
+    $("#preview").innerHTML = `<div class="muted">preview · ${esc(tgt.file)}:${tgt.line} ${defBadge(r.source, r.precision, r.skip)}</div>`;
+    renderInspector(`file:${tgt.file}`);
+    await showCodeView(tgt.file, tgt.line);
+    setFocus("preview");
+    return true;
+  }
+  showDefCandidates(targets);
+  return true;
+}
+function showDefCandidates(targets) {
+  $("#preview").innerHTML = `
+    <div class="muted">定义候选 ${targets.length} 个（选中仍算一跳，不建栈） ${defBadge("lsp", "high", "")}</div>
+    <div id="def-candidates">${targets.map((t, i) => `<div class="hit" data-i="${i}">${esc(t.file)}:${esc(t.line)}</div>`).join("")}</div>`;
+  document.querySelectorAll("#def-candidates .hit").forEach((el) => el.onclick = async () => {
+    const tgt = targets[Number(el.dataset.i)];
+    const cur = (S.preview && S.preview.subject) || (CODE.path ? `file:${CODE.path}` : null);
+    if (cur && (cur !== `file:${tgt.file}` || CODE.line !== tgt.line)) {
+      S.origin = S.preview ? { ...S.preview } : { subject: cur, line: CODE.line };
+    }
+    S.preview = { subject: `file:${tgt.file}`, scroll: 0, line: tgt.line };
+    $("#preview").innerHTML = `<div class="muted">preview · ${esc(tgt.file)}:${tgt.line} ${defBadge("lsp", "high", "")}</div>`;
+    await showCodeView(tgt.file, tgt.line);
+    setFocus("preview");
+  });
+}
+
+// ---------- RA hover（300ms 延迟；380px；type/doc 分区；来源角标） ----------
+let HOVER = { timer: null, el: null };
+function hideHover() {
+  clearTimeout(HOVER.timer);
+  if (HOVER.el) { HOVER.el.remove(); HOVER.el = null; }
+}
+async function showHover(path, line, col, x, y) {
+  hideHover();
+  const card = document.createElement("div");
+  card.className = "hover-card";
+  card.style.left = Math.min(window.innerWidth - 400, Math.max(8, x + 12)) + "px";
+  card.style.top = Math.min(window.innerHeight - 160, y + 12) + "px";
+  card.innerHTML = `<span class="hv-src">…</span><div class="hv-type muted">载入…</div>`;
+  document.body.appendChild(card);
+  HOVER.el = card;
+  const r = await rpc("lsp_hover", { path, line, col }).catch(() => null);
+  const ok = r && !r.degraded && r.type;
+  card.innerHTML = `
+    <span class="hv-src">${ok ? "source: lsp" : "source: db"}</span>
+    <div class="hv-type ${ok ? "" : "unknown"}">${esc(ok ? r.type : "类型未知")}</div>
+    ${ok && r.doc ? `<div class="hv-doc">${esc(r.doc)}</div>` : `<div class="hv-doc">${esc(ok ? "" : (r && r.skip ? "降级：" + r.skip : "未信任/无 server/超时都不猜"))}</div>`}`;
+  return r;
+}
+function bindHover(codeTable, path) {
+  codeTable.querySelectorAll(".code-row").forEach((tr) => {
+    tr.addEventListener("mouseenter", (e) => {
+      const line = Number(tr.dataset.line);
+      clearTimeout(HOVER.timer);
+      HOVER.timer = setTimeout(() => showHover(path, line, 9, e.clientX, e.clientY), 300);
+    });
+    tr.addEventListener("mouseleave", hideHover);
+  });
+}
+
+// ---------- 主题（token 层；切主题不改布局） ----------
+const THEME_KEY = "jw:theme";
+function currentTheme() { return document.documentElement.getAttribute("data-theme") || "dense"; }
+function applyTheme(name) {
+  const t0 = performance.now();
+  document.documentElement.setAttribute("data-theme", name === "mc" ? "mc" : "dense");
+  try { localStorage.setItem(THEME_KEY, currentTheme()); } catch {}
+  const btn = document.getElementById("theme-btn");
+  if (btn) btn.textContent = currentTheme() === "mc" ? "MC" : "密";
+  return performance.now() - t0;
+}
+function toggleTheme() { applyTheme(currentTheme() === "mc" ? "dense" : "mc"); }
+function initTheme() {
+  let t = "dense";
+  try { t = localStorage.getItem(THEME_KEY) || new URLSearchParams(location.search).get("theme") || "dense"; } catch {}
+  applyTheme(t);
+}
+
+// ---------- 检查器卡片（symbol/test/call/impact/problems，≤4 组） ----------
+async function renderInspectorInline(subject) {
+  renderInspector(subject);
+  for (let i = 0; i < 60; i++) {
+    if (!/载入/.test($("#inspector-body")?.textContent || "")) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return true;
+}
+function renderInspector(subject) {
+  const box = $("#bottom-body");
+  if (!subject) { box.innerHTML = '<span class="muted">选中卡片后显示检查器</span>'; return; }
+  box.innerHTML = `<div class="muted">${esc(subject)}</div><div id="inspector-body" class="muted">载入…</div>`;
+  const body = $("#inspector-body");
+  const path = subject.replace(/^file:/, "").replace(/^symbol:/, "").split("#")[0];
+  Promise.all([
+    rpc("card", { path }).catch(() => null),
+    rpc("impact", { target: subject }).catch(() => null),
+    rpc("problems", { path }).catch(() => null),
+    subject.startsWith("symbol:") ? rpc("tests_for", { target: subject }).catch(() => null) : Promise.resolve(null),
+  ]).then(([c, imp, pr, tf]) => {
+    const card = (c && c.card) || {};
+    const groups = [];
+    if (subject.startsWith("symbol:")) {
+      groups.push(`<div class="icard" data-card="symbol"><h3>符号</h3><div>${esc(subject.split("#").pop())} · 测试 ${money(((card.tests||{}).n)||0)}</div></div>`);
+    }
+    if (subject.startsWith("test:")) {
+      groups.push(`<div class="icard" data-card="test"><h3>测试</h3><div>${esc(subject.split("#").pop())}</div></div>`);
+    }
+    if (card.edges || (card.edges||{}).use) {
+      groups.push(`<div class="icard" data-card="call"><h3>调用</h3><div>导入 ${money(((card.edges||{}).use||{}).internal||0)} 内部 · 实现 ${money((card.edges||{}).impl||0)}</div></div>`);
+    }
+    if (imp && !imp.reason) {
+      groups.push(`<div class="icard" data-card="impact"><h3>影响</h3><div>direct ${money((imp.direct||[]).length)}${imp.direct_truncated ? "（截断）" : ""} · trans ${money((imp.transitive||[]).length)} · tests ${money(((imp.tests||{}).items||[]).length)}（file 级）</div></div>`);
+    }
+    if (pr && (pr.items||[]).length) {
+      groups.push(`<div class="icard" data-card="problems"><h3>诊断</h3><div>${money(pr.items.length)} 条 <span class="pill">source: db</span></div></div>`);
+    }
+    body.innerHTML = groups.slice(0, 4).join("") || '<span class="muted">没有可显示的信息</span>';
+  }).catch((e) => { body.textContent = "载入失败：" + e.message; });
+}
+
+// ---------- 概览与搜索 ----------
+async function overview() {
+  const st = await rpc("stat");
+  REPO = st.repo || REPO; $("#repo").textContent = REPO;
+  const cov = await rpc("coverage").catch(() => ({}));
+  const tests = (cov.tests?.standard || 0) + (cov.tests?.macro || 0);
+  const call = cov.call || {};
+  $("#overview").innerHTML = `
+    <table>
+      <tr><th>判断</th><td>${money(st.judgment)}</td></tr>
+      <tr><th>依据</th><td>${money(st.evidence)}</td></tr>
+      <tr><th>改动</th><td>${money(st.change)}</td></tr>
+      <tr><th>测试</th><td>${money(tests)}</td></tr>
+      <tr><th>调用</th><td>${money(call.total)} <span class="muted">已解析 ${money(call.resolved)} / 未解析 ${money(call.unresolved)}</span></td></tr>
+    </table>`;
+  let ra = "";
+  try {
+    const info = await rpc("lsp_ra_info");
+    ra = info && info.found ? ` · RA ${String(info.version || "").replace("rust-analyzer ", "")}` : " · RA 未发现";
+  } catch {}
+  $("#statline").textContent = `write_seq ${st.write_seq}${ra}`;
+}
+async function search() {
+  const term = $("#q").value.trim();
+  if (!term) return;
+  const r = await rpc("find", { term });
+  const hits = r.hits || [];
+  if (!hits.length) {
+    try {
+      const card = await rpc("card", { path: term });
+      if ((card.mode || "").startsWith("range")) {
+        $("#preview").innerHTML = `<h3>模块 ${esc(term)}</h3><div>文件 ${money(card.files)} · 定义 ${money(card.symbols.definitions)} · 测试 ${money(card.tests.total)} · 调用 ${money(card.call.total)}</div>`;
+        return;
+      }
+    } catch {}
+    $("#hits").textContent = "没有匹配";
+    return;
+  }
+  $("#hits").innerHTML = hits.slice(0, 60).map((h, i) => `
+    <div class="hit" data-i="${i}">
+      <div><span class="${vclass(h.verdict)}">●</span> ${esc(h.name || h.subject)}</div>
+      <div class="muted">${esc(h.kind)}${h.path ? " · " + esc(h.path) + ":" + esc(h.line) : ""}</div>
+    </div>`).join("");
+  document.querySelectorAll(".hit").forEach((el) => el.onclick = () => {
+    const h = hits[Number(el.dataset.i)];
+    openSubject(h.kind === "symbol" ? `symbol:${h.path}#${h.name}` : `file:${h.path || h.subject.replace(/^file:/, "")}`);
+  });
+}
+
+// ---------- 键盘（单键位，不用组合键） ----------
+const KEYS = {
+  "/": () => $("#q").focus(),
+  "1": () => setFocus("left"), "2": () => setFocus("main"), "3": () => setFocus("preview"), "4": () => setFocus("pinned"),
+  Enter: () => pin(), p: () => pin(), r: () => { if (CODE.path) showReferences(CODE.path, CODE.line, 9); },
+  Escape: () => { if (back()) return; if (!S.collapsed.bottom) { S.collapsed.bottom = true; applyLayout(); saveLayout(); } },
+  Tab: () => { const order = ["left", "main", "preview", "pinned", "bottom"]; setFocus(order[(order.indexOf(S.focus) + 1) % order.length]); },
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "t" && !/INPUT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); toggleTheme(); return; }
+  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName) && e.key !== "Escape") return;
+  let fn = KEYS[e.key];
+  if (!fn && e.ctrlKey && e.key === "`") fn = () => { S.collapsed.bottom = !S.collapsed.bottom; applyLayout(); saveLayout(); };
+  if (fn) { e.preventDefault(); fn(); }
+});
+$("#search").onclick = search;
+$("#theme-btn").onclick = () => toggleTheme();
+$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+// ---------- 自测（供 smoke.mjs --windows / --jump 读） ----------
+async function selftest(kind) {
+  const out = { kind, checks: [] };
+  const ck = (name, ok, detail = "") => out.checks.push({ name, ok, detail });
+  if (kind === "windows") {
+    ck("slots.exist", ["left", "main", "preview", "pinned", "bottom", "statusbar"].every((id) => document.getElementById(id)));
+    ck("keyboard.registered", Object.keys(KEYS).length >= 8, Object.keys(KEYS).length);
+    ck("layout.default", S.ratio.right > 0 && S.ratio.bottom > 0);
+    S.ratio = { right: 420, bottom: 300 }; S.collapsed.bottom = true;
+    saveLayout();
+    S.ratio = { right: 360, bottom: 240 }; S.collapsed.bottom = false;
+    loadLayout();
+    ck("layout.persist", S.ratio.right === 420 && S.ratio.bottom === 300 && S.collapsed.bottom === true, JSON.stringify(S.ratio));
+    S.pinned = [];
+    pin("symbol:src/lib.rs#f");
+    ck("pinned.add", S.pinned.length === 1);
+    S.pinned = []; loadLayout();
+    ck("pinned.persist", S.pinned.length === 1, JSON.stringify(S.pinned));
+    S.collapsed.bottom = false; applyLayout();
+  }
+  if (kind === "code" || kind === "problems") {
+    const r = await showCodeView("src/lib.rs");
+    ck("code.lines", r.lines.length >= 1, String(r.lines.length));
+    ck("code.gutter", !!document.querySelector(".code-row .ln"));
+    ck("code.breadcrumb", !!document.getElementById("crumb"));
+    ck("code.current_symbol", !!document.getElementById("cur-symbol"));
+    ck("code.highlight", !!document.querySelector(".src .k, .src .s, .src .c"));
+    ck("problems.items", r.problems.length >= 1, String(r.problems.length));
+    ck("problems.source", (document.getElementById("pb-src")?.textContent || "").includes("db"));
+    ck("problems.underline", !!document.querySelector(".code-row.err .src"));
+    document.querySelector('#problems-filter button[data-f="error"]')?.click();
+    const nErr = document.querySelectorAll("#problems-list .pb-item").length;
+    ck("problems.filter", nErr === r.problems.filter((p) => p.severity === "error").length, String(nErr));
+    document.querySelector("#problems-list .pb-item")?.click();
+    ck("problems.jump", CODE.line === (r.problems[0] && r.problems[0].line), String(CODE.line));
+  }
+  if (kind === "theme" || kind === "visual") {
+    initTheme();
+    const targets = ["statusbar", "left", "main", "preview", "bottom"];
+    const before = Object.fromEntries(targets.map((id) => [id, JSON.stringify(document.getElementById(id).getBoundingClientRect())]));
+    const ms = applyTheme("mc");
+    const after = Object.fromEntries(targets.map((id) => [id, JSON.stringify(document.getElementById(id).getBoundingClientRect())]));
+    ck("theme.bbox_equal", targets.every((id) => before[id] === after[id]), targets.filter((id) => before[id] !== after[id]).join(","));
+    ck("theme.switch_ms", ms < 100, ms.toFixed(2));
+    const cs = getComputedStyle(document.documentElement);
+    const lum = (hex) => {
+      const n = hex.trim().replace("#", "");
+      const v = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+      return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+    };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const denseFg = "#e6e8ee", denseBg = "#0f1115", mcFg = "#f2f2f2", mcBg = "#1b1b1b";
+    ck("theme.contrast", ratio(denseFg, denseBg) >= 4.5 && ratio(mcFg, mcBg) >= 4.5,
+      `${ratio(denseFg, denseBg).toFixed(2)}/${ratio(mcFg, mcBg).toFixed(2)}`);
+    applyTheme("dense"); toggleTheme();
+    ck("theme.persist", localStorage.getItem(THEME_KEY) === "mc", localStorage.getItem(THEME_KEY));
+    ck("theme.hierarchy", document.querySelectorAll("#statusbar,#left,#main,#preview,#bottom").length === 5);
+    if (kind === "visual") {
+      await showCodeView("src/lib.rs");
+      ck("card.code", !!document.querySelector("#code-table .code-row"));
+      await renderInspectorInline("symbol:src/lib.rs#a");
+      ck("card.symbol", !!document.querySelector('[data-card="symbol"]'));
+      ck("card.call", !!document.querySelector('[data-card="call"]'));
+      ck("card.impact", !!document.querySelector('[data-card="impact"]'));
+      ck("card.problems", !!document.querySelector('[data-card="problems"]'));
+      applyTheme("dense");
+    }
+  }
+  if (kind === "lsp-diag") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    const r = await showCodeView("src/lib.rs");
+    ck("lspdiag.items", r.problems.length === 3, String(r.problems.length));
+    ck("lspdiag.badge", (document.getElementById("pb-src")?.textContent || "").includes("lsp"),
+      document.getElementById("pb-src")?.textContent || "");
+    ck("lspdiag.underline", !!document.querySelector(".code-row.err .src"));
+    const pull = await rpc("lsp_diagnostics", { path: "src/lib.rs", mode: "pull" }).catch(() => null);
+    ck("lspdiag.pull", pull && (pull.items || []).length === 3 && pull.source === "lsp", JSON.stringify(pull && pull.source));
+    const deg = await rpc("lsp_diagnostics", { path: "src/lib.rs", force_down: true }).catch(() => null);
+    ck("lspdiag.degrade", deg && deg.degraded === true && deg.source === "db", JSON.stringify(deg && deg.reason));
+  }
+  if (kind === "lsp-hover") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    const r = await showCodeView("src/main.rs");
+    const row = document.querySelector('.code-row[data-line="5"]') || document.querySelector(".code-row");
+    const ev = new MouseEvent("mouseenter", { clientX: 400, clientY: 300, bubbles: true });
+    row.dispatchEvent(ev);
+    await new Promise((res) => setTimeout(res, 1200));
+    const card = document.querySelector(".hover-card");
+    ck("hover.card", !!card, card ? card.style.width : "no-card");
+    ck("hover.width", card && Math.round(card.getBoundingClientRect().width) === 380, card ? String(Math.round(card.getBoundingClientRect().width)) : "");
+    ck("hover.type", !!card && (card.querySelector(".hv-type")?.textContent || "").trim().length > 0,
+      card ? card.querySelector(".hv-type")?.textContent : "");
+    ck("hover.badge", !!card && (card.querySelector(".hv-src")?.textContent || "").includes("lsp"),
+      card ? card.querySelector(".hv-src")?.textContent : "");
+    ck("hover.doc_section", !!card && !!card.querySelector(".hv-doc"));
+    hideHover();
+  }
+  if (kind === "lsp-def") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    await showCodeView("src/main.rs");
+    const okJump = await jumpToDef(5, 13);
+    await new Promise((res) => setTimeout(res, 500));
+    ck("def.single", okJump === true && (S.preview?.subject || "").includes("src/main.rs"), S.preview?.subject);
+    ck("def.history_le2", !!S.origin && (S.origin.subject || "").includes("file:"), JSON.stringify(S.origin));
+    ck("def.target_line", (CODE.line === 2), String(CODE.line));
+    ck("def.badge", (document.getElementById("def-src")?.textContent || "").includes("lsp"), document.getElementById("def-src")?.textContent);
+    showDefCandidates([{ file: "src/main.rs", line: 2 }, { file: "src/other.rs", line: 5 }]);
+    ck("def.multi_candidates", document.querySelectorAll("#def-candidates .hit").length === 2, "");
+    document.querySelectorAll("#def-candidates .hit")[1]?.click();
+    await new Promise((res) => setTimeout(res, 400));
+    ck("def.multi_one_hop", !!S.origin && (S.preview?.subject || "") === "file:src/other.rs", JSON.stringify(S.origin));
+    const fb = await rpc("lsp_def", { path: "src/main.rs", line: 5, col: 13, force_down: true }).catch(() => null);
+    ck("def.fallback_db", fb && fb.source === "db" && fb.precision === "low", JSON.stringify(fb && fb.skip));
+    back();
+    ck("def.back_origin", (S.preview?.subject || "").includes("file:"), S.preview?.subject);
+  }
+  if (kind === "lsp-ref") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    await showCodeView("src/main.rs");
+    const ref = await showReferences("src/main.rs", 2, 8);
+    ck("ref.total", ref && ref.total >= 1, String(ref && ref.total));
+    ck("ref.grouped", ref && document.querySelectorAll("#ref-groups .ref-group").length === ref.groups, String(ref && ref.groups));
+    ck("ref.badge", (document.querySelector("#bottom-body .pill")?.textContent || "").includes("lsp"),
+      document.querySelector("#bottom-body .pill")?.textContent);
+    const before = CODE.line;
+    document.querySelector("#ref-groups .hit")?.click();
+    await new Promise((res) => setTimeout(res, 400));
+    ck("ref.one_hop", !!S.origin, JSON.stringify(S.origin));
+    const warm = await rpc("lsp_ref", { path: "src/main.rs", line: 2, col: 8 }).catch(() => null);
+    ck("ref.warm_latency", warm !== null, "");
+    const fb = await rpc("lsp_ref", { path: "src/main.rs", line: 2, col: 8, force_down: true }).catch(() => null);
+    ck("ref.fallback", fb && fb.source === "db" && fb.precision === "low" && fb.coverage, JSON.stringify(fb && fb.skip));
+  }
+  if (kind === "lsp-hint") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    await showCodeView("src/main.rs");
+    const beforeOff = HINTS.stats.requests;
+    await fetchHints();
+    ck("hint.off_zero_requests", HINTS.stats.requests === beforeOff, `${beforeOff}->${HINTS.stats.requests}`);
+    toggleHints();
+    const r = await fetchHints();
+    ck("hint.hints", r && r.source === "lsp" && (r.hints || []).length >= 1, JSON.stringify(r && r.hints && r.hints.length));
+    ck("hint.rendered", document.querySelectorAll(".code-row .hint").length >= 1, String(document.querySelectorAll(".code-row .hint").length));
+    ck("hint.cap", ((r && r.hints) || []).length <= 200, String((r && r.hints || []).length));
+    ck("hint.badge", (document.getElementById("hint-src")?.textContent || "").includes("lsp"), document.getElementById("hint-src")?.textContent);
+    ck("hint.visible_range", HINTS.last.start >= 1 && HINTS.last.end - HINTS.last.start <= 60, JSON.stringify(HINTS.last));
+    const renderedBefore = HINTS.stats.rendered;
+    const s = HINTS.seq;
+    HINTS.seq = s + 1;
+    const dropped = applyHints([{ line: HINTS.last.start, label: "stale" }], s);
+    ck("hint.stale_dropped", dropped === false && HINTS.stats.rendered === renderedBefore, String(HINTS.stats.stale));
+    HINTS.seq = s;
+    toggleHints();
+    ck("hint.off_no_span", document.querySelectorAll(".code-row .hint").length === 0, "");
+  }
+  if (kind === "lsp-action") {
+    await rpc("lsp_trust", { action: "grant" }).catch(() => null);
+    await showCodeView("src/main.rs");
+    const pb = document.querySelector(".pb-item") || (() => {
+      const d = document.createElement("div"); d.className = "pb-item"; d.dataset.line = "4"; d.textContent = "unused"; $("#bottom-body").appendChild(d); return d;
+    })();
+    const r = await attachActions(pb, "src/main.rs", 4, 9, "unused variable: `unused`", 2);
+    ck("action.chips", r && (r.actions || []).length >= 1, String(r && (r.actions || []).length));
+    const chip = pb.querySelector(".chip");
+    chip && chip.click();
+    const det = pb.querySelector(".ca-detail");
+    ck("action.expand", !!det && /kind=/.test(det.textContent || "") && /source=/.test(det.textContent || ""), det ? det.textContent : "");
+    ck("action.no_apply", ACTIONS.applied === 0, String(ACTIONS.applied));
+    ck("action.badge", ((r && r.source) || "") === "lsp" && (r.actions || []).every((a) => a.source === "lsp"), String(r && r.source));
+  }
+  if (kind === "jump") {
+    S.preview = null; S.origin = null;
+    openSubject("file:a.rs");
+    openSubject("file:b.rs");
+    ck("jump.replace", S.preview.subject === "file:b.rs");
+    ck("jump.origin.one", !!S.origin && S.origin.subject === "file:a.rs");
+    openSubject("file:c.rs");
+    ck("jump.history.le2", S.origin.subject === "file:b.rs", JSON.stringify(S.origin));
+    back();
+    ck("jump.back.once", S.preview.subject === "file:b.rs" && S.origin === null);
+    back();
+    ck("jump.back.noop", S.preview.subject === "file:b.rs");
+  }
+  const pass = out.checks.filter((c) => c.ok).length;
+  out.pass = pass; out.total = out.checks.length;
+  $("#selftest").textContent = JSON.stringify(out);
+  document.title = `selftest ${pass}/${out.total}`;
+  return out;
+}
+
+(async () => {
+  if (SELFTEST) {
+    const h = await fetch("/health").then((r) => r.json()).catch(() => null);
+    REPO = (h && h.repo) || "?";
+    await selftest(SELFTEST);
+    return;
+  }
+  initTheme();
+  try {
+    const h = await fetch("/health").then((r) => r.json());
+    REPO = h.repo; $("#repo").textContent = REPO;
+    loadLayout();
+    await overview();
+    $("#conn").textContent = "connected";
+    const qs = new URLSearchParams(location.search);
+    const sym = qs.get("symbol"), p = qs.get("path");
+    if (sym) openSubject("symbol:" + sym, "main"); else if (p) openSubject("file:" + p, "main");
+  } catch (e) {
+    $("#conn").textContent = "offline"; $("#main").textContent = String(e);
+  }
+})();
+</script>
+</html>

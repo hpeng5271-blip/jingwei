@@ -1,0 +1,25 @@
+== D-check · 重跑 ingest 是否抹掉 verify 结论 ==
+  $ jw init  → exit=0  initialized repo at .\.jingwei\jingwei.db
+  $ jw ingest --limit 5  → exit=0  ingested 1 commits, 1 file-changes into .\.jingwei\jingwei.db
+  [ingest 后] judgment: [('213cf000', 'held', '1/1')]
+  [ingest 后] evidence: [('supports', 'commit:f56e167449e04d7b7baf46793a82846510052bc8')]
+  $ jw verify file:y.txt  → exit=1  refuted: file:y.txt 已不存在（contradicts 证据已记录）
+  [verify 后] judgment: [('213cf000', 'refuted', '1/1')]
+  [verify 后] evidence: [('supports', 'commit:f56e167449e04d7b7baf46793a82846510052bc8'), ('contradicts', 'recheck:missing:file:y.txt')]
+  $ jw ask file:y.txt  → exit=2  conflict: file:y.txt
+  judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+  scope=file objects=1 env=1
+  <- [contradicts] recheck:missing:file:y.txt (verify)
+  <- [supports] commit:f56e167449e04d7b7baf46793a82846510052bc8 (git)
+  ask: conflict: file:y.txt
+  $ jw ingest --limit 5  → exit=0  ingested 1 commits, 1 file-changes into .\.jingwei\jingwei.db
+  [重跑 ingest 后] judgment: [('213cf000', 'refuted', '1/1')]
+  [重跑 ingest 后] evidence: [('contradicts', 'recheck:missing:file:y.txt'), ('supports', 'commit:f56e167449e04d7b7baf46793a82846510052bc8')]
+  $ jw ask file:y.txt  → exit=2  conflict: file:y.txt
+  judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+  scope=file objects=1 env=1
+  <- [contradicts] recheck:missing:file:y.txt (verify)
+  <- [supports] commit:f56e167449e04d7b7baf46793a82846510052bc8 (git)
+  ask: conflict: file:y.txt
+
+  判定：假设不成立

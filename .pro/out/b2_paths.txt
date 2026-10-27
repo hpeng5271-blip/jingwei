@@ -1,0 +1,49 @@
+raw_mentions=75 unique=46
+existing=28
+
+Y   AGENTS.md
+Y / bench/scan.json
+-   check-links.mjs
+Y / crates/cli/src/main.rs
+Y / crates/cli/src/usage.rs
+Y / crates/cli/tests/usage_log.rs
+Y / crates/engine/src/graph/index.rs
+Y / crates/engine/tests/notify_gate.rs
+Y / crates/model/src/lib.rs
+Y / docs/MANIFEST-摘要.md
+Y / docs/process/专题-决策点与删命令普查-2026-10-21.md
+Y / docs/process/事故账本.md
+Y / docs/process/要点-2026-10-21.md
+Y / docs/reference/债表.md
+Y / docs/reference/操作细节.md
+Y / docs/reference/里程碑-2026-10.md
+-   gates.ps1
+-   index.rs
+-   knowledge-gate.mjs
+-   main.py
+-   main.rs
+-   parse_python.rs
+- / pkg/cfg.py
+- / pkg/mod.py
+-   resolve.rs
+-   resolve_imports.rs
+-   resolve_pyattr.rs
+-   skills-doctor.mjs
+Y / skills/KILLTEST.json
+-   smoke-pack.mjs
+- / src/a.rs
+- / tests/usage_log.rs
+Y / tools/bench-scan.mjs
+Y / tools/check-links.mjs
+Y / tools/check_facts.mjs
+Y / tools/collect_facts.mjs
+Y / tools/ctx-cost.mjs
+Y / tools/gates.json
+Y / tools/gates.ps1
+Y / tools/knowledge-gate.mjs
+Y / tools/perf.mjs
+Y / tools/skill-killtest.mjs
+Y / tools/skills-doctor.mjs
+Y / tools/uitest.mjs
+-   uitest.mjs
+-   usage.rs

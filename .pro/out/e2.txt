@@ -1,0 +1,39 @@
+== E2 · 两闸判别力 + 幂等性 ==
+db=D:\projects\demo\.jingwei\jingwei.db  now=1792902310  seed=42
+subject 总数=2243  judgment 总数=4017
+
+-- 自检：重算 vs jw ask（seed=42, n=30）--
+  一致=30  不一致=0
+
+-- H2a：全量 2243 subject 的 outcome 分布 --
+  held                       2241
+  uncertain(verdict_uncertain) 1
+  refuted                    1
+  conflict 命中=0  coverage_short 命中=0  expired 命中=0
+
+-- 结构性检查（闸为什么点不着）--
+  change     judgment=1921  满覆盖=1921  0/0=0   覆盖不足=0
+  doc        judgment=122   满覆盖=122   0/0=0   覆盖不足=0
+  issue      judgment=3     满覆盖=2     0/0=1   覆盖不足=0
+  symbol     judgment=1971  满覆盖=1971  0/0=0   覆盖不足=0
+  多判断 subject=87
+  同 subject 内出现相反 verdict 的=0
+  无任何 evidence 的 judgment 数=0 {'change': 0, 'doc': 0, 'symbol': 0, 'issue': 0}
+  premise 被 clip 的 evidence=0/4024（证据存的是指针，不是全文）
+
+-- H2b：重复导入是否幂等（scratch 根）--
+  docs 第1遍: ingested 2 docs into D:\projects\jingwei\.pro\tmp\e2\idem\.jingwei\jingwei.db  → judgment=2
+  docs 第2遍: ingested 2 docs into D:\projects\jingwei\.pro\tmp\e2\idem\.jingwei\jingwei.db  → judgment=4
+  parse 第1遍: parsed 2 symbols into D:\projects\jingwei\.pro\tmp\e2\idem\.jingwei\jingwei.db → judgment=6
+  parse 第2遍: parsed 2 symbols into D:\projects\jingwei\.pro\tmp\e2\idem\.jingwei\jingwei.db → judgment=8
+  台账：docs 2->4（期望幂等则不变）  parse 6->8
+
+-- H2c：退出码能否区分 no_data 与 uncertain --
+  issue:demo#1      exit=2  uncertain: issue:demo#1（verdict_uncertain）
+  no-such-subject   exit=2  uncertain: no-such-subject-xyz（no_data）
+  退出码相同 = True
+
+== 判定 ==
+H2a（两闸各>=1 命中）: 不成立  (conflict=0, coverage_short=0, expired=0)
+H2b（重复导入幂等）: 不成立  (docs 2->4, parse 6->8)
+H2c（退出码能区分）: 不成立

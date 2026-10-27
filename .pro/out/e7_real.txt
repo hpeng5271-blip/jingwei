@@ -1,0 +1,13 @@
+== E7 · 真记录模式（扫 D-*.md 的断言行并按文法判定）==
+记录根=D:\projects\demo  判定根=D:\projects\demo
+可导入记录=11
+
+== 汇总 ==
+  断言总数=0  true=0 falsified=0 unverifiable=0
+  有断言的记录=0/11 []
+  coverage（可判定/总数）= 0/0
+
+== 看哪几个数（真记录门槛，见 断言文法 §4）==
+  ① importable_assertions≥1 且含 path_absent/symbol_exist：total=0
+  ② unverifiable=0：当前 0
+  ③ falsified=0：>0 时先判「记录写错」还是「代码漂移」（人工），再决定改记录/改代码

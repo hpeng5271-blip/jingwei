@@ -1,0 +1,83 @@
+﻿cargo :    Compiling datacore v0.1.0 (D:\projects\jingwei\crates\datacore)
+所在位置 行:1 字符: 153
++ ... ($false); cd D:\projects\jingwei; cargo test --workspace 2>&1 | Out-F ...
++                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling da...rates\datacore):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling collect v0.1.0 (D:\projects\jingwei\crates\collect)
+   Compiling jw v0.1.0 (D:\projects\jingwei\crates\cli)
+warning: linker stdout: 正在创建库 D:\projects\jingwei\target\debug\deps\jw.lib 和对象 D:\projects\jingwei\target\debug\deps\jw
+.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `jw` (bin "jw") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running unittests src\lib.rs (target\debug\deps\collect-87a9123569b476a7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\git_paths.rs (target\debug\deps\git_paths-e81810d60d953280.exe)
+
+running 1 test
+test git_log_keeps_utf8_paths ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running unittests src\lib.rs (target\debug\deps\datacore-16692ed7c156be76.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\core.rs (target\debug\deps\core-29c60ee9901cd8ce.exe)
+
+running 15 tests
+test compose_no_data ... ok
+test compose_conflict_gate ... ok
+test compose_coverage_gate ... ok
+test conflict_requires_opposite_and_full_coverage ... ok
+test hash_is_stable_and_distinct ... ok
+test issue_verdict_mapping ... ok
+test pr_verdict_mapping ... ok
+test compose_held_when_covered ... ok
+test ddl_blocks_refuted_without_full_coverage ... ok
+test scope_roundtrip ... ok
+test collection_kinds_registered ... ok
+test alternative_requires_existing_judgments ... ok
+test expired_judgment_is_filtered ... ok
+test as_of_uses_t_for_expiry ... ok
+test reimport_does_not_wipe_verdict_or_evidence ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src\main.rs (target\debug\deps\jw-31d117ede1c8eb17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\collect.rs (target\debug\deps\collect-ef9009550a7da47a.exe)
+
+running 3 tests
+test ask_no_data_has_own_label ... ok
+test issue_import_end_to_end ... ok
+test pr_import_end_to_end ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.64s
+
+   Doc-tests collect
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests datacore
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

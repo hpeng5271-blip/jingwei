@@ -1,0 +1,126 @@
+== E3 · 冲突从哪来 + resolve 可表达性 ==
+work=D:\projects\jingwei\.pro\tmp\e3
+
+-- 1. 场景 --
+  git log: 0a610e2 1792810800 c2 | 715868c 1792807200 c1
+  a.txt 被 2 个 commit 改过；b.txt 只被 1 个改过
+
+-- 2. init + ingest --
+  $ jw init   [root=repo]
+    initialized repo at .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ingest --limit 10   [root=repo]
+    ingested 2 commits, 3 file-changes into .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ask file:b.txt   [root=repo]
+    held: file:b.txt
+      judgment repo:j:change:17 kind=change verdict=held coverage=1/1
+      scope=file objects=1 env=1
+      <- [supports] commit:715868cac74fafdebee6f86ee49aa7a2de0937af (git)
+    (exit=0)
+  [ingest 后] file:b.txt judgments:
+    id=…ecb912fd verdict=held      at=1792807200 cov=1/1 exp=None
+  [ingest 后] evidence: [('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+
+-- 3. 删文件 + verify b.txt（最小复现：单历史）--
+  $ jw verify file:b.txt   [root=repo]
+    refuted: file:b.txt 已不存在（contradicts 证据已记录）
+    (exit=1)
+  verify 前: id=…ecb912fd verdict=held at=1792807200
+  verify 后: id=…ecb912fd verdict=refuted at=1792807200
+  → 同一 id 原地改 verdict = True
+  $ jw ask file:b.txt   [root=repo]
+    uncertain: file:b.txt（conflict）
+      judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:missing:file:b.txt (verify)
+      <- [supports] commit:715868cac74fafdebee6f86ee49aa7a2de0937af (git)
+    (exit=2)
+  [verify 后] file:b.txt judgments:
+    id=…ecb912fd verdict=refuted   at=1792807200 cov=1/1 exp=None
+  [verify 后] evidence: [('contradicts', 'recheck:missing:file:b.txt'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+
+-- 4. 删文件 + verify a.txt（多历史）--
+  $ jw verify file:a.txt   [root=repo]
+    refuted: file:a.txt 已不存在（contradicts 证据已记录）
+    (exit=1)
+  verify 前最新: id=…8f397e48 verdict=held
+  verify 后同一 id: id=…8f397e48 verdict=refuted
+  → 同一 id 原地改 verdict = True
+  $ jw ask file:a.txt   [root=repo]
+    uncertain: file:a.txt（conflict）
+      judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:missing:file:a.txt (verify)
+      <- [supports] commit:0a610e27c8b337139ff3225b28c214a07edcb05a (git)
+    (exit=2)
+  [verify 后] file:a.txt judgments:
+    id=…8f397e48 verdict=held      at=1792807200 cov=1/1 exp=None
+    id=…8f397e48 verdict=refuted   at=1792810800 cov=1/1 exp=None
+  [verify 后] evidence: [('contradicts', 'recheck:missing:file:a.txt'), ('supports', 'commit:0a610e27c8b337139ff3225b28c214a07edcb05a'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+  $ jw conflicts   [root=repo]
+    scanned, found 1 conflict pair(s), 1 unresolved
+      repo:j:change:1792810800:dfda62208f397e48  <->  repo:j:change:1792807200:dfda62208f397e48
+    (exit=0)
+  conflict 表: [('repo:j:change:1792810800:dfda62208f397e48', 'repo:j:change:1792807200:dfda62208f397e48', 0)]
+
+-- 5. 分支 A：只用现有 CLI，`expire <subject>` 只能点到最新那条 --
+  $ jw expire file:a.txt --at 1792810900   [root=repoA]
+    expired: file:a.txt at 1792810900
+    (exit=0)
+  $ jw ask file:a.txt   [root=repoA]
+    held: file:a.txt
+      judgment repo:j:change:17 kind=change verdict=held coverage=1/1
+      scope=file objects=1 env=1
+      <- [supports] commit:715868cac74fafdebee6f86ee49aa7a2de0937af (git)
+    (exit=0)
+  [A: expire 最新后] file:a.txt judgments:
+    id=…8f397e48 verdict=held      at=1792807200 cov=1/1 exp=None
+    id=…8f397e48 verdict=refuted   at=1792810800 cov=1/1 exp=1792810900
+  [A: expire 最新后] evidence: [('contradicts', 'recheck:missing:file:a.txt'), ('supports', 'commit:0a610e27c8b337139ff3225b28c214a07edcb05a'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+  $ jw conflicts   [root=repoA]
+    scanned, found 1 conflict pair(s), 1 unresolved
+      repo:j:change:1792810800:dfda62208f397e48  <->  repo:j:change:1792807200:dfda62208f397e48
+    (exit=0)
+  conflict.resolved = [(0, None)]
+
+-- 6. 分支 B：只 expire 输的那条（老 held），模拟未来 `expire --id` --
+  SQL: UPDATE judgment SET expires_at=1792811000 WHERE id=…8f397e48
+  $ jw ask file:a.txt   [root=repoB]
+    uncertain: file:a.txt（conflict）
+      judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:missing:file:a.txt (verify)
+      <- [supports] commit:0a610e27c8b337139ff3225b28c214a07edcb05a (git)
+    (exit=2)
+  [B: expire 老判断后] file:a.txt judgments:
+    id=…8f397e48 verdict=held      at=1792807200 cov=1/1 exp=1792811000
+    id=…8f397e48 verdict=refuted   at=1792810800 cov=1/1 exp=None
+  [B: expire 老判断后] evidence: [('contradicts', 'recheck:missing:file:a.txt'), ('supports', 'commit:0a610e27c8b337139ff3225b28c214a07edcb05a'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+  conflict.resolved = [(0, None)]
+
+-- 7. 分支 C：模型层配方 = 新判断(at=T, 只挂 contradicts) + expire 全部旧判断 --
+  expire 旧判断 2 条；新增判断 id=…8f397e48 verdict=refuted, 依据=contradicts
+  $ jw ask file:a.txt   [root=repoC]
+    refuted: file:a.txt
+      judgment repo:j:change:17 kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] resolve:cf:1:recheck:missing:file:a.txt (resolve)
+    (exit=1)
+  [C: 配方后] file:a.txt judgments:
+    id=…8f397e48 verdict=held      at=1792807200 cov=1/1 exp=1792810900
+    id=…8f397e48 verdict=refuted   at=1792810800 cov=1/1 exp=1792810900
+    id=…8f397e48 verdict=refuted   at=1792811100 cov=1/1 exp=None
+  [C: 配方后] evidence: [('contradicts', 'recheck:missing:file:a.txt'), ('contradicts', 'resolve:cf:1:recheck:missing:file:a.txt'), ('supports', 'commit:0a610e27c8b337139ff3225b28c214a07edcb05a'), ('supports', 'commit:715868cac74fafdebee6f86ee49aa7a2de0937af')]
+  $ jw conflicts   [root=repoC]
+    scanned, found 2 conflict pair(s), 2 unresolved
+      repo:j:change:1792810800:dfda62208f397e48  <->  repo:j:change:1792807200:dfda62208f397e48
+      repo:j:change:1792811100:dfda62208f397e48  <->  repo:j:change:1792807200:dfda62208f397e48
+    (exit=0)
+  conflict.resolved = [(0, None), (0, None)]（没人写 resolved=1）
+
+== 判定 ==
+H3a（删文件 verify → ask refuted）: 第 3 步 b.txt 与第 4 步 a.txt 的 ask 都是 uncertain(conflict)（verify 把 contradicts 挂到了本来就有 supports 的那条判断上）→ 声称不成立
+H3b（只靠现有 CLI resolve 且 conflicts 清账）: 第 5 步 → expire 点到最新那条，ask 回到 held（方向反了）；conflicts 永远 1 unresolved（没有写 resolved 的命令）
+第 6 步：只过期输方不够（剩下的那条自带 supports 证据）→ 仍 conflict
+第 7 步：只有「新判断（只挂 contradicts）+ 旧判断全过期」才让 ask 出 refuted；但这需要 3 件新东西：定点 expire / 新判断写入 / conflict 清账。

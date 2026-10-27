@@ -1,0 +1,16 @@
+{
+  "commits": null,
+  "changes": 6,
+  "files": 2,
+  "dir_changes": 4,
+  "file_symbols": 3,
+  "decision_candidates": 3,
+  "decision_picked": 1,
+  "find_hits": 3,
+  "check_ok": true,
+  "moved_to_old": "src/c.rs",
+  "moved_to_new": null,
+  "edges_use_internal": 0,
+  "edges_use_ext": 1,
+  "edges_impl": 1
+}

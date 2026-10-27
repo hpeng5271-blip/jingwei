@@ -1,0 +1,23 @@
+== B1.5 遗留孤儿证据修复演练（库副本）==
+副本 = D:\projects\jingwei\.pro\tmp\b1fix\repo\.jingwei\jingwei.db  文件 = ['jingwei.db']
+
+-- 修前 --
+  judgment=4017  evidence=5286
+  孤儿 evidence=1262
+  integrity_check=ok
+
+-- 执行 DELETE FROM evidence WHERE NOT EXISTS (…judgment…) → rowcount=1262 --
+  judgment=4017  evidence=4024
+  孤儿 evidence=0
+  integrity_check=ok
+  evidence by instrument=[('tree-sitter', 1971), ('git', 1921), ('docs', 122), ('issue', 10)]
+  每 kind 判断/证据=[('symbol', 1971, 1971), ('change', 1921, 1921), ('doc', 122, 122), ('issue', 3, 10)]
+
+-- 抽样 ask（副本根）--
+  file:docs/MANIFEST-摘要.md           exit=0  held: file:docs/MANIFEST-摘要.md
+  file:docs/README.md                exit=0  held: file:docs/README.md
+  issue:demo#2                       exit=0  held: issue:demo#2
+  decision:none                      exit=2  no_data: decision:none
+
+== 结论 ==
+孤儿清零、evidence 回到 4024、抽样 ask 不变 → 修复可用；正式修要在 demo 上按同一 SQL 跑一次。

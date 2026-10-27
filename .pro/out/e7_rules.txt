@@ -1,0 +1,44 @@
+== E7 · checker 判定规则单元验证（16 用例，期望先写死）==
+用例仓 = D:\projects\jingwei\.pro\tmp\e7\repo
+  [PASS] C01 path_exist crates/x/ok.rs                  expect=true        got=true        文件存在
+  [PASS] C02 path_exist crates/x/ghost.md               expect=falsified   got=falsified   文件不存在
+  [PASS] C03 path_exist tools/dir_target                expect=falsified   got=falsified   是目录，不是文件
+  [PASS] C04 path_absent crates/x/ghost.md              expect=true        got=true        确实不存在
+  [PASS] C05 path_absent crates/x/ok.rs                 expect=falsified   got=falsified   文件存在
+  [PASS] C06 path_absent tools/dir_target               expect=falsified   got=falsified   目录存在（存在性含目录）
+  [PASS] C07 symbol_exist crates/x/ok.rs#alpha          expect=true        got=true        fn alpha 在本文件（symbol≈regex）
+  [PASS] C08 symbol_exist crates/x/ok.rs#Beta           expect=true        got=true        struct Beta 在本文件（symbol≈regex）
+  [PASS] C09 symbol_exist crates/x/ok.rs#gamma          expect=falsified   got=falsified   gamma 在 empty.rs，不在本文件（symbol≈regex）
+  [PASS] C10 symbol_exist crates/x/ghost.rs#alpha       expect=falsified   got=falsified   文件不存在 → 确定没有该符号（文件不存在）
+  [PASS] C11 symbol_exist crates/x/bad.txt#alpha        expect=unverifiable got=unverifiable 非 UTF-8，读不了（读不了）
+  [PASS] C12 symbol_exist tools/dir_target#alpha        expect=unverifiable got=unverifiable 目录，读不了（读不了）
+  [PASS] C13 path_exist /abs/x.rs                       expect=unverifiable got=unverifiable 绝对路径，格式错（arg 格式错）
+  [PASS] C14 path_exist ../x.rs                         expect=unverifiable got=unverifiable 含 ..，格式错（arg 格式错）
+  [PASS] C15 path_exist ok.rs                           expect=unverifiable got=unverifiable 裸文件名，格式错（必须带目录）（arg 格式错）
+  [PASS] C16 symbol_exist crates/x/ok.rs                expect=unverifiable got=unverifiable 缺 #（缺 #）
+
+== 汇总 ==
+  用例总数=16  verdict 分布：true=4 falsified=6 unverifiable=6
+  期望分布：true=4 falsified=6 unverifiable=6  mismatch=0
+
+== 判别力门槛 ==
+  falsified 全部判对且 ≥2  : 满足
+  unverifiable 全部判对且 ≥1: 满足
+  true 全部判对             : 满足
+  0 个非 true 误判成 true   : 满足
+
+== 变异检查（用例集能不能区分'错误实现'）==
+  目的：证明这 16 个用例不是「怎么实现都能过」的摆设——每个错误实现至少被 1 个用例抓住。
+    M1 path_absent 用 is_file 在 C06 判 true，期望 falsified
+  [PASS] M1 path_absent 用 is_file: 失败用例=1（崩溃 0）
+    M2 symbol 文件缺失判查不了 在 C10 判 unverifiable，期望 falsified
+  [PASS] M2 symbol 文件缺失判查不了: 失败用例=1（崩溃 0）
+    M3 不做格式校验 在 C13 判 falsified，期望 unverifiable
+    M3 不做格式校验 在 C14 判 falsified，期望 unverifiable
+    M3 不做格式校验 在 C15 判 falsified，期望 unverifiable
+  [PASS] M3 不做格式校验: 失败用例=3（崩溃 0）
+    M4 只捕 OSError 在 C11 崩溃（UnicodeDecodeError）→ 记失败
+  [PASS] M4 只捕 OSError: 失败用例=1（崩溃 1）
+  变异体被区分：4/4
+  4 个错误实现都被用例抓住   : 满足
+  结论：规则实现 与文法一致，且用例能区分错误实现 → 可进 Rust

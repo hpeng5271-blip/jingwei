@@ -1,0 +1,55 @@
+== B1 验收复核 ==
+demo db = D:\projects\demo\.jingwei\jingwei.db  exists=True
+backup  = D:\projects\demo\.jingwei.bak-20261025-1235\jingwei.db  exists=True
+backup 目录文件 = ['jingwei.db', 'jingwei.db-shm', 'jingwei.db-wal']
+
+-- R1 孤儿证据（evidence 指向不存在的 judgment）--
+  孤儿 evidence 行数 = 1262
+    ('commit:be3c653277722a4730b8ef3d9282588e9854de40', 'supports', 'git')
+    ('commit:f3fc94f01ed6e4cbbfa8b15546b948a68abd04c6', 'supports', 'git')
+    ('commit:f3fc94f01ed6e4cbbfa8b15546b948a68abd04c6', 'supports', 'git')
+    ('commit:f3fc94f01ed6e4cbbfa8b15546b948a68abd04c6', 'supports', 'git')
+    ('commit:f3fc94f01ed6e4cbbfa8b15546b948a68abd04c6', 'supports', 'git')
+  孤儿里 instrument 分布 = [('git', 1262)]
+  证据总数 = 5286
+
+-- R2 quoted 清理 --
+  judgment subject LIKE 'file:"%' = 0
+  change path LIKE '"%'           = 0
+  judgment 总数 = 4017  change 行数 = 1921
+
+-- R3 change 表路径 vs kind=change 的 subject --
+  change 去重路径 = 147  kind=change 去重 subject = 147
+  只在 change 表 = 0  只在 judgment = 0
+
+-- R4 备份库 --
+  integrity_check = ok
+  judgment=4017 evidence=4024 change=1921
+  quoted judgment=1262
+  备份孤儿 evidence=0
+
+-- R5 当前库计数 --
+  judgment=4017  evidence=5286 source=202  change=1921  snapshot=200  conflict=0
+  kind=symbol   judgment=1971  evidence=1971
+  kind=change   judgment=1921  evidence=1921
+  kind=doc      judgment=122   evidence=122
+  kind=issue    judgment=3     evidence=10
+  无证据的判断数 = 0
+  evidence by instrument = [('git', 3183), ('tree-sitter', 1971), ('docs', 122), ('issue', 10)]
+
+-- R6 幂等/重复 subject --
+  同一 subject 多判断且 at 相同（真重复）= 0
+  同一 (subject, at) 不同 id 的行数（应 0）= 0
+
+-- R7 change subject 是否都是仓库里真实存在的路径 --
+  root=D:\projects\demo
+  去重 subject=147  含非 ASCII=51  磁盘上不存在=11
+    missing: docs/process/其他会话-设计与决策点-2026-10-21.md
+    missing: docs/process/减法重构进度-2026-10-21.md
+    missing: docs/process/删命令候选普查-2026-10-21.md
+    missing: docs/process/接缝契约审计-2026-10-21.md
+    missing: docs/process/进展报告-2026-10-19.md
+
+-- R8 source 按 instrument（B2 预判要用）--
+  [('git', 199), ('tree-sitter', 1), ('issue', 1), ('docs', 1)]
+  源总数=202  被引用的源=202

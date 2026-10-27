@@ -1,0 +1,83 @@
+== 复核 E1 基线 ==  记录数=11
+
+-- D-20261019-01: 旧口径=2  修表头后=2
+   [旧] bullet **B. LSP rename**：跨文件符号更新语义最复杂、翻车率最高，且不阻塞任何下游；
+   [旧] bullet **C. result_sha 聚合复用**：复用等价性难机器验证（两遍结果须逐项一致），146s 才是真瓶颈，没基线就做复用是过早优化。
+
+-- D-20261020-04: 旧口径=8  修表头后=7
+   [旧] table  情形 / 为什么
+   [旧] table  前缀是**未索引的外部包** / 没有它的符号表，猜就是编
+   [旧] table  动态导入（`__import__` / `importlib` / `getattr` / `import *`） / 运行时才知道名字
+   [旧] table  别名被重绑 / 条件导入 / 同名多义
+   [旧] table  前缀落在**没有属性表**的值上（函数、字符串） / 属性集不可枚举
+   [旧] table  `sys.path` 歧义（同名包多处） / 解析结果不唯一
+   [旧] bullet 不做类型推断（`x.foo` 的 `x` 是什么类型）——那是另一个数量级；
+   [旧] bullet 不做跨语言（Python 调 Rust）——图谱里没有这个事实。
+   ^^ 上面多出来的就是表头行（下面列修正后的）
+   [新] table  前缀是**未索引的外部包** / 没有它的符号表，猜就是编
+   [新] table  动态导入（`__import__` / `importlib` / `getattr` / `import *`） / 运行时才知道名字
+   [新] table  别名被重绑 / 条件导入 / 同名多义
+   [新] table  前缀落在**没有属性表**的值上（函数、字符串） / 属性集不可枚举
+   [新] table  `sys.path` 歧义（同名包多处） / 解析结果不唯一
+   [新] bullet 不做类型推断（`x.foo` 的 `x` 是什么类型）——那是另一个数量级；
+   [新] bullet 不做跨语言（Python 调 Rust）——图谱里没有这个事实。
+
+-- D-20261021-05-主路径八动词: 旧口径=3  修表头后=3
+   [旧] bullet 删命令要逐个确认"没有测试/文档/脚本依赖"，一轮做不完；而**排序**已经能解决"没有默认动作"
+   [旧] bullet K1（反 FizzBuzz）：先做能立刻降低决策成本的那一刀
+   [旧] bullet 第二刀（真删 `new/clean/snap/env/init/use/install/audit`）留到阶段 1 后半，先攒够调用样本看谁真没人用
+
+-- D-20261023-05-事件的项目归属: 旧口径=4  修表头后=3
+   [旧] table  选项 / 做法 / 代价 / 结论
+   [旧] table  **1 加字段** / `Event` 增 `root`；老事件 `None` / 改 schema + 明确迁移口径 / **选它**
+   [旧] table  2 key 复合 / key 写成 `root + 分隔符 + 路径` / 所有读侧都要拆，点击回文件多一步解析；污染 key 语义 / 否决
+   [旧] table  3 不做 / 降级为"全局进度"，界面写清"跨项目" / 零改动，但把混淆留给用户 / 否决
+   ^^ 上面多出来的就是表头行（下面列修正后的）
+   [新] table  **1 加字段** / `Event` 增 `root`；老事件 `None` / 改 schema + 明确迁移口径 / **选它**
+   [新] table  2 key 复合 / key 写成 `root + 分隔符 + 路径` / 所有读侧都要拆，点击回文件多一步解析；污染 key 语义 / 否决
+   [新] table  3 不做 / 降级为"全局进度"，界面写清"跨项目" / 零改动，但把混淆留给用户 / 否决
+
+替代项合计：旧口径=17  修表头后=15
+
+== 路径口径（E1 的 regex，逐条摊开）==
+mentions=44  unique=27
+逐条（unique，按字典序；exists=root 下是否存在）：
+  Y  bench/scan.json
+  Y  crates/cli/src/main.rs
+  Y  crates/cli/src/usage.rs
+  Y  crates/cli/tests/usage_log.rs
+  Y  crates/engine/src/graph/index.rs
+  Y  crates/engine/tests/notify_gate.rs
+  Y  crates/model/src/lib.rs
+  Y  docs/MANIFEST-摘要.md
+  Y  docs/process/专题-决策点与删命令普查-2026-10-21.md
+  Y  docs/process/事故账本.md
+  Y  docs/process/要点-2026-10-21.md
+  Y  docs/reference/债表.md
+  Y  docs/reference/操作细节.md
+  Y  docs/reference/里程碑-2026-10.md
+  Y  skills/KILLTEST.json
+  Y  tools/bench-scan.mjs
+  Y  tools/check-links.mjs
+  Y  tools/check_facts.mjs
+  Y  tools/collect_facts.mjs
+  Y  tools/ctx-cost.mjs
+  Y  tools/gates.json
+  Y  tools/gates.ps1
+  Y  tools/knowledge-gate.mjs
+  Y  tools/perf.mjs
+  Y  tools/skill-killtest.mjs
+  Y  tools/skills-doctor.mjs
+  Y  tools/uitest.mjs
+unique=27  existing=27  absent=0
+absent 列表 = []
+
+每条的提及次数（用于解释 mentions=32）：
+  D-20261019-01: 9 次 / 去重 3
+  D-20261019-02: 2 次 / 去重 2
+  D-20261021-05-主路径八动词: 1 次 / 去重 1
+  D-20261021-06-命令调用记录: 12 次 / 去重 10
+  D-20261022-01-测试失败定位: 1 次 / 去重 1
+  D-20261022-02-消息阵列保留策略: 2 次 / 去重 2
+  D-20261022-03-资源预算与文件聚焦: 4 次 / 去重 3
+  D-20261022-04-上下文与技能治理: 13 次 / 去重 10

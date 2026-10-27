@@ -1,0 +1,71 @@
+== C0 · 代码现状 vs demo 库 ==
+
+-- C1. 当前二进制的 issue 口径（新 scratch 根）--
+  $ jw init   [root=issue_now]
+    initialized issue_now at .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw issue D:\projects\jingwei\tests\fixtures\issues.json   [root=issue_now]
+    imported 3 issues into .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ask issue:demo#1   [root=issue_now]
+    uncertain: issue:demo#1（verdict_uncertain）
+      judgment issue_now:j:issu kind=issue verdict=uncertain coverage=0/0
+      scope=issue objects=1 env=1
+      <- [supports] issue:1:Add a cache for symbol lookup — Lookup is slow on big repos. Proposal: cache by (path, name). (github)
+      <- [supports] comment:Cache invalidation is the hard part; key must include commit hash. (github)
+      <- [supports] comment:Agreed, we will key by commit. (github)
+    (exit=2)
+    DB: subject=issue:demo#1 objects=['demo#1'] granularity=issue env={'repo': 'issue_now'}
+    DB: subject=issue:demo#2 objects=['demo#2'] granularity=issue env={'repo': 'issue_now'}
+    DB: subject=issue:demo#3 objects=['demo#3'] granularity=issue env={'repo': 'issue_now'}
+  demo 库里的 issue 行（对照）：
+    DB: subject=issue:demo#1 objects=['issue:demo#1'] granularity=file env={'repo': 'demo'}
+    DB: subject=issue:demo#2 objects=['issue:demo#2'] granularity=file env={'repo': 'demo'}
+    DB: subject=issue:demo#3 objects=['issue:demo#3'] granularity=file env={'repo': 'demo'}
+
+-- C2. issue 重复导入是否幂等 --
+  第1遍 judgment=3；第2遍输出='imported 3 issues into .\.jingwei\jingwei.db' → judgment=6（幂等应不变）
+  $ jw ask issue:demo#2   [root=issue_now]
+    held: issue:demo#2
+      judgment issue_now:j:issu kind=issue verdict=held coverage=1/1
+      scope=issue objects=1 env=1
+      <- [supports] issue:2:Drop graph.json — Two copies confused tooling; move to quarantine. (github)
+      <- [supports] comment:Done in be3c6532. (github)
+    (exit=0)
+
+-- C3. why 与 ask 会不会相反（verify 之后）--
+  $ jw init   [root=whyask]
+    initialized whyask at .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw ingest --limit 5   [root=whyask]
+    ingested 1 commits, 1 file-changes into .\.jingwei\jingwei.db
+    (exit=0)
+  $ jw verify file:x.txt   [root=whyask]
+    refuted: file:x.txt 已不存在（contradicts 证据已记录）
+    (exit=1)
+  $ jw ask file:x.txt   [root=whyask]
+    uncertain: file:x.txt（conflict）
+      judgment whyask:j:change: kind=change verdict=refuted coverage=1/1
+      scope=file objects=1 env=1
+      <- [contradicts] recheck:missing:file:x.txt (verify)
+      <- [supports] commit:2544e8f9c65b021d4f6605dcbffb8f9f79c3e4c6 (git)
+    (exit=2)
+  $ jw why x.txt   [root=whyask]
+    held: x.txt 被 1 次改动触及
+      2544e8f9 A 1792803600 <t> c1
+    (exit=0)
+
+-- C4. C-quote 的 subject 能否用真实路径问到 --
+  $ jw ask file:docs/MANIFEST-摘要.md   [root=demo]
+    uncertain: file:docs/MANIFEST-摘要.md（no_data）
+    (exit=2)
+  $ jw ask file:"docs/MANIFEST-\346\221\230\350\246\201.md"   [root=demo]
+    held: file:"docs/MANIFEST-\346\221\230\350\246\201.md"
+      judgment demo:j:change:17 kind=change verdict=held coverage=1/1
+      scope=file objects=1 env=1
+      <- [supports] commit:f3fc94f01ed6e4cbbfa8b15546b948a68abd04c6 (git)
+    (exit=0)
+
+== 备注 ==
+C1 若 demo 行 objects 带 issue: 前缀 / granularity=file，而新根 objects=demo#n / granularity=issue，
+   则 demo 库不是当前代码的产物 → 今天那批改动没在 demo 上重放过。

@@ -1,0 +1,8 @@
+[package]
+name = "lsp"
+version.workspace = true
+edition.workspace = true
+description = "经維的 LSP 客户端：Content-Length 帧 + 会话生命周期 + 诊断收集"
+
+[dependencies]
+serde_json.workspace = true

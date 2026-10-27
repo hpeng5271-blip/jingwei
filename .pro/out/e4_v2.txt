@@ -1,0 +1,23 @@
+== E4 v2 · 记录的可证伪性（句子分类 + 断言行）==
+扫到 md 文件=15（含 _ 开头；importable 只算 D-*）
+  [NON] _模板: path_exist crates/cli/src/main.rs → true
+  [NON] _模板: path_absent tools/gates.js → true
+  [NON] _模板: symbol_exist crates/cli/src/main.rs#usage_name → true（approx(regex)）
+  [NON] _示例-带断言: path_exist crates/cli/src/main.rs → true
+  [NON] _示例-带断言: path_absent tools/gates.js → true
+  [NON] _示例-带断言: symbol_exist crates/cli/src/main.rs#usage_name → true（approx(regex)）
+
+-- 每文件断言行数 --
+  _模板: 3 条  (不导入：非 D-*)
+  _示例-带断言: 3 条  (不导入：非 D-*)
+
+== 汇总 ==
+  句子分类：A 存在类=3  B 行为类=47  C 否定类=23
+  断言行总数=6  其中 importable（D-*）=0  malformed=0
+  干跑判定：true=6  falsified=0  unverifiable=0
+  importable 里可能不成立的类型数（path_absent/symbol_exist）=0
+
+== 门槛（见 .pro/断言文法.md §4）==
+  ① importable_assertions>=1 且可证伪类型>=1 : 未满足（importable=0, falsifiable_type=0）
+  ② 干跑 unverifiable==0                     : 满足（unverifiable=0）
+  结论：checker 不开

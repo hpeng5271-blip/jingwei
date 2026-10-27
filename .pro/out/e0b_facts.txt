@@ -1,0 +1,60 @@
+== 审核核对事实（demo 库只读）==
+
+-- 1. kind 覆盖率：judgment 里出现但 kind_registry 没登记的 --
+  registry=['activity', 'candidate-source', 'change', 'check', 'file', 'impact', 'issue', 'mastery', 'pr', 'rationale', 'symbol', 'time-series']
+  used=['change', 'doc', 'issue', 'symbol']
+  未登记=['doc']
+
+-- 2. subject 前缀 vs kind 是否一致 --
+  kind=change   subject前缀=file:      n=1921
+  kind=doc      subject前缀=doc:       n=122
+  kind=issue    subject前缀=issue:     n=3
+  kind=symbol   subject前缀=symbol:    n=1971
+
+-- 3. change 类判断的 subject 是 file:，kind 却是 change --
+  kind=change 且 subject 以 file: 开头的 = 1921
+  kind=file 的判断数 = 0（registry 有 file，无生产者）
+
+-- 4. 被 git C-quote 的 subject（非 ASCII 路径）--
+  含双引号的 subject 数 = 51
+    file:"\344\273\213\347\273\215.md"
+    file:"\344\275\277\347\224\250\350\257\264\346\230\216.md"
+    file:"\345\216\237\345\255\220\350\203\275-\350\247\206\351\242\221\346\270\205\345\215\225.json"
+    file:"\346\274\224\347\244\272\350\204\232\346\234\254.md"
+    file:"docs/MANIFEST-\346\221\230\350\246\201.md"
+    file:"docs/archive/V0-\346\227\247\345\220\210\347\250\277.md"
+    file:"docs/archive/\344\273\212\346\227\245\345\244\215\347\233\230-2026-10-17.md"
+    file:"docs/decisions/D-20261021-05-\344\270\273\350\267\257\345\276\204\345\205\253\345\212\250\350\257\215.md"
+
+-- 5. symbol 同名冲突：同文件同名符号是否共用一个 subject --
+  symbol 判断总数=1971
+  同一 symbol subject 出现多次的=0（>0 说明同名符号被并成一条）
+
+-- 6. docs / parse 的 at 是否同一时刻（同一次跑）--
+  kind=doc      distinct at=1 [1792901663]
+  kind=symbol   distinct at=1 [1792901664]
+  kind=issue    distinct at=1 [1792901671]
+
+-- 7. scope 里的 granularity 取值分布 --
+  granularity=file         2046
+  granularity=symbol       1971
+
+-- 8. scope.objects 是否与 subject 自洽（抽样各 kind 2 条）--
+  [change] subject=file:graph.json objects=['graph.json'] env={'repo': 'demo'}
+  [change] subject=file:tools/graph.json objects=['tools/graph.json'] env={'repo': 'demo'}
+  [doc] subject=doc:AGENTS.md objects=['AGENTS.md'] env={'repo': 'demo'}
+  [doc] subject=doc:docs/archive/README-分诊.md objects=['docs/archive/README-分诊.md'] env={'repo': 'demo'}
+  [symbol] subject=symbol:crates/cli/src/cmd_clean.rs#cmd_scan objects=['crates/cli/src/cmd_clean.rs'] env={'repo': 'demo'}
+  [symbol] subject=symbol:crates/cli/src/cmd_clean.rs#CAT_ORDER objects=['crates/cli/src/cmd_clean.rs'] env={'repo': 'demo'}
+  [issue] subject=issue:demo#1 objects=['issue:demo#1'] env={'repo': 'demo'}
+  [issue] subject=issue:demo#2 objects=['issue:demo#2'] env={'repo': 'demo'}
+
+-- 9. evidence 密度（每条判断的依据数）--
+  change   avg=1.0 min=1 max=1
+  doc      avg=1.0 min=1 max=1
+  issue    avg=3.33 min=3 max=4
+  symbol   avg=1.0 min=1 max=1
+
+-- 10. 时区/时间：at 的范围 --
+  min(at)=1792540869  max(at)=1792901671
+  cache: .jingwei 目录内容 = ['jingwei.db', 'jingwei.db-shm', 'jingwei.db-wal']

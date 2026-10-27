@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>经纬</title>
+<!-- 版本号必须随发布改：WebView2 会缓存子资源，只改内容不换 URL 的话，
+     用户升级后拿到的是旧样式/旧脚本（这个坑踩过一次）。 -->
+<link rel="stylesheet" href="style.css?v=22">
+</head>
+<body>
+
+<!-- 图标：成套的线性图标（24×24 stroke，随文字颜色变色）。用 sprite 是为了
+     一处定义多处复用；比字符图标稳、比图片小、还能跟着主题变色。 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></symbol>
+    <symbol id="i-run" viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 18l-6-6 6-6M15 6l6 6-6 6"/></symbol>
+    <symbol id="i-journal" viewBox="0 0 24 24"><path d="M5 5a2 2 0 012-2h11v18H7a2 2 0 01-2-2z"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-machine" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-clean" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.5 6.5l2.6 2.6M14.9 14.9l2.6 2.6M17.5 6.5l-2.6 2.6M9.1 14.9l-2.6 2.6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10H9"/></symbol>
+    <symbol id="i-build" viewBox="0 0 24 24"><path d="M14 4l6 6-3 3-6-6z"/><path d="M11 9L4 16v4h4l7-7"/></symbol>
+    <symbol id="i-test" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></symbol>
+  </defs>
+</svg>
+
+<div class="ambient" aria-hidden="true"><div class="ambient-i"></div></div>
+
+<!-- 窄导航条（PCL2 那种做法：图标 + 悬停提示，把横向空间全留给内容） -->
+<aside class="side">
+  <div class="brand" data-tip="经纬 · 开发环境与项目就绪检查器">
+    <span class="mark">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 3v18" />
+        <path d="M8 3a9 9 0 010 18" />
+      </svg>
+    </span>
+  </div>
+
+  <nav class="nav" id="nav">
+    <button data-tab="home" class="on" data-needs="project" data-tip="概览 · 项目的结论与待处理项"><svg class="ic"><use href="#i-overview"/></svg><span class="lbl">概览</span></button>
+    <button data-tab="run" data-needs="project" data-tip="运行 · 装依赖 / 构建 / 测试 / 运行"><svg class="ic"><use href="#i-run"/></svg><span class="lbl">运行</span></button>
+    <button data-tab="editor" data-needs="project" data-tip="编辑器 · 改动先进草稿，应用才落盘"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">编辑器</span></button>
+    <button data-tab="note" data-needs="project" data-tip="记录 · 笔记 / 运行日志 / 变更"><svg class="ic"><use href="#i-journal"/></svg><span class="lbl">记录</span></button>
+        <span class="nav-sep"></span>
+    <button data-tab="machine" data-tip="机器清单 · 装配信息与系统设置"><svg class="ic"><use href="#i-machine"/></svg><span class="lbl">机器清单</span></button>
+    <button data-tab="clean" data-tip="清理 · 能删的 / 要权限的 / 别碰的"><svg class="ic"><use href="#i-clean"/></svg><span class="lbl">清理</span></button>
+  </nav>
+
+  <div class="side-foot">
+    <div class="sf-line" id="sfProject">还没有选项目</div>
+    <button class="btn ghost sm" id="btnPick" data-tip="打开项目…"><svg class="ic"><use href="#i-folder"/></svg><span class="lbl">打开项目…</span></button>
+    <button class="btn ghost sm" id="btnNew" data-tip="从模板新建项目"><svg class="ic"><use href="#i-plus"/></svg><span class="lbl">新建项目</span></button>
+  </div>
+</aside>
+
+<header class="top">
+  <div class="tinfo">
+    <h1 id="projectName">先选一个项目</h1>
+    <p id="projectPath">打开已有项目，或从模板创建新项目。</p>
+  </div>
+  <div class="tactions">
+    <div class="switcher">
+      <button class="btn ghost sm" id="btnSwitch"><svg class="ic"><use href="#i-swap"/></svg>切换项目 <b id="switchCount">0</b></button>
+      <div class="menu" id="switchMenu" hidden></div>
+    </div>
+    <div class="split" id="openSplit" hidden>
+      <button class="btn" id="btnOpen">用 VS Code 打开</button>
+      <button class="btn caret" id="btnOpenMenu">▾</button>
+      <div class="menu" id="openMenu" hidden></div>
+    </div>
+  </div>
+</header>
+
+<aside class="rail" id="rail" data-on="1">
+  <div class="rail-head">
+    <b id="railTitle">项目</b>
+    <span class="hint" id="railCounts">未扫描到项目</span>
+    <span class="grow"></span>
+    <button class="iconbtn" id="btnRail" title="收起/展开">⇥</button>
+  </div>
+  <!-- 全局选中：整个外壳只有这一处「当前项目」，点谁这儿都跟着换 -->
+  <div class="rail-projs" id="railProjs" style="display:none"></div>
+  <!-- 依赖是「当前项目」的属性，所以它有自己的一栏标题，不跟项目列表混在一起 -->
+  <div class="rail-sub" id="railSub" hidden>
+    <b>依赖</b><span id="railSubCounts"></span>
+    <span class="grow"></span>
+  </div>
+  <div class="rail-body" id="railBody"></div>
+</aside>
+
+<main>
+  <div id="fatal" class="fatal" hidden></div>
+
+  <!-- ───── 概览 ───── -->
+  <section id="view-home" class="view on">
+
+  <!-- **扫描面板常驻**（2026-10-18 用户反馈：选中项目后它就没了）。
+       以前它长在"欢迎页"里，选中项目 → 欢迎页隐藏 → 扫描、项目列表一起消失，
+       想换个目录就得先忘掉当前项目。**扫描是这个工具的主入口，不该被选中状态挤掉。** -->
+  <div class="scanPanel" id="homeEnginePanel">
+    <div class="sp-head"><b>项目</b><span class="hint">选一个项目即打开（走新内核）</span><span class="grow"></span><button class="btn sm" id="engPickRoot">选择仓库…</button></div>
+    <div id="engProjList" class="hint">读取中…</div>
+    <div class="sp-head"><b>内核概览</b><span class="hint">数据来自 jingwei.db（新内核，非旧 graph.db）</span></div>
+    <div class="dgrid" id="homeStats"><div class="hint">读取中…</div></div>
+    <div class="sp-head" style="margin-top:10px"><b>同级项目</b><span class="hint">当前仓库父目录下带 .git/.jingwei 的目录</span></div>
+    <div id="homeProjects" class="hint">读取中…</div>
+    <div class="sp-head" style="margin-top:10px"><b>未由内核提供（T6）</b></div>
+    <div class="hint">扫描项目 / 审计 / 合同 / 检查 / 构建 / 运行 / 消息中心 —— 旧内核（graph.db）能力，T6 后按需重接；本轮不混源。</div>
+  </div>
+  <!-- T5 待删（旧扫描面板） -->
+
+    <div id="welcome" class="welcome">
+      <svg class="hero-art" viewBox="0 0 120 120" aria-hidden="true">
+        <!-- 空状态插画：一只敞开的箱子 + 一点暖光（线条与图标同源） -->
+        <path d="M18 44l42-20 42 20-42 20z" />
+        <path d="M18 44v34l42 20 42-20V44" />
+        <path d="M60 64v34" />
+        <path d="M36 34l42 20" />
+        <circle cx="60" cy="30" r="4" />
+      </svg>
+      <h2>选择项目</h2>
+      <p>选择一个目录，扫描其中的项目；选中后可查看它声明了什么、实际用的是哪个。</p>
+      <div class="wrow" style="margin-top:18px">
+        <button class="btn big" id="btnPick2">打开已有项目</button>
+        <button class="btn ghost" id="btnNew2">＋ 新建项目</button>
+      </div>
+    </div>
+
+    <div class="modal" id="newModal" hidden>
+    <div class="modal-card" id="newPanel" role="dialog" aria-modal="true" aria-label="新建项目">
+      <div class="modal-head">
+        <h3>新建项目</h3>
+        <span class="grow"></span>
+        <button class="iconbtn" id="btnNewX" title="关闭（Esc）">✕</button>
+      </div>
+      <div class="row">
+        <select id="newLang" style="flex:0 0 150px" data-tip="先定语言：不同语言的清单文件、目录结构、构建命令都不一样">
+          <option value="python">Python</option>
+          <option value="rust">Rust</option>
+          <option value="node">Node / 前端</option>
+          <option value="java">Java</option>
+          <option value="cpp">C / C++</option>
+        </select>
+        <select id="newProfile" style="flex:0 0 170px"><option value="">— 配置档 —</option></select>
+        <input id="newName" placeholder="项目名：英文、数字、下划线">
+        <select id="newTpl">
+          <option value="package">package · 一个包 + 测试</option>
+          <option value="cli">cli · 带子命令的命令行工具</option>
+          <option value="script">script · 单个脚本</option>
+        </select>
+      </div>
+      <div class="row" id="newPyRow">
+        <select id="newPython" style="flex:1"><option value="">自动挑一个可用的解释器</option></select>
+        <label class="chk"><input type="checkbox" id="newVenv" checked> 建虚拟环境并绑进契约</label>
+      </div>
+      <div class="row">
+        <input id="newPurpose" placeholder="为什么做它？这句会变成第一篇笔记">
+        <button class="btn" id="btnCreate">选个位置建起来</button>
+        <button class="btn ghost" id="btnSaveProfile">存成配置档</button>
+        <button class="btn ghost" id="btnNewCancel">取消</button>
+      </div>
+      <div class="newpreview" id="newPreview"></div>
+      <div class="hint" id="newHint">配置档记的是「模板 + 用哪个解释器 + 建不建虚拟环境」，下次直接沿用。</div>
+    </div>
+    </div>
+
+    <div id="homeBody" hidden>
+      <!-- **一句话指南**：项目是什么 / 能不能跑 / 卡在哪 / 下一步敲什么。
+           它是概览页主位——人打开一个项目问的是一个**问题**，不是一份清单。
+           数据与 `jingwei guide` 同源（引擎的 `Guide::to_json()`），不可能各说各的。 -->
+      <div id="guideCard"></div>
+      <div id="statusCard" class="status"></div>
+      <!-- **验一下能不能构建**：只有它回答"这台机器够不够用" -->
+      <div class="verify-row">
+        <button id="verifyBtn" class="btn">验一下能不能构建</button>
+        <span class="hint" id="verifyHint">会真跑一次构建，可能要一两分钟</span>
+      </div>
+      <div id="verifyResult" hidden></div>
+      <div id="autoLine" class="autoLine" hidden></div>
+      <div id="cardNotes" class="cardNotes"></div>
+      <div id="changeCard"></div>
+      <h3 class="secTitle">诊断</h3>
+      <div id="resultLine" class="result-line-wrap"></div><div id="msgFeed" class="msg-feed"></div><div id="findings"></div>
+
+      <div class="audit-head" style="display:none">
+        <h3 class="secTitle">项目检查</h3>
+        <span class="hint" id="auditWhen"></span>
+        <span class="grow"></span>
+        <button class="btn ghost sm" id="btnAuditScan">重新扫描</button>
+        <button class="btn ghost sm" id="btnAuditDeep">深度扫描</button>
+      </div>
+      <div id="audit" style="display:none"></div>
+
+      <details class="more">
+        <summary>细节：解释器、工具链、契约</summary>
+        <div id="facts" class="facts"></div>
+      </details>
+
+      <div id="settingsPanel" class="panel" hidden>
+        <h3>设置</h3>
+        <div class="hint">能自定义的都在这儿；关掉任何一项，同一件事都还能手动做。</div>
+        <div class="setGroup">外观</div>
+        <div class="setrow">
+          <label>主题 <select id="setTheme">
+            <option value="light">暖阳（默认）</option>
+            <option value="dark">夜灯</option>
+          </select></label>
+          <label>密度 <select id="setDensity">
+            <option value="compact">紧凑</option>
+            <option value="standard" selected>标准</option>
+            <option value="loose">宽松</option>
+          </select></label>
+          <label>动效 <select id="setMotion">
+            <option value="off">关</option>
+            <option value="fast">快</option>
+            <option value="default" selected>标准</option>
+            <option value="slow">慢</option>
+          </select></label>
+          <label>反馈 <select id="setFbLevel">
+            <option value="silent">静默</option>
+            <option value="standard" selected>标准</option>
+            <option value="verbose">详细</option>
+          </select></label>
+          <label>编辑器缩进 <select id="setIndent">
+            <option value="2">2 空格</option>
+            <option value="4" selected>4 空格</option>
+          </select></label>
+        </div>
+        <div class="setGroup">自动化（关掉后手动点）</div>
+        <div class="opt"><div class="lbl"><b>进 App 就扫一遍项目目录</b>
+          <span>打开就能看到你手上有哪些项目；关掉就手动点「扫描」。</span></div>
+          <input class="sw" type="checkbox" id="setScan"></div>
+        <div class="opt"><div class="lbl"><b>自动分析每张卡片</b>
+          <span>按需读取环境、依赖、项目检查，填进卡片下方的小字。</span></div>
+          <input class="sw" type="checkbox" id="setAnalyze"></div>
+        <div class="opt"><div class="lbl"><b>没有契约时自动起草</b>
+          <span>按项目文件推出一份 env.contract.json；它只是草稿，命令可以改。</span></div>
+          <input class="sw" type="checkbox" id="setContract"></div>
+        <div class="opt"><div class="lbl"><b>打开项目后自动跑一次测试</b>
+          <span>契约里有 test 命令才跑；用来确认这个项目现在是不是好的。</span></div>
+          <input class="sw" type="checkbox" id="setVerify"></div>
+        <div class="opt"><div class="lbl"><b>打开项目后自动试运行</b>
+          <span>会真的把项目跑起来。长期服务会占端口，所以只对一次性脚本自动生效。</span></div>
+          <input class="sw" type="checkbox" id="setTrial"></div>
+        <div class="opt"><div class="lbl"><b>记录页鼠标停一下就选中项目</b>
+          <span>不用点击即可切换；关掉后改成点击选中。</span></div>
+          <input class="sw" type="checkbox" id="setHover"></div>
+        <div class="opt"><div class="lbl"><b>每次动作自动写一条记录</b>
+          <span>契约、测试、清理都留痕，回头看能知道什么时候是好的。</span></div>
+          <input class="sw" type="checkbox" id="setAutoRecord"></div>
+        <div class="opt"><div class="lbl"><b>点击与完成的音效</b>
+          <span>很轻，现场合成，不占体积；嫌吵就关。</span></div>
+          <input class="sw" type="checkbox" id="setSound"></div>
+        <div class="hint" style="margin-top:8px">试运行会真的把项目跑起来：长期服务会占住端口和进程，
+        所以它默认只对「一次性脚本」生效（契约里写了退出码判定的那种）。</div>
+        <div class="setGroup">网络（默认拒绝，只放行包仓库）</div>
+        <div class="opt"><div class="lbl"><b>临时放行一个域名</b>
+          <span>装依赖要用的仓库；最多 24 小时，到点自动失效，随时可以收回。</span></div>
+          <input id="netHost" placeholder="例如 mirrors.aliyun.com" style="width:180px">
+          <button class="btn sm" id="netAllow">允许 24 小时</button></div>
+        <div id="netList" class="hint" style="margin-top:4px">读一下当前允许了什么…</div>
+        <div class="hint" style="margin-top:6px">数据目录：<code id="dataDir">读一下…</code> <button class="btn ghost sm" id="btnDataDir" title="在资源管理器里打开">打开</button></div>
+<div id="envLast" class="hint" style="margin-top:6px">最近一次环境动作：—</div>
+        <div class="setGroup">范围</div>
+        <div class="setrow">
+          <label>扫描深度 <select id="setScanDepth">
+            <option value="1">往下 1 层</option>
+            <option value="2" selected>往下 2 层</option>
+            <option value="3">往下 3 层</option>
+          </select></label>
+          <label>清理力度 <select id="setCleanLevel">
+            <option value="conservative">保守</option>
+            <option value="standard" selected>标准</option>
+            <option value="aggressive">激进（A 区全勾）</option>
+          </select></label>
+          <label>删除方式 <select id="setDelMode">
+            <option value="trash" selected>回收站（可还原）</option>
+            <option value="permanent">永久删除</option>
+          </select></label>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn ghost sm" id="btnResetSettings">恢复默认</button>
+          <span class="hint">默认：暖阳 · 标准密度 · 标准动效 · 自动化全开 · 回收站</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───── 这台机器（不需要项目） ───── -->
+  <section id="view-machine" class="view">
+    <div class="panel">
+      <div class="deep-head">
+        <h3>硬件与系统</h3>
+        <span class="hint" id="deepWhen">正在读…</span>
+        <span class="grow"></span>
+        <button class="btn ghost sm" id="btnRefreshMachine">重新读取</button>
+      </div>
+      <div id="hwBody" class="hint">读取中…</div>
+    </div>
+    <div class="panel" id="deepBody"></div>
+  </section>
+
+  <!-- ───── 启动 ───── -->
+  <section id="view-run" class="view">
+  <div class="scanPanel" id="engRunPanel">
+    <div class="sp-head"><b>运行</b><span class="hint">T4 过渡态</span></div>
+    <div class="hint">终端未接（P1）：本轮不 spawn 任何进程。</div>
+    <div class="hint" id="engRunDeny">外部操作未实现/已禁用（deny-list）：运行 / 启动 / 打开目录 / 打开 URL 均不可用。</div>
+  </div>
+    <!-- 一条龙：装依赖 → 构建 → 测试 → 运行。每步一个状态灯，跑完就亮。 -->
+    <!-- T5 待删（旧运行面板） -->
+<div class="pipeline" id="pipeline" style="display:none">
+      <button class="pstep" disabled data-task="install"><span class="pdot"></span><svg class="ic"><use href="#i-box"/></svg>
+        <b>装依赖</b><span class="pcmd" id="cmdInstall">—</span></button>
+      <span class="parrow">→</span>
+      <button class="pstep" disabled data-task="build"><span class="pdot"></span><svg class="ic"><use href="#i-build"/></svg>
+        <b>构建</b><span class="pcmd" id="cmdBuild">—</span></button>
+      <span class="parrow">→</span>
+      <button class="pstep" disabled data-task="test"><span class="pdot"></span><svg class="ic"><use href="#i-test"/></svg>
+        <b>测试</b><span class="pcmd" id="cmdTest">—</span></button>
+      <span class="parrow">→</span>
+      <button class="pstep primary" disabled data-task="run"><span class="pdot"></span><svg class="ic"><use href="#i-run"/></svg>
+        <b>运行</b><span class="pcmd" id="cmdRun">—</span></button>
+      <span class="grow"></span>
+      <span class="hint" id="runHint">按契约里的命令走；输出会实时流进来，跑完留成一张卡片。</span>
+    </div>
+    <!-- 运行时：每一段是一个小面板，跑完不消失；细节折在每块里面 -->
+    <div id="stageStream" class="stream" hidden></div>
+    <!-- T5 待删（旧运行流） -->
+<div id="runs" style="display:none"></div>
+  </section>
+
+  <!-- ───── 清理 ───── -->
+  <section id="view-clean" class="view">
+    <div class="toolbar">
+      <div>
+        <div class="big" id="cleanSummary">正在清点…</div>
+        <div class="hint" id="cleanScope">默认走回收站，删掉的东西还能找回来。</div>
+      </div>
+      <span class="grow"></span>
+      <button class="btn" id="btnClean">清理勾选的项</button>
+      <button class="btn ghost" id="btnRescan">重新清点</button>
+    </div>
+    <div id="cleanList"></div>
+  </section>
+
+  <!-- ───── 笔记 ───── -->
+  <!-- ───── 编辑器（工作副本：改了先不落盘）───── -->
+  <section id="view-editor" class="view">
+  <div class="scanPanel" id="engEditorPanel">
+    <div class="sp-head"><b>文件（engine_files·单层钻取 ≤8 层）</b><span class="hint" id="engBreadcrumb">/</span></div>
+    <div id="engFiles" class="hint">读取中…</div>
+    <div class="sp-head" style="margin-top:10px"><b>文件内容（engine_read_file）</b></div>
+    <pre id="engText" style="max-height:30vh;overflow:auto;font-size:12px">未打开文件</pre>
+    <div class="hint" id="engMeta"></div>
+    <div class="sp-head" style="margin-top:10px"><b>预览（preview，Esc 回 origin）</b></div>
+    <div id="engPreview" class="hint">点一条引用看预览</div>
+    <div class="sp-head" style="margin-top:10px"><b>引用（engine_cite）</b></div>
+    <div id="engCite" class="hint">未打开文件</div>
+    <div class="sp-head" style="margin-top:10px"><b>引用列表（engine_impact）</b></div>
+    <div id="engRefs" class="hint">未打开文件</div>
+    <div class="sp-head" style="margin-top:10px"><b>卡片（engine_card）</b></div>
+    <div id="engCard" class="hint">未打开文件</div>
+    <div class="sp-head" style="margin-top:10px"><b>边（engine_edges）</b></div>
+    <div id="engEdges" class="hint">未打开文件</div>
+    <div class="hint">problems / impact / rename / 草稿 / 保存 —— 未由内核提供（T6）。越界路径会显示 outside root。</div>
+  </div>
+            <div id="edRenameBox" class="ed-rename" hidden>
+          <label>旧名 <input id="edRnOld" size="14" placeholder="符号名"></label>
+          <label>新名 <input id="edRnNew" size="14" placeholder="改成什么"></label>
+          <button class="btn ghost sm" id="edRnPreview">先看清单</button>
+          <button class="btn sm" id="edRnApply" hidden>按清单改</button>
+          <span id="edRnMsg" class="hint"></span>
+          <div id="edRnList" class="ed-rn-list"></div>
+        </div>
+<!-- T5 待删（旧编辑器） -->
+<div class="ed-wrap" style="display:none">
+      <div class="ed-side">
+        <div class="ed-tools">
+          <input id="edFilter" placeholder="筛选文件…">
+          <button class="btn ghost sm" id="btnEdRefresh">刷新</button>
+        </div>
+        <div id="edFiles" class="ed-files"></div>
+      </div>
+      <div class="ed-main">
+        <div class="ed-tabs" id="edTabs"></div>
+        <div class="ed-bar">
+          <b id="edPath">还没有打开文件</b>
+          <span class="dirty" id="edDirty" hidden>未应用</span>
+          <span class="grow"></span>
+          <button class="btn ghost sm" id="btnEdRename" disabled title="改名前先看清单">改名</button>
+          <button class="btn sm" id="btnEdApply" disabled><svg class="ic"><use href="#i-check"/></svg>应用</button>
+          <button class="btn ghost sm" id="btnEdMore" disabled title="版本与格式">更多 ▾</button>
+          <span class="sep"></span>
+          <span id="edHistory" class="ed-history" hidden></span>
+          <span id="edDiagCount" class="ed-diagcount" hidden title="这个文件有几处诊断，点一下跳到第一处"></span>
+          <button class="btn ghost sm" id="btnEdCheck" disabled title="跑一次真实编译器检查，结果会标在行号上">检查</button>
+          <button class="btn ghost sm" id="btnEdBuild" disabled><svg class="ic"><use href="#i-build"/></svg>构建</button>
+          <button class="btn ghost sm" id="btnEdTest" disabled><svg class="ic"><use href="#i-test"/></svg>测试</button>
+          <button class="btn ghost sm" id="btnEdRun" disabled><svg class="ic"><use href="#i-run"/></svg>运行</button>
+        </div>
+        <div class="ed-crumb" id="edCrumb" hidden></div>
+        <div class="ed-body">
+          <div class="ed-gutter" id="edGutter">
+            <div class="ed-gl" id="edGl" hidden></div>
+            <div id="edNums">1</div>
+          </div>
+          <div class="ed-wrap2">
+            <div class="ed-hl" id="edHl" hidden></div>
+            <div class="ed-guides" id="edGuides"></div>
+            <div class="ed-brk" id="edBrkA" hidden></div>
+            <div class="ed-brk" id="edBrkB" hidden></div>
+            <pre class="ed-code" id="edCode" aria-hidden="true"></pre>
+            <textarea id="edText" spellcheck="false" placeholder="从左边选一个文件；改动先留在内存里，点「应用」才写回磁盘。"></textarea>
+            <div class="ed-find" id="edFind" hidden>
+              <input id="edFindInput" placeholder="查找…" autocomplete="off">
+              <span class="fcnt" id="edFindCnt"></span>
+              <button class="iconbtn" id="edFindPrev" title="上一处（Shift+Enter）">↑</button>
+              <button class="iconbtn" id="edFindNext" title="下一处（Enter）">↓</button>
+              <button class="iconbtn" id="edFindClose" title="关闭（Esc）">✕</button>
+            </div>
+          </div>
+        </div>
+        <div class="ed-foot">
+          <span id="edStat">—</span>
+          <span class="grow"></span>
+          <span id="edEnc" data-tip="这个文件的编码与换行"></span>
+          <span id="edLnCol">第 1 行，第 1 列</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───── 笔记 ───── -->
+  <!-- 图谱：画布是主体，控制条浮在右上（和编辑器一样，画布不是卡片） -->
+  <section id="view-note" class="view">
+  <div class="scanPanel" id="engNotePanel">
+    <div class="sp-head"><b>记录（文档索引）</b><span class="hint">T4 过渡态</span></div>
+    <div id="engNoteBody" class="hint">文档索引未由内核提供（T6）：旧内核读取 graph.db，本轮不混源。</div>
+  </div>
+    <!-- T5 待删（旧记录页） -->
+<div class="noteTop" style="display:none">
+      <div class="noteTop-bar">
+        <b>项目</b>
+        <span class="hint" id="nbScope">选中一个项目，看它留了什么下来</span>
+        <span class="grow"></span>
+        <button class="btn ghost sm" id="btnNbScan">扫描项目目录</button>
+      </div>
+      <div id="nbProjects" class="projList compact"></div>
+    </div>
+    <!-- T5 待删（旧笔记编辑器） -->
+<div class="notebook" style="display:none">
+      <div class="nb-list">
+        <div class="nb-tools">
+          <input id="nbSearch" placeholder="搜标题、正文、标签…">
+          <button class="btn sm" id="btnNewNote">＋ 新笔记</button>
+        </div>
+        <div id="nbItems" class="nb-items"></div>
+        <div class="nb-foot" id="nbFoot"></div>
+      </div>
+      <div class="nb-editor" id="nbEditor">
+        <div class="nb-empty">
+          <h3>这是你自己的笔记本</h3>
+          <p>每篇笔记存成一个 <code>.md</code> 文件，带 frontmatter，可以直接拖进 Obsidian 或任何编辑器。</p>
+          <p>正文里写 <code>[[另一篇笔记]]</code>，它就会认成链接。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───── 底部工具窗（IDEA 的形状：问题 / 终端 / 消息 都在这一处）───── -->
+  <section class="dock" id="dock" hidden>
+    <div class="dock-tabs">
+      <button class="dtab on" data-dtab="problems">问题<b class="cnt" id="dCntProb">0</b></button>
+      <button class="dtab" data-dtab="terminal">终端</button>
+      <button class="dtab" data-dtab="messages">消息<b class="cnt" id="dCntMsg">0</b></button>
+      <span class="grow"></span>
+      <span class="dock-hint" id="dockHint"></span>
+      <button class="iconbtn" id="dockCheck" title="跑一次真实的编译器检查（Rust 项目）">运行检查</button>
+      <button class="iconbtn" id="dockClear" title="清空当前这一栏">清空</button>
+      <button class="iconbtn" id="dockClose" title="收起（Ctrl+J）">收起</button>
+    </div>
+    <div class="dock-body">
+      <div class="dpane on" id="paneProblems">
+        <div class="dfilter" id="probFilter"></div>
+        <div class="dsplit">
+          <div class="dlist" id="probList"></div>
+          <div class="ddetail" id="probDetail">
+            <div class="dempty">选择左侧条目，此处显示判定依据与复核命令。</div>
+          </div>
+        </div>
+      </div>
+      <div class="dpane" id="paneTerminal">
+        <pre class="term" id="termOut"></pre>
+      </div>
+      <div class="dpane" id="paneMessages">
+        <div class="dlist" id="msgList"></div>
+      </div>
+    </div>
+    <div class="dock-grip" id="dockGrip" title="拖动调整高度"></div>
+  </section>
+</main>
+
+<section class="band" id="band" hidden>
+  <div class="band-main">
+    <span class="dot" id="bandDot"></span>
+    <b id="bandTitle">还没有运行记录</b>
+    <span class="hint" id="bandDetail"></span>
+    <span class="grow"></span>
+    <button class="btn ghost sm" id="btnBandOpen" hidden>查看输出</button>
+    <button class="btn ghost sm" id="btnBandClose" hidden>收起</button>
+  </div>
+  <div class="progress" id="bandProgress" hidden><div class="fill" id="bandFill"></div></div>
+  <ol class="band-stages" id="bandStages"></ol>
+</section>
+
+<footer class="bar">
+  <span class="bit">CPU <b id="barCpu">—</b></span>
+  <canvas id="spark" width="132" height="24" hidden></canvas>
+  <span class="bit">内存 <b id="barMem">—</b></span>
+  <span class="bit">系统盘 <b id="barDisk">—</b></span>
+  <span class="bit dim" id="barPy">—</span>
+  <span class="grow"></span>
+  <button class="bit act" id="btnDockProb" data-dock="problems" title="问题（Ctrl+J 开合底部）">问题 <b id="barProb">0</b></button>
+  <button class="bit act" id="btnDockTerm" data-dock="terminal" title="终端：跑起来的输出都在这儿">终端</button>
+        <button class="btn ghost sm" id="btnFocus" title="停掉不必要后台（轮询/对账），只留当前要看的东西">聚焦</button>
+  <button class="btn ghost sm" id="btnSettings"><svg class="ic"><use href="#i-gear"/></svg>设置</button>
+  <span class="bit dim" id="barAt">等待采样…</span>
+</footer>
+
+<div class="feed" id="feed" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<div class="busyCursor" id="busyCursor" hidden><span class="bc-i"></span></div>
+<!-- 前端拆成 7 个经典脚本（没有打包器是架构选择，见《设计》§10）。
+     **顺序不能动**：经典脚本按 <script> 出现的顺序求值，函数声明会提升、
+     const/let 不会。所以状态与基础工具排在最前，页面模块依次在后。
+     拆的边界按"一屏/一域"，不是按行数平均切——
+     原来的 app.js 已经到 4400 行，门禁上限 4500，再加功能就撞线了。 -->
+<script src="shim.js?v=1"></script>
+<script src="core.js?v=22"></script>
+<script src="shell.js?v=22"></script>
+<script src="scan.js?v=1"></script>
+<script src="scan-extra.js?v=1"></script>
+<script src="projects.js?v=22"></script>
+<script src="notes.js?v=22"></script>
+<script src="events.js?v=22"></script>
+<script src="editor.js?v=22"></script>
+<script src="engine-editor.js?v=1"></script>
+<script src="datacore.js?v=2"></script>
+<script src="datacore-panel.js?v=1"></script>
+<script>
+(function () {
+  if (new URLSearchParams(location.search).get('selftest') !== 'shell') return;
+  const errs = [];
+  window.addEventListener('error', (e) => errs.push(String(e.message || e)));
+  window.addEventListener('unhandledrejection', (e) => errs.push('reject:' + String(e.reason)));
+  const TABS = ['home','run','editor','note','machine','clean'];
+  const out = { tabs: [], pages: {}, scripts: [], consoleErrors: errs, unmapped: [] };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    await sleep(800);
+    out.scripts = [...document.scripts].map((s) => s.src || 'inline');
+    out.tabs = [...document.querySelectorAll('[data-tab]')].map((b) => b.dataset.tab);
+    for (const name of TABS) {
+      const btn = document.querySelector('[data-tab="' + name + '"]');
+      if (btn) btn.click();
+      await sleep(500);
+      const view = document.querySelector('#view-' + name) || document.querySelector('[id$="' + name + '"].view');
+      out.rootAt = (typeof S !== 'undefined') ? S.root : null;
+      out.pages[name] = {
+        visible: !!view && !view.hidden && view.offsetParent !== null,
+        textLen: view ? (view.innerText || '').trim().length : 0,
+        nodes: view ? view.querySelectorAll('*').length : 0,
+        empty: view ? /没有|暂无|空|未映射|未实现/.test(view.innerText || '') : true,
+        text: view ? (view.innerText || '').slice(0, 60000) : '',
+      };
+      if (name === 'editor' && window.__engOpen) {
+        // T6.5 preview：点一条 → 连点第二条 → Esc
+        const refs = document.querySelectorAll('#engRefs [data-ref]');
+        out.pages[name].refs = refs.length;
+        if (refs[0]) { refs[0].click(); await sleep(400); out.pages[name].preview1 = (document.querySelector('#engPreview') || {}).textContent || ''; }
+        if (refs[1]) { refs[1].click(); await sleep(400); out.pages[name].preview2 = (document.querySelector('#engPreview') || {}).textContent || ''; }
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        await sleep(200);
+        out.pages[name].previewEsc = (document.querySelector('#engPreview') || {}).textContent || '';
+        try { await window.__engOpen('../'); } catch {}
+        await sleep(300);
+        out.pages[name].escape = (document.querySelector('#engMeta') || {}).textContent || '';
+        try { await window.__engOpen('crates/engine/src/lib.rs'); } catch {}
+      }
+      if (name === 'run') {
+        const btns = document.querySelectorAll('#view-run button');
+        out.pages[name].buttons = btns.length;
+        for (const b of btns) { try { b.click(); } catch {} }
+        await sleep(400);
+      }
+    }
+    out.unmapped = window.__JW_UNMAPPED__ || [];
+    out.ok = out.tabs.length === 6;
+    const pre = document.createElement('pre');
+    pre.id = 'selftest';
+    pre.textContent = JSON.stringify(out);
+    pre.style.display = 'none';
+    document.body.appendChild(pre);
+    document.title = 'SELFTEST ' + (out.ok ? 'OK' : 'FAIL');
+  });
+})();
+</script>
+</body>
+</html>

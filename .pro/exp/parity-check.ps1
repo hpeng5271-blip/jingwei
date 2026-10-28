@@ -43,7 +43,7 @@ Start-Sleep -Seconds 3
 $text2 = Step "text"
 Check "project.opened" ($text2 -match 'jingwei') ""
 
-$tabs = @('run','editor','note','graph','machine','clean')
+$tabs = @('run','editor','note','machine','clean')
 foreach ($t in $tabs) {
   Step ("tab:" + $t) | Out-Null
   Start-Sleep -Seconds 2

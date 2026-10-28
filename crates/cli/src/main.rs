@@ -3736,6 +3736,8 @@ fn cmd_serve(root: &PathBuf, no_subscribe: bool) -> anyhow::Result<ExitCode> {
                 }
             }
             "machine" => serde_json::json!({"v": 1, "id": id, "ok": true, "result": engine::Engine::machine()}),
+            "machine_hw" => serde_json::json!({"v": 1, "id": id, "ok": true, "result": engine::Engine::machine_hw()}),
+
             "check" => match engine::Engine::open(&root).and_then(|e| e.check()) {
                 // T2.4：与 facade 同源（12 项）；旧 4 项 stub 声称 files/symbols 却恒 0，已废弃
                 Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),

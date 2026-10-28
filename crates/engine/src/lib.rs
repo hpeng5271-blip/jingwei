@@ -685,6 +685,73 @@ impl Engine {
         })
     }
 
+    /// 硬件（R2 · machine 换芯）：CPU / 内存 / 显卡 / 系统盘。
+    ///
+    /// 只走**外部命令**（PowerShell CIM），不在 engine 里写 WMI FFI——
+    /// 与 git 同一原则：工具链从外面来，我们只解析结果。失败给 `fails` 明说，不编默认值。
+    pub fn machine_hw() -> serde_json::Value {
+        let script = r#"
+$ErrorActionPreference='SilentlyContinue'
+$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+$os  = Get-CimInstance Win32_OperatingSystem | Select-Object -First 1
+$gpu = @(Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Basic|Remote|Virtual' } | ForEach-Object { $_.Name })
+$disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object {
+  @{ drive = $_.DeviceID; free_gb = [math]::Round($_.FreeSpace/1GB,0); total_gb = [math]::Round($_.Size/1GB,0) }
+})
+[pscustomobject]@{
+  cpu = $cpu.Name
+  cpu_mhz = $cpu.MaxClockSpeed
+  cores = $cpu.NumberOfLogicalProcessors
+  mem_gb = if ($os) { [math]::Round($os.TotalVisibleMemorySize/1MB,1) } else { $null }
+  gpus = $gpu
+  disks = $disks
+  os_product = $os.Caption
+  os_version = $os.Version
+  os_build = $os.BuildNumber
+} | ConvertTo-Json -Depth 5 -Compress
+"#;
+        let out = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output();
+        let mut fails: Vec<String> = Vec::new();
+        let val = match out {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                match serde_json::from_str::<serde_json::Value>(&s) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        fails.push(format!("CIM 输出不是 JSON：{e}"));
+                        serde_json::Value::Null
+                    }
+                }
+            }
+            Ok(o) => {
+                fails.push(format!(
+                    "powershell 退出码 {}：{}",
+                    o.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ));
+                serde_json::Value::Null
+            }
+            Err(e) => {
+                fails.push(format!("起不来 powershell：{e}"));
+                serde_json::Value::Null
+            }
+        };
+        if val.is_null() {
+            return serde_json::json!({
+                "scope": "project", "files_considered": 0, "truncated": false, "next_cursor": serde_json::Value::Null,
+                "source": "cim", "fails": fails, "hw": serde_json::Value::Null,
+            });
+        }
+        serde_json::json!({
+            "scope": "project", "files_considered": 0, "truncated": false, "next_cursor": serde_json::Value::Null,
+            "source": "cim",
+            "fails": fails,
+            "hw": val,
+        })
+    }
+
     /// 同级项目列表（serve `projects` 同构）：父目录里带 .git 或 .jingwei 的目录，最多 200 项。
     /// 读目录失败显式 Err，不返回空列表冒充"没有项目"。
 

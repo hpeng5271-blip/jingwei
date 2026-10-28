@@ -388,6 +388,23 @@ fn serve_scan_matches_facade() {
 
 
 
+
+/// R2 · machine 硬件换芯：走外部 PowerShell CIM，成功给 hw，失败给 fails（不许两头空）。
+#[test]
+fn machine_hw_reports_either_data_or_reason() {
+    let v = engine::Engine::machine_hw();
+    assert_eq!(v["scope"], "project");
+    assert_eq!(v["truncated"], false);
+    let has_hw = !v["hw"].is_null();
+    let fails = v["fails"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(has_hw || fails > 0, "要么有数据要么有失败原因：{v}");
+    if has_hw {
+        assert!(v["hw"]["cpu"].is_string() || v["hw"]["cpu"].is_null(), "{v}");
+        assert!(v["hw"].get("mem_gb").is_some(), "内存字段要在：{v}");
+        assert!(v["hw"].get("disks").is_some(), "磁盘字段要在：{v}");
+    }
+}
+
 /// R2 · note 换芯：读 `.jingwei/notes/*.md`，frontmatter 五键与旧壳同规则，排序 updated 倒序。
 #[test]
 fn serve_notes_matches_facade_and_parses_frontmatter() {

@@ -390,7 +390,7 @@ fn serve_scan_matches_facade() {
 
 
 
-/// R2 · clean 换芯（数据面）：项目产物字段对齐 + 顶层信封口径（zoneA/recommended*，只算 zone A delete）。
+/// R2 · clean 换芯（数据面）：项目产物按旧页 JUNK/BUILD 枚举（target/node_modules 不列），字段对齐。
 #[test]
 fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     let d = fixture("cleanscan");
@@ -398,6 +398,12 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     std::fs::write(d.join("target/debug/x.rlib"), vec![0u8; 2048]).unwrap();
     std::fs::create_dir_all(d.join("node_modules/pkg")).unwrap();
     std::fs::write(d.join("node_modules/pkg/i.js"), "x\n").unwrap();
+    std::fs::create_dir_all(d.join("dist")).unwrap();
+    std::fs::write(d.join("dist/app.bin"), vec![0u8; 4096]).unwrap();
+    std::fs::create_dir_all(d.join("build")).unwrap();
+    std::fs::write(d.join("build/o.o"), vec![0u8; 8]).unwrap();
+    std::fs::create_dir_all(d.join("__pycache__")).unwrap();
+    std::fs::write(d.join("__pycache__/x.pyc"), vec![0u8; 100]).unwrap();
     parse_fixture(&d);
 
     let e = engine::Engine::open(&d).expect("open");
@@ -406,7 +412,7 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     let resp = serve_once(&d, &req);
     assert_eq!(resp["ok"], true, "{resp}");
     let served = strip(resp["result"].clone());
-    // serve 与 facade 同值：真实大缓存量体积 300ms 截断、字节漂移，只比「非截断项」（截断项已排除出字节合计）。
+    // serve 与 facade 同值：真实大缓存量体积 300ms 截断、字节漂移，只比「非截断项」。
     let strip_trunc = |v: &Value| -> Value {
         let mut c = v.clone();
         if let Some(arr) = c.get_mut("items").and_then(|i| i.as_array_mut()) {
@@ -416,36 +422,42 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     };
     assert_eq!(strip_trunc(&served), strip_trunc(&facade), "非截断项 serve 与 facade 必须同值");
 
-    // 顶层键固定（zoneA/recommendedBytes/recommendedCount 是旧页信封口径）
+    // 顶层键固定
     let mut top: Vec<&str> = served.as_object().unwrap().keys().map(|s| s.as_str()).collect();
     top.sort();
     assert_eq!(top, ["files_considered", "hasProject", "human", "humanRecommended", "items", "next_cursor", "recommendedBytes", "recommendedCount", "scope", "total_bytes", "truncated", "zoneA"]);
 
-    // 项目产物（path 是相对名）字段与旧页 zone A 对齐；全局缓存走枚举层，另测。
+    // 项目产物：target/node_modules 旧页 SKIP 不列；dist/build/__pycache__ 列（旧文案/绝对路径/rec）。
     let items = served["items"].as_array().expect("items");
-    let names = ["target", "node_modules", "dist", "__pycache__"];
     let project: Vec<&Value> = items
         .iter()
-        .filter(|i| i["path"].as_str().map_or(false, |p| names.contains(&p)))
+        .filter(|i| matches!(i["label"].as_str(), Some("target" | "node_modules" | "dist" | "build" | "__pycache__")))
         .collect();
-    let paths: Vec<&str> = project.iter().filter_map(|i| i["path"].as_str()).collect();
-    assert!(paths.contains(&"target"), "{paths:?}");
-    assert!(paths.contains(&"node_modules"), "{paths:?}");
+    let labels: Vec<&str> = project.iter().filter_map(|i| i["label"].as_str()).collect();
+    assert!(!labels.contains(&"target"), "{labels:?}");
+    assert!(!labels.contains(&"node_modules"), "{labels:?}");
+    assert!(labels.contains(&"dist"), "{labels:?}");
+    assert!(labels.contains(&"__pycache__"), "{labels:?}");
     for it in &project {
         let mut ks: Vec<&str> = it.as_object().unwrap().keys().map(|x| x.as_str()).collect();
         ks.sort();
         assert_eq!(ks, ["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"], "{it}");
         assert_eq!(it["action"], "delete");
         assert_eq!(it["zone"], "a");
-        assert_eq!(it["recommended"], true);
     }
-    let t = project.iter().find(|i| i["path"] == "target").expect("target item");
-    assert!(t["size_bytes"].as_u64().unwrap_or(0) >= 2048, "{t}");
-    // 顶层口径：只算 zone A + delete；target 2048B 非截断必进
-    assert!(served["zoneA"]["bytes"].as_u64().unwrap() >= 2048);
-    assert!(served["zoneA"]["count"].as_u64().unwrap() >= 2);
-    assert!(served["recommendedBytes"].as_u64().unwrap() >= 2048);
-    assert!(served["recommendedCount"].as_u64().unwrap() >= 1);
+    let dist = project.iter().find(|i| i["label"] == "dist").expect("dist item");
+    assert_eq!(dist["recommended"], false, "{dist}");
+    assert_eq!(dist["reason"], "打包/构建目录；重新构建就会再生成");
+    assert_eq!(dist["consequence"], "如果里面有你要交付的安装包，先拷走再删");
+    assert!(dist["path"].as_str().unwrap().ends_with("dist"), "{dist}");
+    assert!(dist["size_bytes"].as_u64().unwrap() >= 4096, "{dist}");
+    let pyc = project.iter().find(|i| i["label"] == "__pycache__").expect("pyc item");
+    assert_eq!(pyc["recommended"], true, "{pyc}");
+    assert_eq!(pyc["reason"], "Python 导入时自动生成的字节码；下次导入会重建");
+    assert!(pyc["path"].as_str().unwrap().ends_with("__pycache__"), "{pyc}");
+    assert!(pyc["size_bytes"].as_u64().unwrap() >= 100, "{pyc}");
+
+    assert_eq!(served["truncated"], false);
     assert_eq!(served["scope"], "project");
     let _ = std::fs::remove_dir_all(&d);
 }

@@ -834,20 +834,19 @@ impl Engine {
     /// 顶层口径与旧页信封一致：`zoneA`/`recommendedBytes`/`recommendedCount` 只算
     /// zone A + action=delete；被截断的项不进字节合计（不留假精确）。
     pub fn clean_scan(&self) -> Result<serde_json::Value, EngineError> {
-        const NAMES: [(&str, &str, &str); 4] = [
-            ("target", "Rust 构建产物", "下次 cargo build 会重新编出来"),
-            ("node_modules", "Node 依赖", "下次 npm install 会重新装"),
-            ("dist", "打包输出", "下次构建会重新生成"),
-            ("__pycache__", "Python 字节码缓存", "下次 import 会重新生成"),
-        ];
+        const JUNK_DIRS: &[&str] = &["__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".ipynb_checkpoints", "htmlcov"];
+        const BUILD_DIRS: &[&str] = &["build", "dist"];
+        const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "venv", "env", ".idea", ".vs", ".jingwei", ".drydock", ".pylaunch"];
         let mut items: Vec<serde_json::Value> = Vec::new();
         let mut files_considered: u64 = 0;
-        let mut stack: Vec<std::path::PathBuf> = vec![self.root.clone()];
+        let mut project_truncated = false;
+        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        let mut stack: Vec<std::path::PathBuf> = vec![root.clone()];
         let mut depth_of: std::collections::HashMap<std::path::PathBuf, u32> = Default::default();
-        depth_of.insert(self.root.clone(), 0);
+        depth_of.insert(root, 0);
         while let Some(dir) = stack.pop() {
             let d = *depth_of.get(&dir).unwrap_or(&0);
-            if d >= 4 || items.len() >= 50 {
+            if d >= 6 {
                 continue;
             }
             let Ok(rd) = std::fs::read_dir(&dir) else { continue };
@@ -857,28 +856,40 @@ impl Engine {
                 if !ft.is_dir() {
                     continue;
                 }
-                if let Some((_, label, consequence)) = NAMES.iter().find(|(n, _, _)| *n == name) {
+                let lower = name.to_lowercase();
+                let is_junk = JUNK_DIRS.contains(&lower.as_str());
+                let is_build = BUILD_DIRS.contains(&lower.as_str());
+                let is_egg = lower.ends_with(".egg-info");
+                if is_junk || is_build || is_egg {
+                    if items.len() >= 50 {
+                        project_truncated = true;
+                        continue;
+                    }
                     let (bytes, truncated) = measure_dir(&e.path(), 20_000);
                     files_considered += 1;
-                    let rel = e
-                        .path()
-                        .strip_prefix(&self.root)
-                        .map(|r| r.to_string_lossy().replace('\\', "/"))
-                        .unwrap_or_else(|_| name.clone());
+                    let (reason, consequence, recommended) = if lower == "__pycache__" {
+                        ("Python 导入时自动生成的字节码；下次导入会重建", "只是首次 import 慢一点点；不影响任何功能", true)
+                    } else if is_build {
+                        ("打包/构建目录；重新构建就会再生成", "如果里面有你要交付的安装包，先拷走再删", false)
+                    } else if is_egg {
+                        ("pip install -e 留下的元数据；重装时重建", "之后 pip uninstall 会认不出它，必要时 pip install -e . 重来一次", false)
+                    } else {
+                        ("测试/类型检查/格式化工具的运行缓存", "下次运行时重新计算，不影响结果", true)
+                    };
                     items.push(serde_json::json!({
-                        "path": rel,
-                        "label": label,
+                        "path": e.path().to_string_lossy().to_string(),
+                        "label": lower,
                         "action": "delete",
                         "zone": "a",
-                        "recommended": true,
+                        "recommended": recommended,
                         "size_bytes": bytes,
-                        "reason": "可重新生成",
+                        "reason": reason,
                         "consequence": consequence,
                         "truncated": truncated,
                     }));
                     continue;
                 }
-                if name.starts_with('.') || is_not_source_dir(&name) {
+                if SKIP_DIRS.contains(&lower.as_str()) {
                     continue;
                 }
                 depth_of.insert(e.path(), d + 1);
@@ -895,6 +906,8 @@ impl Engine {
         if let Some(t) = temp {
             if let Some(it) = scan_temp(&t) { items.push(it); }
         }
+        items.extend(admin_items());
+        items.extend(offlimits_items());
 
         // 顶层口径：只算 zone A + action=delete；被截断项不进字节合计（不留假精确）。
         let za = |i: &&serde_json::Value| i["zone"] == "a" && i["action"] == "delete";
@@ -908,7 +921,7 @@ impl Engine {
         Ok(serde_json::json!({
             "scope": "project",
             "files_considered": files_considered,
-            "truncated": items.len() >= 50,
+            "truncated": project_truncated,
             "next_cursor": serde_json::Value::Null,
             "hasProject": true,
             "items": items,

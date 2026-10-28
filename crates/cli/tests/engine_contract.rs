@@ -144,6 +144,28 @@ fn impact_perf_ms() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// R2.5 · card scope 三件套：file→"file"、dir→"module"、项目根→"project"。
+#[test]
+fn card_scope_three_zones() {
+    let d = fixture("cardscope");
+    parse_fixture(&d);
+    let e = engine::Engine::open(&d).expect("open");
+
+    let (_c, f) = e.card("file:src/a.rs", false, None).unwrap();
+    assert_eq!(f["scope"], "file", "{f}");
+    assert!(f["files_considered"].as_u64().is_some(), "{f}");
+    assert!(f["next_cursor"].is_null(), "{f}");
+
+    let (c, m) = e.card("src", false, None).unwrap();
+    assert_eq!(c, 0, "{m}");
+    assert_eq!(m["scope"], "module", "{m}");
+
+    let (c, p) = e.card(".", false, None).unwrap();
+    assert_eq!(c, 0, "{p}");
+    assert_eq!(p["scope"], "project", "{p}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 fn git(dir: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .arg("-C")

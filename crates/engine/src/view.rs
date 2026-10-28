@@ -51,6 +51,10 @@ pub fn card_value(store: &Store, root: &Path, input: &str, history: bool, state:
             "evidence": premise,
             "original": serde_json::Value::Null,
             "exit": 0,
+            "scope": "project",
+            "files_considered": 1,
+            "truncated": false,
+            "next_cursor": serde_json::Value::Null,
         });
         if state == Some("original") {
             // 原文：只从 <id> 推导（docs/decisions/<id>*.md），不猜别的目录；失败一次不崩
@@ -115,6 +119,7 @@ pub fn card_value(store: &Store, root: &Path, input: &str, history: bool, state:
                 return Ok((0, serde_json::json!({
                     "v": 1, "mode": "def", "path": rel, "total": list.len(),
                     "symbols": list, "exit": 0,
+                    "scope": "file", "files_considered": 1, "truncated": false, "next_cursor": serde_json::Value::Null,
                 })));
             }
             let dups = store.symbol_dups(&rel)?;
@@ -125,6 +130,7 @@ pub fn card_value(store: &Store, root: &Path, input: &str, history: bool, state:
             return Ok((0, serde_json::json!({
                 "v": 1, "mode": "dups", "path": rel, "total": list.len(),
                 "dups": list, "exit": 0,
+                "scope": "file", "files_considered": 1, "truncated": false, "next_cursor": serde_json::Value::Null,
             })));
         }
     }
@@ -209,6 +215,10 @@ pub fn card_value(store: &Store, root: &Path, input: &str, history: bool, state:
             })),
             "days": days.iter().map(|(d, n)| serde_json::json!({"day": day_str(*d), "n": n})).collect::<Vec<_>>(),
             "exit": 0,
+            "scope": if dir == "." { "project" } else { "module" },
+            "files_considered": files,
+            "truncated": files > 1000 || !facts_ok,
+            "next_cursor": serde_json::Value::Null,
         });
         if dep_names.is_none() {
             if let Some(o) = v.as_object_mut() {
@@ -247,6 +257,10 @@ if is_commit_like(input) {
                 "deleted": deleted,
                 "list": files.iter().take(20).map(|(p, s)| serde_json::json!({"path": p, "status": s})).collect::<Vec<_>>(),
             },
+            "scope": "project",
+            "files_considered": files.len(),
+            "truncated": files.len() > 20,
+            "next_cursor": serde_json::Value::Null,
         });
         return Ok((if meta.is_some() { 0 } else { 2 }, v));
     }
@@ -287,6 +301,7 @@ if is_commit_like(input) {
             "top": top.iter().map(|(d, n)| serde_json::json!({"dst": d, "n": n})).collect::<Vec<_>>(),
             "more": (total - top.len() as i64).max(0),
             "exit": 0,
+            "scope": "file", "files_considered": 1, "truncated": false, "next_cursor": serde_json::Value::Null,
         })));
     }
 
@@ -322,6 +337,7 @@ if is_commit_like(input) {
                 "author": r.author,
                 "subject": r.subject,
             })).collect::<Vec<_>>(),
+            "scope": "file", "files_considered": 1, "truncated": false, "next_cursor": serde_json::Value::Null,
         });
         return Ok((code, v));
     }
@@ -399,6 +415,10 @@ if is_commit_like(input) {
             "macro_n": tests.iter().filter(|(_, _, k)| k == "test_macro").count(),
             "items": tests.iter().map(|(n, l, k)| serde_json::json!({"name": n, "line": l, "kind": k})).collect::<Vec<_>>(),
         },
+        "scope": if subject.starts_with("dep:") { "project" } else { "file" },
+        "files_considered": 1,
+        "truncated": false,
+        "next_cursor": serde_json::Value::Null,
     });
     // Cargo.toml 的卡带一句依赖概况（只读统计，不重复落判断）
     if path.ends_with("Cargo.toml") {

@@ -1624,6 +1624,10 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
             "tests": {"scope": "file", "files": files.iter().cloned().collect::<Vec<_>>(), "items": tests},
             "importers": importers.iter().map(|(s, leaf, dst)| serde_json::json!({"file": s, "leaf": leaf, "dst": dst})).collect::<Vec<_>>(),
             "completeness": {"call_resolved": call_total - call_un, "call_unresolved": call_un, "depth_cap": 2, "detail_cap": DETAIL_CAP},
+            "scope": "module",
+            "files_considered": files.len(),
+            "truncated": direct_truncated || trans_truncated,
+            "next_cursor": serde_json::Value::Null,
         });
         return Ok((v, 0));
     }
@@ -1695,6 +1699,10 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
         "tests": {"scope": "file", "files": files.iter().cloned().collect::<Vec<_>>(), "items": tests},
         "importers": importers.iter().map(|(s, leaf)| serde_json::json!({"file": s, "leaf": leaf})).collect::<Vec<_>>(),
         "completeness": {"call_resolved": call_total - call_un, "call_unresolved": call_un, "depth_cap": 2},
+        "scope": "file",
+        "files_considered": files.len(),
+        "truncated": false,
+        "next_cursor": serde_json::Value::Null,
     });
     Ok((v, 0))
 }
@@ -1778,7 +1786,7 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
             .iter()
             .map(|(dst, k)| serde_json::json!({"kind": k, "dst": dst}))
             .collect();
-        let mut result = serde_json::json!({"path": path, "total": edges.len(), "edges": edges});
+        let mut result = serde_json::json!({"path": path, "total": edges.len(), "edges": edges, "scope": "file", "files_considered": 1, "truncated": false, "next_cursor": serde_json::Value::Null});
         // `?use` 原因码与 jw edges 同一份 collect::gap（不写第二份）
         let unresolved = self.store.unresolved_use_edges().map_err(db)?;
         let table = collect::gap::GapTable::new(&self.root);

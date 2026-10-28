@@ -107,11 +107,16 @@ fn impact_fixture_is_honest_about_symbol_level() {
         "direct 里应有 symbol:src/a.rs#a: {v}"
     );
     assert_eq!(v["target_kind"], "symbol");
+    // §4.4 scope 三件套：symbol → file
+    assert_eq!(v["scope"], "file");
+    assert_eq!(v["truncated"], false);
+    assert!(v["files_considered"].as_u64().is_some(), "{v}");
+    assert!(v["next_cursor"].is_null(), "{v}");
     let mut top: Vec<&str> = v.as_object().unwrap().keys().map(|s| s.as_str()).collect();
     top.sort();
     assert_eq!(
         top,
-        vec!["completeness", "direct", "importers", "target", "target_kind", "targets", "tests", "transitive", "v"]
+        vec!["completeness", "direct", "files_considered", "importers", "next_cursor", "scope", "target", "target_kind", "targets", "tests", "transitive", "truncated", "v"]
     );
 
     // serve 同值

@@ -184,7 +184,13 @@ fn edges_facade_matches_serve() {
     let d = tmp_db();
     let served = serve_request(&d, serde_json::json!({"id":1,"method":"edges","path":"src/a.rs"}));
     let eng = engine::Engine::open(&d).unwrap();
-    assert_eq!(served["result"], eng.edges("src/a.rs").unwrap());
+    let r = eng.edges("src/a.rs").unwrap();
+    assert_eq!(served["result"], r);
+    // §4.4 scope 三件套：单文件边层
+    assert_eq!(r["scope"], "file");
+    assert_eq!(r["files_considered"], 1);
+    assert_eq!(r["truncated"], false);
+    assert!(r["next_cursor"].is_null());
     let _ = std::fs::remove_dir_all(&d);
 }
 

@@ -12,7 +12,7 @@ function Step($s) { (python $py $s 2>&1 | Select-Object -First 1) }
 Get-Process -Name jingwei-gui -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
-$a = Start-Process -FilePath $exe -PassThru
+$a = Start-Process -FilePath $exe -ArgumentList 'D:\projects\jingwei' -PassThru
 Start-Sleep -Seconds 7
 
 $state = Step "state"
@@ -20,6 +20,22 @@ $text = Step "text"
 Check "list.detail_buttons" ($state -match 'detail=\d+') $state
 Check "list.scan_line" ($text -match '133') ""
 Check "list.dirs" ($text -match '284') ""
+
+# clean page switched to engine_clean_scan (new kernel). Renders 29 items = A16/B5/C8.
+# Must assert BEFORE open: open switches S.root to first list project (not jingwei).
+# Poll until scanClean (engine_clean_scan walks global caches, slow) finishes.
+Step "tab:clean" | Out-Null
+$cleanItems = 0
+for ($i = 0; $i -lt 30; $i++) {
+  $cleanItems = Step "clean_items"
+  if ($cleanItems -match '-> 29$') { break }
+  Start-Sleep -Seconds 2
+}
+Check "clean.items_29" ($cleanItems -match '-> 29$') $cleanItems
+$cerr = Step "clean_error"
+Check "clean.no_fallback" ($cerr -match '-> null$') $cerr
+Step "tab:home" | Out-Null
+Start-Sleep -Seconds 2
 
 # open first project
 Step "open" | Out-Null

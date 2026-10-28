@@ -80,6 +80,7 @@ STEPS = {
     "detail": "document.querySelectorAll('[data-act=\"detail\"]')[0].click(); 'ok'",
     "open": "document.querySelectorAll('[data-act=\"open\"]')[0].click(); 'ok'",
     "tab:run": "document.querySelector('[data-tab=\"run\"]').click(); 'ok'",
+    "tab:home": "document.querySelector('[data-tab=\"home\"]').click(); 'ok'",
     "tab:editor": "document.querySelector('[data-tab=\"editor\"]').click(); 'ok'",
     "tab:note": "document.querySelector('[data-tab=\"note\"]').click(); 'ok'",
     "tab:graph": "document.querySelector('[data-tab=\"graph\"]').click(); 'ok'",
@@ -90,6 +91,10 @@ STEPS = {
     "envtools": "(()=>{const g=[...document.querySelectorAll('.dgrid')].find(d=>d.innerText.indexOf('uv')>=0); return g?g.children.length:-1;})()",
     # 工具链区块的每个格子文本（用来核对名字逐项相同）
     "envtool_names": "(()=>{const g=[...document.querySelectorAll('.dgrid')].find(d=>d.innerText.indexOf('uv')>=0); if(!g) return 'none'; return [...g.children].map(c=>{const k=c.querySelector('.k'); return (k?k.innerText:c.innerText.split('\\n')[0]).trim();}).join(',');})()",
+    # clean 页渲染的 item 数（#cleanList 下 .item 元素数，29 = A16/B5/C8）；未渲染返回 0。
+    "clean_items": "document.querySelectorAll('#cleanList .item').length",
+    # clean 页数据源回落标记：null=引擎直供；字符串=引擎失败已回落旧源（判据②）。
+    "clean_error": "typeof S!=='undefined' ? JSON.stringify(S.cleanError) : 'noS'",
 }
 
 step = sys.argv[1]

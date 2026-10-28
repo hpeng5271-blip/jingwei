@@ -455,16 +455,17 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
 fn global_caches_enumerate_hermetic_fields_and_sizes() {
     let d = std::env::temp_dir().join(format!("jw-caches-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
+    let specs = engine::CACHES_MAIN.iter().chain(engine::CACHES_TAIL.iter());
     let mut roots: Vec<(&engine::CacheSpec, std::path::PathBuf)> = Vec::new();
-    for (i, spec) in engine::CACHES_MAIN.iter().enumerate() {
+    for (i, spec) in specs.enumerate() {
         let p = d.join(format!("c{i}"));
         std::fs::create_dir_all(&p).unwrap();
         std::fs::write(p.join("f.bin"), vec![0u8; 100 + i]).unwrap();
         roots.push((spec, p));
     }
     let items = engine::enumerate_global_caches(&roots);
-    assert_eq!(items.len(), engine::CACHES_MAIN.len(), "{items:?}");
-    for (it, spec) in items.iter().zip(engine::CACHES_MAIN.iter()) {
+    assert_eq!(items.len(), engine::CACHES_MAIN.len() + engine::CACHES_TAIL.len(), "{items:?}");
+    for (it, spec) in items.iter().zip(engine::CACHES_MAIN.iter().chain(engine::CACHES_TAIL.iter())) {
         assert_eq!(it["zone"], "a", "{it}");
         assert_eq!(it["action"], "delete", "{it}");
         assert_eq!(it["label"].as_str().unwrap(), spec.label, "{it}");
@@ -480,6 +481,44 @@ fn global_caches_enumerate_hermetic_fields_and_sizes() {
     ks.sort();
     assert_eq!(ks, ["action", "command", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"]);
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R2 · clean 特殊项（hermetic）：回收站（固定 command）/ 缩略图（文件量）/ 临时文件（7 天以上）。
+#[test]
+fn clean_scan_special_items_recycle_thumb_temp() {
+    let rb = engine::recycle_bin_item();
+    assert_eq!(rb["action"], "command");
+    assert_eq!(rb["zone"], "a");
+    assert_eq!(rb["command"], "Clear-RecycleBin -Force");
+    assert_eq!(rb["command_note"], "在 PowerShell 里跑");
+    assert_eq!(rb["recommended"], false);
+    assert_eq!(rb["size_bytes"], 0);
+
+    let d = std::env::temp_dir().join(format!("jw-thumb-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("thumbcache_1.db"), vec![0u8; 512]).unwrap();
+    std::fs::write(d.join("iconcache_2.db"), vec![0u8; 256]).unwrap();
+    std::fs::write(d.join("readme.txt"), vec![0u8; 999]).unwrap();
+    let th = engine::scan_thumbcache(&d).expect("thumb item");
+    assert_eq!(th["size_bytes"].as_u64().unwrap(), 768, "{th}");
+    assert_eq!(th["label"], "缩略图 / 图标缓存");
+    assert_eq!(th["action"], "delete");
+    let _ = std::fs::remove_dir_all(&d);
+
+    let t = std::env::temp_dir().join(format!("jw-tmp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    std::fs::create_dir_all(&t).unwrap();
+    std::fs::write(t.join("fresh.bin"), vec![0u8; 100]).unwrap();
+    assert!(engine::scan_temp(&t).is_none(), "刚建的文件不该列");
+    let old = t.join("old.bin");
+    std::fs::write(&old, vec![0u8; 200]).unwrap();
+    let old_t = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(8 * 24 * 3600)).unwrap();
+    std::fs::OpenOptions::new().write(true).open(&old).unwrap().set_times(std::fs::FileTimes::new().set_modified(old_t)).unwrap();
+    let tm = engine::scan_temp(&t).expect("temp item with old file");
+    assert!(tm["size_bytes"].as_u64().unwrap() >= 200, "{tm}");
+    assert_eq!(tm["action"], "delete");
+    let _ = std::fs::remove_dir_all(&t);
 }
 
 /// R2 · machine 硬件换芯：走外部 PowerShell CIM，成功给 hw，失败给 fails（不许两头空）。

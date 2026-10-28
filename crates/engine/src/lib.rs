@@ -217,6 +217,18 @@ pub const CACHES_MAIN: &[CacheSpec] = &[
     CacheSpec { var: "USERPROFILE", rel: ".gradle/caches", label: "Gradle 依赖缓存", reason: "Gradle 下载的依赖与 daemon 缓存", consequence: "下次构建需重新下载；已 checkout 的项目要重跑配置", recommended: false, command: None, command_note: None },
 ];
 
+/// 全局缓存尾（刀2：VS Code 5 / 浏览器 2 / 崩溃转储 1，8 条目录型）。
+pub const CACHES_TAIL: &[CacheSpec] = &[
+    CacheSpec { var: "APPDATA", rel: "Code/Cache", label: "Code Cache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { var: "APPDATA", rel: "Code/CachedData", label: "CachedData", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { var: "APPDATA", rel: "Code/GPUCache", label: "GPUCache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { var: "APPDATA", rel: "Code/Code Cache", label: "Code Cache(old)", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { var: "APPDATA", rel: "Code/logs", label: "日志", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "Microsoft/Edge/User Data/Default/Cache", label: "Edge 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "Google/Chrome/User Data/Default/Cache", label: "Chrome 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "CrashDumps", label: "崩溃转储", reason: "程序崩溃时留下的内存快照", consequence: "除非你正在查某个崩溃，否则没有任何用", recommended: true, command: None, command_note: None },
+];
+
 /// 发现层（薄，不单测）：env 查找 → 已解析路径，目录不存在就跳过。
 fn discover_caches(specs: &[CacheSpec]) -> Vec<(&CacheSpec, PathBuf)> {
     specs
@@ -240,6 +252,51 @@ pub fn enumerate_global_caches(roots: &[(&CacheSpec, PathBuf)]) -> Vec<serde_jso
         out.push(item);
     }
     out
+}
+
+/// 缩略图/图标缓存（hermetic）：Explorer 目录里 thumbcache_*/iconcache_* 文件，按文件量不是目录。
+pub fn scan_thumbcache(dir: &Path) -> Option<serde_json::Value> {
+    let mut bytes = 0u64;
+    let Ok(rd) = std::fs::read_dir(dir) else { return None };
+    for e in rd.flatten() {
+        let n = e.file_name().to_string_lossy().to_lowercase();
+        if n.starts_with("thumbcache_") || n.starts_with("iconcache_") {
+            bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    if bytes == 0 {
+        return None;
+    }
+    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "缩略图 / 图标缓存", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "资源管理器为图片/视频/图标生成的预览缓存", "consequence": "删除后资源管理器会自动重建；只是某些文件夹首次打开时图标要重算，不影响文件本身", "truncated": false}))
+}
+
+/// 回收站：系统托管、工具不直接删，给命令（固定项，action=command，不进 zoneA 字节合计）。
+pub fn recycle_bin_item() -> serde_json::Value {
+    serde_json::json!({"path": "所有驱动器", "label": "回收站", "action": "command", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "已经删过一次、但还占着盘的东西", "consequence": "清空后无法还原。确认里面没有你要找回的文件再清", "command": "Clear-RecycleBin -Force", "command_note": "在 PowerShell 里跑", "truncated": false})
+}
+
+/// 临时文件（hermetic）：目录里 7 天以上没动过的条目；够老才列，不是全部 TEMP。
+pub fn scan_temp(dir: &Path) -> Option<serde_json::Value> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return None };
+    let now = std::time::SystemTime::now();
+    let cutoff = std::time::Duration::from_secs(7 * 24 * 3600);
+    let mut bytes = 0u64;
+    let mut truncated = false;
+    for e in rd.flatten() {
+        let p = e.path();
+        let Ok(m) = e.metadata() else { continue };
+        let t = m.modified().or_else(|_| m.created()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if now.duration_since(t).unwrap_or_default() < cutoff {
+            continue;
+        }
+        let (b, tr) = if p.is_dir() { measure_dir(&p, 20_000) } else { (m.len(), false) };
+        bytes += b;
+        truncated |= tr;
+    }
+    if bytes == 0 {
+        return None;
+    }
+    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "临时文件（7 天以上没动过）", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "程序用完就丢的中间文件；7 天没碰过的基本没人要了", "consequence": "正在运行的程序占用的会被自动跳过；关掉再清更干净", "truncated": truncated}))
 }
 
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
@@ -829,6 +886,15 @@ impl Engine {
             }
         }
         items.extend(enumerate_global_caches(&discover_caches(CACHES_MAIN)));
+        items.extend(enumerate_global_caches(&discover_caches(CACHES_TAIL)));
+        if let Some(p) = std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("Microsoft/Windows/Explorer")) {
+            if let Some(it) = scan_thumbcache(&p) { items.push(it); }
+        }
+        items.push(recycle_bin_item());
+        let temp = std::env::var_os("TEMP").map(PathBuf::from).or_else(|| std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("Temp")));
+        if let Some(t) = temp {
+            if let Some(it) = scan_temp(&t) { items.push(it); }
+        }
 
         // 顶层口径：只算 zone A + action=delete；被截断项不进字节合计（不留假精确）。
         let za = |i: &&serde_json::Value| i["zone"] == "a" && i["action"] == "delete";

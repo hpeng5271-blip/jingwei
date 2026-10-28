@@ -155,6 +155,43 @@ fn count_sources(dir: &Path, cap: usize) -> (usize, bool) {
 }
 
 
+/// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
+fn parse_note(text: &str) -> (String, String, String, String, Vec<String>, String) {
+    let mut kind = String::new();
+    let mut title = String::new();
+    let mut created = String::new();
+    let mut updated = String::new();
+    let mut tags: Vec<String> = Vec::new();
+    let mut body = text.to_string();
+    if let Some(after) = text.strip_prefix("---") {
+        if let Some(end) = after.find("\n---") {
+            let head = &after[..end];
+            body = after[end + 4..].trim_start_matches('\n').to_string();
+            for line in head.lines() {
+                let Some((k, v)) = line.split_once(':') else { continue };
+                let v = v.trim();
+                match k.trim() {
+                    "kind" => kind = v.to_string(),
+                    "title" => title = v.to_string(),
+                    "created" => created = v.to_string(),
+                    "updated" => updated = v.to_string(),
+                    "tags" => {
+                        tags = v
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    (kind, title, created, updated, tags, body.trim().to_string())
+}
+
 /// `Some(_)` → true（has_test / has_install 这类"有没有"的判据）。
 fn v_has(v: &Option<String>) -> bool {
     v.is_some()
@@ -667,6 +704,52 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
     /// 工具链探测（serve `env_probe` 同构）：只读，跑一次版本命令定性。
     pub fn env_probe(&self) -> Result<serde_json::Value, EngineError> {
         Ok(env_probe_value())
+    }
+
+    /// 工作笔记（R2 · note 换芯）：读 `.jingwei/notes/*.md`，格式与旧壳**同一份**。
+    ///
+    /// 只做读：写入仍走壳（下一刀再接）。解析规则照抄旧实现——
+    /// frontmatter `kind/title/created/updated/tags`，缺省字段留空，别编造。
+    pub fn notes(&self) -> Result<serde_json::Value, EngineError> {
+        let dir = self.root.join(".jingwei").join("notes");
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        let mut files = 0u64;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|s| s.to_str()) != Some("md") {
+                    continue;
+                }
+                files += 1;
+                let Some(slug) = p.file_stem().map(|s| s.to_string_lossy().to_string()) else {
+                    continue;
+                };
+                let Ok(text) = std::fs::read_to_string(&p) else { continue };
+                let (kind, title, created, updated, tags, body) = parse_note(&text);
+                out.push(serde_json::json!({
+                    "slug": slug,
+                    "kind": kind,
+                    "title": title,
+                    "created": created,
+                    "updated": updated,
+                    "tags": tags,
+                    "body": body,
+                }));
+            }
+        }
+        // 与旧实现同序：updated 倒序，其次 slug 倒序
+        out.sort_by(|a, b| {
+            let u = b["updated"].as_str().unwrap_or("").cmp(a["updated"].as_str().unwrap_or(""));
+            u.then(b["slug"].as_str().unwrap_or("").cmp(a["slug"].as_str().unwrap_or("")))
+        });
+        Ok(serde_json::json!({
+            "scope": "project",
+            "files_considered": files,
+            "truncated": false,
+            "next_cursor": serde_json::Value::Null,
+            "dir": ".jingwei/notes",
+            "notes": out,
+        }))
     }
 
     /// 可编辑文件清单（R2 · editor 换芯）：扁平相对路径（`/` 分隔），由 UI 自己树化。

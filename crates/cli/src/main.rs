@@ -3695,6 +3695,10 @@ fn cmd_serve(root: &PathBuf, no_subscribe: bool) -> anyhow::Result<ExitCode> {
                 Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),
                 Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),
             },
+            "notes" => match engine::Engine::open(&root).and_then(|e| e.notes()) {
+                Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),
+                Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),
+            },
             "run_plan" => match engine::Engine::open(&root).and_then(|e| e.run_plan()) {
                 Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),
                 Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),

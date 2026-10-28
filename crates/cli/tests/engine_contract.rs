@@ -387,6 +387,54 @@ fn serve_scan_matches_facade() {
 
 
 
+
+/// R2 · note 换芯：读 `.jingwei/notes/*.md`，frontmatter 五键与旧壳同规则，排序 updated 倒序。
+#[test]
+fn serve_notes_matches_facade_and_parses_frontmatter() {
+    let d = fixture("notes");
+    let nd = d.join(".jingwei/notes");
+    std::fs::create_dir_all(&nd).unwrap();
+    std::fs::write(
+        nd.join("a.md"),
+        "---\nkind: idea\ntitle: 第一个想法\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ntags: [x, y]\n---\n\n正文 A\n",
+    )
+    .unwrap();
+    std::fs::write(
+        nd.join("b.md"),
+        "---\nkind: plan\ntitle: 后面的计划\ncreated: 2026-10-03T00:00:00Z\nupdated: 2026-10-04T00:00:00Z\ntags: \n---\n\n正文 B\n",
+    )
+    .unwrap();
+    parse_fixture(&d);
+
+    let e = engine::Engine::open(&d).expect("open");
+    let facade = e.notes().expect("notes");
+    let req = serde_json::json!({"id": 1, "method": "notes"});
+    let resp = serve_once(&d, &req);
+    assert_eq!(resp["ok"], true, "{resp}");
+    let served = strip(resp["result"].clone());
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
+
+    let ns = served["notes"].as_array().expect("notes");
+    assert_eq!(ns.len(), 2);
+    // updated 倒序：b(10-04) 在 a(10-02) 前
+    assert_eq!(ns[0]["slug"], "b");
+    assert_eq!(ns[0]["title"], "后面的计划");
+    assert_eq!(ns[1]["slug"], "a");
+    assert_eq!(ns[1]["kind"], "idea");
+    let tags: Vec<&str> = ns[1]["tags"].as_array().unwrap().iter().filter_map(|x| x.as_str()).collect();
+    assert_eq!(tags, vec!["x", "y"]);
+    assert!(ns[1]["body"].as_str().unwrap().contains("正文 A"));
+    // 键固定 7 个
+    for n in ns {
+        let mut ks: Vec<&str> = n.as_object().unwrap().keys().map(|x| x.as_str()).collect();
+        ks.sort();
+        assert_eq!(ks, vec!["body", "created", "kind", "slug", "tags", "title", "updated"], "{n}");
+    }
+    assert_eq!(served["scope"], "project");
+    assert_eq!(served["files_considered"], 2);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R2 · editor 换芯：文件清单要扁平、带 `/`、跳过 target/node_modules，且带 scope 三件套。
 #[test]
 fn serve_source_files_matches_facade_and_skips_noise() {

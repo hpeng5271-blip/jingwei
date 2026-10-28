@@ -1,4 +1,6 @@
 > 目标态总图：[`docs/reference/jingwei-final-design.md`](docs/reference/jingwei-final-design.md)（目标态；当前态只认本文件与证据；冲突裁决：代码与证据 > HANDOFF > 设计文档）
+>
+> **★ 2026-10-28 新会话（主会话即 pro）请先读**：[`docs/reference/handoff-2026-10-28.md`](docs/reference/handoff-2026-10-28.md) —— 角色契约、已定决策 D1–D11、R 系列断点（当前断点 = inspect 换芯）、每刀预算与监督回路、暗坑 14 条、未决风险。
 
 # HANDOFF · 经纬核心（2026-10-25）
 

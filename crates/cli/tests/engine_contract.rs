@@ -389,6 +389,50 @@ fn serve_scan_matches_facade() {
 
 
 
+
+/// R2 · clean 换芯（数据面）：只清点项目内可重新生成的产物，字段与旧页 zone A 对齐。
+#[test]
+fn serve_clean_scan_matches_facade_and_flags_regenerable() {
+    let d = fixture("cleanscan");
+    std::fs::create_dir_all(d.join("target/debug")).unwrap();
+    std::fs::write(d.join("target/debug/x.rlib"), vec![0u8; 2048]).unwrap();
+    std::fs::create_dir_all(d.join("node_modules/pkg")).unwrap();
+    std::fs::write(d.join("node_modules/pkg/i.js"), "x\n").unwrap();
+    parse_fixture(&d);
+
+    let e = engine::Engine::open(&d).expect("open");
+    let facade = e.clean_scan().expect("clean_scan");
+    let req = serde_json::json!({"id": 1, "method": "clean_scan"});
+    let resp = serve_once(&d, &req);
+    assert_eq!(resp["ok"], true, "{resp}");
+    let served = strip(resp["result"].clone());
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
+
+    let items = served["items"].as_array().expect("items");
+    let paths: Vec<&str> = items.iter().filter_map(|i| i["path"].as_str()).collect();
+    assert!(paths.contains(&"target"), "{paths:?}");
+    assert!(paths.contains(&"node_modules"), "{paths:?}");
+    // 字段与旧页 zone A 对齐（少一个，页面就会显示 undefined）
+    for it in items {
+        let mut ks: Vec<&str> = it.as_object().unwrap().keys().map(|x| x.as_str()).collect();
+        ks.sort();
+        assert_eq!(
+            ks,
+            vec!["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"],
+            "{it}"
+        );
+        assert_eq!(it["action"], "delete");
+        assert_eq!(it["zone"], "a");
+        assert_eq!(it["recommended"], true);
+    }
+    // target 下 2048 字节要量出来
+    let t = items.iter().find(|i| i["path"] == "target").expect("target item");
+    assert!(t["size_bytes"].as_u64().unwrap_or(0) >= 2048, "{t}");
+    assert!(served["human"].as_str().unwrap().contains("KB"), "{}", served["human"]);
+    assert_eq!(served["scope"], "project");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R2 · machine 硬件换芯：走外部 PowerShell CIM，成功给 hw，失败给 fails（不许两头空）。
 #[test]
 fn machine_hw_reports_either_data_or_reason() {

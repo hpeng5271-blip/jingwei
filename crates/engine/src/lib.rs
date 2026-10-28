@@ -155,6 +155,45 @@ fn count_sources(dir: &Path, cap: usize) -> (usize, bool) {
 }
 
 
+/// 有上限地量一个目录的体积（20k 文件或 300ms 就停），返回 `(bytes, 是否被截断)`。
+fn measure_dir(dir: &std::path::Path, cap_files: u64) -> (u64, bool) {
+    let t0 = std::time::Instant::now();
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if files >= cap_files || t0.elapsed().as_millis() > 300 {
+            return (bytes, true);
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                stack.push(e.path());
+            } else if ft.is_file() {
+                files += 1;
+                bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    (bytes, false)
+}
+
+/// 人看的体积（与旧壳同口径：一位小数 + 单位）。
+fn human_bytes(b: u64) -> String {
+    const KB: f64 = 1024.0;
+    let f = b as f64;
+    if f >= KB * KB * KB {
+        format!("{:.1} GB", f / (KB * KB * KB))
+    } else if f >= KB * KB {
+        format!("{:.1} MB", f / (KB * KB))
+    } else if f >= KB {
+        format!("{:.1} KB", f / KB)
+    } else {
+        format!("{b} B")
+    }
+}
+
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
 fn parse_note(text: &str) -> (String, String, String, String, Vec<String>, String) {
     let mut kind = String::new();
@@ -683,6 +722,76 @@ impl Engine {
             "arch": std::env::consts::ARCH,
             "cpus": cpus,
         })
+    }
+
+    /// 清理清点（R2 · clean 换芯，**只清点不删**）：项目里可重新生成的产物目录。
+    ///
+    /// 这一刀只做"项目内 zones"，全局缓存（回收站/崩溃转储等）仍由旧源负责——
+    /// 清理页是**会删东西**的页，半换源会把总量算错，宁可分两次（理由写进 HANDOFF）。
+    pub fn clean_scan(&self) -> Result<serde_json::Value, EngineError> {
+        const NAMES: [(&str, &str, &str); 4] = [
+            ("target", "Rust 构建产物", "下次 cargo build 会重新编出来"),
+            ("node_modules", "Node 依赖", "下次 npm install 会重新装"),
+            ("dist", "打包输出", "下次构建会重新生成"),
+            ("__pycache__", "Python 字节码缓存", "下次 import 会重新生成"),
+        ];
+        let mut items: Vec<serde_json::Value> = Vec::new();
+        let mut files_considered: u64 = 0;
+        let mut stack: Vec<std::path::PathBuf> = vec![self.root.clone()];
+        let mut depth_of: std::collections::HashMap<std::path::PathBuf, u32> = Default::default();
+        depth_of.insert(self.root.clone(), 0);
+        while let Some(dir) = stack.pop() {
+            let d = *depth_of.get(&dir).unwrap_or(&0);
+            if d >= 4 || items.len() >= 50 {
+                continue;
+            }
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let Ok(ft) = e.file_type() else { continue };
+                if !ft.is_dir() {
+                    continue;
+                }
+                if let Some((_, label, consequence)) = NAMES.iter().find(|(n, _, _)| *n == name) {
+                    let (bytes, truncated) = measure_dir(&e.path(), 20_000);
+                    files_considered += 1;
+                    let rel = e
+                        .path()
+                        .strip_prefix(&self.root)
+                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|_| name.clone());
+                    items.push(serde_json::json!({
+                        "path": rel,
+                        "label": label,
+                        "action": "delete",
+                        "zone": "a",
+                        "recommended": true,
+                        "size_bytes": bytes,
+                        "reason": "可重新生成",
+                        "consequence": consequence,
+                        "truncated": truncated,
+                    }));
+                    continue;
+                }
+                if name.starts_with('.') || is_not_source_dir(&name) {
+                    continue;
+                }
+                depth_of.insert(e.path(), d + 1);
+                stack.push(e.path());
+            }
+        }
+        let total: u64 = items.iter().map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        Ok(serde_json::json!({
+            "scope": "project",
+            "files_considered": files_considered,
+            "truncated": items.len() >= 50,
+            "next_cursor": serde_json::Value::Null,
+            "hasProject": true,
+            "items": items,
+            "total_bytes": total,
+            "human": human_bytes(total),
+            "humanRecommended": human_bytes(total),
+        }))
     }
 
     /// 硬件（R2 · machine 换芯）：CPU / 内存 / 显卡 / 系统盘。

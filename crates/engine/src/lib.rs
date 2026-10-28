@@ -669,6 +669,67 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
         Ok(env_probe_value())
     }
 
+    /// 四步计划（R2 · run 换芯）：装依赖 → 构建 → 测试 → 运行。
+    ///
+    /// **只给计划，不执行**：执行仍走壳里的 launch（下一刀再接）。缺命令的步给 `available:false`
+    /// 与 `reason`，不许静默省略——用户看到"没有这一步"和"这一步没配"是两件事。
+    pub fn run_plan(&self) -> Result<serde_json::Value, EngineError> {
+        let cpath = self.root.join("env.contract.json");
+        let (cname, cerror, cmds) = if cpath.is_file() {
+            match std::fs::read_to_string(&cpath)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            {
+                Some(v) => {
+                    let g = |k: &str| v["commands"][k].as_str().map(|s| s.to_string());
+                    (
+                        v["name"].as_str().map(|s| s.to_string()),
+                        None,
+                        [g("install"), g("build"), g("test"), g("run")],
+                    )
+                }
+                None => (
+                    None,
+                    Some("env.contract.json 解析失败".to_string()),
+                    [None, None, None, None],
+                ),
+            }
+        } else {
+            (
+                None,
+                Some("没有 env.contract.json（不知道这一步该跑什么）".to_string()),
+                [None, None, None, None],
+            )
+        };
+
+        let kinds = ["install", "build", "test", "run"];
+        let mut steps = Vec::new();
+        for (i, kind) in kinds.iter().enumerate() {
+            let cmd = cmds[i].clone();
+            let (available, reason) = match (&cmd, &cerror) {
+                (Some(_), _) => (true, serde_json::Value::Null),
+                (None, Some(e)) => (false, serde_json::json!(e)),
+                (None, None) => (false, serde_json::json!("契约里没有这一步")),
+            };
+            steps.push(serde_json::json!({
+                "kind": kind,
+                "cmd": cmd,
+                "available": available,
+                "reason": reason,
+            }));
+        }
+
+        Ok(serde_json::json!({
+            "scope": "project",
+            "files_considered": 0,
+            "truncated": false,
+            "next_cursor": serde_json::Value::Null,
+            "contract_name": cname,
+            "contract_error": cerror,
+            "steps": steps,
+        }))
+    }
+
     /// 项目详情（R2 · inspect 换芯第一刀）：**只迁这 5 组**，`unavailable` 明说还没迁的部分。
     ///
     /// 已迁：路径 / 类型 / 最近改动 / 怎么跑 / 契约（+ §4.4 scope 三件套）。

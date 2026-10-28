@@ -385,6 +385,50 @@ fn serve_scan_matches_facade() {
 }
 
 
+
+/// R2 · run 换芯：四步计划必须显式给"有没有这一步/为什么没有"。
+#[test]
+fn serve_run_plan_matches_facade_and_marks_missing_steps() {
+    let d = fixture("runplan");
+    std::fs::write(
+        d.join("env.contract.json"),
+        r#"{"name":"fx","commands":{"run":"cargo run","build":"cargo build"}}"#,
+    )
+    .unwrap();
+    parse_fixture(&d);
+
+    let e = engine::Engine::open(&d).expect("open");
+    let facade = e.run_plan().expect("run_plan");
+    let req = serde_json::json!({"id": 1, "method": "run_plan"});
+    let resp = serve_once(&d, &req);
+    assert_eq!(resp["ok"], true, "{resp}");
+    let served = strip(resp["result"].clone());
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
+
+    let steps = served["steps"].as_array().expect("steps");
+    assert_eq!(steps.len(), 4, "四步固定：install/build/test/run");
+    let kinds: Vec<&str> = steps.iter().filter_map(|s| s["kind"].as_str()).collect();
+    assert_eq!(kinds, vec!["install", "build", "test", "run"]);
+    // build/run 有命令；install/test 没有 → available=false 且给理由，不许静默省略
+    assert_eq!(steps[1]["available"], true);
+    assert_eq!(steps[1]["cmd"], "cargo build");
+    assert_eq!(steps[3]["available"], true);
+    assert_eq!(steps[3]["cmd"], "cargo run");
+    assert_eq!(steps[0]["available"], false);
+    assert!(steps[0]["reason"].as_str().unwrap().contains("没有"));
+    assert_eq!(steps[2]["available"], false);
+    // 每步 4 个键（kind/cmd/available/reason），null 也算键
+    for s in steps {
+        let mut ks: Vec<&str> = s.as_object().unwrap().keys().map(|x| x.as_str()).collect();
+        ks.sort();
+        assert_eq!(ks, vec!["available", "cmd", "kind", "reason"], "{s}");
+    }
+    // §4.4 三件套
+    assert_eq!(served["scope"], "project");
+    assert_eq!(served["truncated"], false);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R2 · inspect 换芯第一刀：5 组已迁字段 + scope 三件套；未迁的三组必须**显式列出**。
 #[test]
 fn serve_inspect_matches_facade_and_keeps_keys() {

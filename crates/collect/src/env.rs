@@ -322,6 +322,48 @@ pub fn probe_tool(
     ToolProbe::absent(name, exe, version_args)
 }
 
+/// 外置服务探测结果：客户端三态 + 服务 reachable（None = 查不了 / 无 TCP）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceProbe {
+    pub kind: String,
+    pub status: Status,
+    pub version: Option<String>,
+    pub reachable: Option<bool>,
+    pub repro: Option<String>,
+}
+
+/// TCP 探活：连得上 `Some(true)`、连不上 `Some(false)`、host/port 解析不了 `None`。
+pub fn tcp_reachable(host: &str, port: u16, timeout: Duration) -> Option<bool> {
+    use std::net::{TcpStream, ToSocketAddrs};
+    let addr = (host, port).to_socket_addrs().ok()?.next()?;
+    Some(TcpStream::connect_timeout(&addr, timeout).is_ok())
+}
+
+/// 外置服务探测（D4：只探测不启停）：客户端 `--version` 三态 + 服务 TCP reachable。
+/// `port = None` → 无 TCP（SQLite 内嵌 / 需命令探活），reachable 由调用方填。
+pub fn probe_service(
+    kind: &str,
+    exe: &str,
+    host: &str,
+    port: Option<u16>,
+    shims: &[PathBuf],
+    commons: &[PathBuf],
+) -> ServiceProbe {
+    let tool = probe_tool(kind, exe, &["--version"], None, shims, commons);
+    // absent/超时 → reachable=null（查不了，不是 false）
+    let reachable = match tool.status {
+        Status::Ok => port.and_then(|p| tcp_reachable(host, p, PROBE_TIMEOUT)),
+        Status::Timeout | Status::Absent => None,
+    };
+    ServiceProbe {
+        kind: kind.to_string(),
+        status: tool.status,
+        version: tool.version,
+        reachable,
+        repro: tool.repro,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

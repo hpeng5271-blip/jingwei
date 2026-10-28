@@ -491,6 +491,14 @@ fn is_not_source_dir(name: &str) -> bool {
 ///
 /// 纪律：**只读**——不改 PATH、不装组件、不写任何配置文件。
 /// 名字/参数沿用旧壳那张表（`detect/probe.rs:354-363`），判定交给 `collect::env`。
+/// Docker daemon 探活（npipe 不是 TCP）：`docker info` 成功 = daemon 在。
+fn docker_daemon_reachable() -> Option<bool> {
+    match std::process::Command::new("docker").arg("info").output() {
+        Ok(o) => Some(o.status.success()),
+        Err(_) => None,
+    }
+}
+
 pub fn env_probe_value() -> serde_json::Value {
     const TOOLS: &[(&str, &str, &[&str])] = &[
         ("node", "node.exe", &["-v"]),
@@ -520,10 +528,36 @@ pub fn env_probe_value() -> serde_json::Value {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // 外置服务（D4：只探测不启停）
+    let mut services: Vec<serde_json::Value> = Vec::new();
+    for (kind, exe, host, port) in [
+        ("docker", "docker.exe", "", None::<u16>),
+        ("redis", "redis-cli.exe", "localhost", Some(6379)),
+        ("postgresql", "psql.exe", "localhost", Some(5432)),
+        ("mysql", "mysql.exe", "localhost", Some(3306)),
+        ("mongodb", "mongosh.exe", "localhost", Some(27017)),
+        ("sqlite", "sqlite3.exe", "", None),
+    ] {
+        let mut p = collect::env::probe_service(kind, exe, host, port, &shims, &commons);
+        // Docker daemon 走 npipe 不是 TCP：客户端在就用 `docker info` 探
+        if kind == "docker" && p.status == collect::env::Status::Ok {
+            p.reachable = docker_daemon_reachable();
+        }
+        services.push(serde_json::json!({
+            "kind": p.kind,
+            "status": p.status.as_str(),
+            "version": p.version,
+            "host": host,
+            "port": port,
+            "reachable": p.reachable,
+            "repro": p.repro,
+        }));
+    }
     serde_json::json!({
         "schema": 1,
         "generated_at": generated_at,
         "tools": tools,
+        "services": services,
     })
 }
 

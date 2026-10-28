@@ -789,7 +789,7 @@ fn serve_env_probe_matches_facade_and_keeps_keys() {
     // keys-only：顶层 3 个
     let mut top: Vec<&str> = served.as_object().unwrap().keys().map(|s| s.as_str()).collect();
     top.sort();
-    assert_eq!(top, vec!["generated_at", "schema", "tools"]);
+    assert_eq!(top, vec!["generated_at", "schema", "services", "tools"]);
     assert_eq!(served["schema"], 1);
 
     // 每 tool 6 个键：null 也算键（三态不许用"字段消失"冒充"没有"）
@@ -818,6 +818,25 @@ fn serve_env_probe_matches_facade_and_keeps_keys() {
         }
         if status == "ok" {
             assert!(t["version"].is_string(), "ok 要带 version：{t}");
+        }
+    }
+
+    // 外置服务 6 项：只探测（kind/status/version/host/port/reachable/repro），不启停
+    let svcs = served["services"].as_array().expect("services");
+    assert_eq!(svcs.len(), 6, "{served}");
+    let kinds: Vec<&str> = svcs.iter().filter_map(|s| s["kind"].as_str()).collect();
+    assert_eq!(kinds, vec!["docker", "redis", "postgresql", "mysql", "mongodb", "sqlite"]);
+    for s in svcs {
+        let mut ks: Vec<&str> = s.as_object().unwrap().keys().map(|x| x.as_str()).collect();
+        ks.sort();
+        assert_eq!(ks, vec!["host", "kind", "port", "reachable", "repro", "status", "version"], "{s}");
+        assert!(matches!(s["status"].as_str(), Some("ok" | "timeout" | "absent")), "{s}");
+        // 口径：absent/超时 → reachable=null（查不了，不是 false）；SQLite 无 TCP 恒 null
+        if s["status"] != "ok" {
+            assert!(s["reachable"].is_null(), "absent/超时 reachable 要 null：{s}");
+        }
+        if s["kind"] == "sqlite" {
+            assert!(s["reachable"].is_null(), "SQLite 内嵌无 TCP：{s}");
         }
     }
     let _ = std::fs::remove_dir_all(&d);

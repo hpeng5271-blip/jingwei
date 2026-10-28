@@ -472,7 +472,7 @@ fn global_caches_enumerate_hermetic_fields_and_sizes() {
     assert_eq!(items.len(), engine::CACHES_MAIN.len() + engine::CACHES_TAIL.len(), "{items:?}");
     for (it, spec) in items.iter().zip(engine::CACHES_MAIN.iter().chain(engine::CACHES_TAIL.iter())) {
         assert_eq!(it["zone"], "a", "{it}");
-        assert_eq!(it["action"], "delete", "{it}");
+        assert_eq!(it["action"], spec.action, "{it}");
         assert_eq!(it["label"].as_str().unwrap(), spec.label, "{it}");
         assert!(it["size_bytes"].as_u64().unwrap() > 0, "{it}");
         assert_eq!(it["recommended"].as_bool().unwrap(), spec.recommended, "{it}");

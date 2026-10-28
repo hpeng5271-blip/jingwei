@@ -194,40 +194,51 @@ pub struct CacheSpec {
     pub var: &'static str, pub rel: &'static str,
     pub label: &'static str, pub reason: &'static str, pub consequence: &'static str,
     pub recommended: bool, pub command: Option<&'static str>, pub command_note: Option<&'static str>,
+    pub action: &'static str,
 }
 
 /// 全局缓存主体（刀1：Python/Node/Go/Rust/JVM，11 条）；尾 11 条 + zone B/C 后续刀补。
 pub const CACHES_MAIN: &[CacheSpec] = &[
-    CacheSpec { var: "LOCALAPPDATA", rel: "pip/cache", label: "pip 下载缓存", reason: "pip 下载过的 wheel/源码缓存", consequence: "下次装同名包要重新下载（有网就行）", recommended: true, command: Some("python -m pip cache purge"), command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "uv/cache", label: "uv 包缓存", reason: "uv 的解析结果与包归档缓存", consequence: "已装的虚拟环境照常能用；新建环境要重新下载", recommended: true, command: Some("uv cache clean"), command_note: None },
-    CacheSpec { var: "USERPROFILE", rel: ".conda/pkgs", label: "conda 包缓存", reason: "conda 解压过的包副本；已建环境不依赖它", consequence: "以后 conda install 会重新下载", recommended: true, command: Some("conda clean --all --dry-run"), command_note: Some("先看它列出什么。确认没问题，再去掉 --dry-run 真删") },
-    CacheSpec { var: "LOCALAPPDATA", rel: "Python/_cache", label: "运行时下载缓存（安装管理器）", reason: "Python 安装管理器下载过的运行时归档；装好的版本不依赖它", consequence: "装好的运行时不依赖它；下次 python install 新版本要重新下载", recommended: false, command: Some("py --list"), command_note: Some("先看这台机器装了哪些版本，再决定删不删缓存") },
-    CacheSpec { var: "LOCALAPPDATA", rel: "npm-cache", label: "npm 缓存", reason: "npm 下载过的 tarball", consequence: "npm install 重新下载；node_modules 不受影响", recommended: true, command: Some("npm cache clean --force"), command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "Yarn/Cache", label: "Yarn 缓存", reason: "Yarn 的包缓存", consequence: "重新 yarn install 时会再下载", recommended: true, command: Some("yarn cache clean"), command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "pnpm-store", label: "pnpm store", reason: "pnpm 的内容寻址仓库", consequence: "现有项目的 node_modules 是硬链接，删了可能让它们失效；要清用 pnpm store prune", recommended: false, command: Some("pnpm store prune"), command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "go-build", label: "go build 缓存", reason: "编译中间产物缓存", consequence: "下次 go build/go test 慢一些", recommended: true, command: Some("go clean -cache"), command_note: None },
-    CacheSpec { var: "USERPROFILE", rel: "go/pkg/mod", label: "go 模块缓存", reason: "go mod 下载的依赖源码", consequence: "断网时没法再 build；有网就自动重下", recommended: false, command: Some("go clean -modcache"), command_note: None },
-    CacheSpec { var: "USERPROFILE", rel: ".cargo/registry", label: "cargo registry", reason: "crates.io 下载的包与索引", consequence: "下次 cargo build 要把依赖全下一遍（这块经常几个 GB）", recommended: false, command: None, command_note: None },
-    CacheSpec { var: "USERPROFILE", rel: ".gradle/caches", label: "Gradle 依赖缓存", reason: "Gradle 下载的依赖与 daemon 缓存", consequence: "下次构建需重新下载；已 checkout 的项目要重跑配置", recommended: false, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "pip/cache", label: "pip 下载缓存", reason: "pip 下载过的 wheel/源码缓存", consequence: "下次装同名包要重新下载（有网就行）", recommended: true, command: Some("python -m pip cache purge"), command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "uv/cache", label: "uv 包缓存", reason: "uv 的解析结果与包归档缓存", consequence: "已装的虚拟环境照常能用；新建环境要重新下载", recommended: true, command: Some("uv cache clean"), command_note: None },
+    CacheSpec { action: "command", var: "USERPROFILE", rel: ".conda/pkgs", label: "conda 包缓存", reason: "conda 解压过的包副本；已建环境不依赖它", consequence: "以后 conda install 会重新下载", recommended: false, command: Some("conda clean --all --dry-run"), command_note: Some("确认后去掉 --dry-run") },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "Python/_cache", label: "运行时下载缓存（安装管理器）", reason: "Python 安装管理器下载过的运行时归档；装好的版本不依赖它", consequence: "装好的运行时不依赖它；下次 python install 新版本要重新下载", recommended: false, command: Some("py --list"), command_note: Some("先看这台机器装了哪些版本，再决定删不删缓存") },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "npm-cache", label: "npm 缓存", reason: "npm 下载过的 tarball", consequence: "npm install 重新下载；node_modules 不受影响", recommended: true, command: Some("npm cache clean --force"), command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "Yarn/Cache", label: "Yarn 缓存", reason: "Yarn 的包缓存", consequence: "重新 yarn install 时会再下载", recommended: true, command: Some("yarn cache clean"), command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "pnpm-store", label: "pnpm store", reason: "pnpm 的内容寻址仓库", consequence: "现有项目的 node_modules 是硬链接，删了可能让它们失效；要清用 pnpm store prune", recommended: false, command: Some("pnpm store prune"), command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "go-build", label: "go build 缓存", reason: "编译中间产物缓存", consequence: "下次 go build/go test 慢一些", recommended: true, command: Some("go clean -cache"), command_note: None },
+    CacheSpec { action: "delete", var: "USERPROFILE", rel: "go/pkg/mod", label: "go 模块缓存", reason: "go mod 下载的依赖源码", consequence: "断网时没法再 build；有网就自动重下", recommended: false, command: Some("go clean -modcache"), command_note: None },
+    CacheSpec { action: "delete", var: "USERPROFILE", rel: ".cargo/registry", label: "cargo registry", reason: "crates.io 下载的包与索引", consequence: "下次 cargo build 要把依赖全下一遍（这块经常几个 GB）", recommended: false, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "USERPROFILE", rel: ".gradle/caches", label: "Gradle 依赖缓存", reason: "Gradle 下载的依赖与 daemon 缓存", consequence: "下次构建需重新下载；已 checkout 的项目要重跑配置", recommended: false, command: None, command_note: None },
 ];
 
 /// 全局缓存尾（刀2：VS Code 5 / 浏览器 2 / 崩溃转储 1，8 条目录型）。
 pub const CACHES_TAIL: &[CacheSpec] = &[
-    CacheSpec { var: "APPDATA", rel: "Code/Cache", label: "Code Cache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
-    CacheSpec { var: "APPDATA", rel: "Code/CachedData", label: "CachedData", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
-    CacheSpec { var: "APPDATA", rel: "Code/GPUCache", label: "GPUCache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
-    CacheSpec { var: "APPDATA", rel: "Code/Code Cache", label: "Code Cache(old)", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
-    CacheSpec { var: "APPDATA", rel: "Code/logs", label: "日志", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "Microsoft/Edge/User Data/Default/Cache", label: "Edge 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "Google/Chrome/User Data/Default/Cache", label: "Chrome 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
-    CacheSpec { var: "LOCALAPPDATA", rel: "CrashDumps", label: "崩溃转储", reason: "程序崩溃时留下的内存快照", consequence: "除非你正在查某个崩溃，否则没有任何用", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "APPDATA", rel: "Code/Cache", label: "Code Cache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "APPDATA", rel: "Code/CachedData", label: "CachedData", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "APPDATA", rel: "Code/GPUCache", label: "GPUCache", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "APPDATA", rel: "Code/Code Cache", label: "Code Cache(old)", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "APPDATA", rel: "Code/logs", label: "日志", reason: "编辑器自己的缓存与日志，跟你的代码无关", consequence: "VS Code 首次打开稍慢；设置和插件都不受影响", recommended: true, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "Microsoft/Edge/User Data/Default/Cache", label: "Edge 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "Google/Chrome/User Data/Default/Cache", label: "Chrome 缓存", reason: "网页缓存", consequence: "首次打开常用网站慢一点；登录状态、密码不受影响", recommended: false, command: None, command_note: None },
+    CacheSpec { action: "delete", var: "LOCALAPPDATA", rel: "CrashDumps", label: "崩溃转储", reason: "程序崩溃时留下的内存快照", consequence: "除非你正在查某个崩溃，否则没有任何用", recommended: true, command: None, command_note: None },
 ];
+
+/// env 变量 + 相对路径（`/` 分段 push → `\` 分隔绝对路径，与旧 env_path 一致）。
+fn env_path(var: &str, rel: &str) -> Option<PathBuf> {
+    let base = std::env::var_os(var)?;
+    let mut p = PathBuf::from(base);
+    for seg in rel.split('/').filter(|s| !s.is_empty()) {
+        p.push(seg);
+    }
+    Some(p)
+}
 
 /// 发现层（薄，不单测）：env 查找 → 已解析路径，目录不存在就跳过。
 fn discover_caches(specs: &[CacheSpec]) -> Vec<(&CacheSpec, PathBuf)> {
     specs
         .iter()
-        .filter_map(|s| std::env::var_os(s.var).map(|b| (s, PathBuf::from(b).join(s.rel))))
+        .filter_map(|s| env_path(s.var, s.rel).map(|p| (s, p)))
         .filter(|(_, p)| p.is_dir())
         .collect()
 }
@@ -240,7 +251,7 @@ pub fn enumerate_global_caches(roots: &[(&CacheSpec, PathBuf)]) -> Vec<serde_jso
         if bytes == 0 {
             continue;
         }
-        let mut item = serde_json::json!({"path": path.to_string_lossy().to_string(), "label": spec.label, "action": "delete", "zone": "a", "recommended": spec.recommended, "size_bytes": bytes, "reason": spec.reason, "consequence": spec.consequence});
+        let mut item = serde_json::json!({"path": path.to_string_lossy().to_string(), "label": spec.label, "action": spec.action, "zone": "a", "recommended": spec.recommended, "size_bytes": bytes, "reason": spec.reason, "consequence": spec.consequence});
         if let Some(c) = spec.command { item["command"] = serde_json::json!(c); }
         if let Some(c) = spec.command_note { item["command_note"] = serde_json::json!(c); }
         out.push(item);
@@ -389,10 +400,16 @@ pub fn admin_items() -> Vec<serde_json::Value> {
         items.push(serde_json::json!({"path": path.to_string_lossy().to_string(), "label": label, "action": "command", "zone": "b", "recommended": recommended, "size_bytes": size, "reason": reason, "consequence": consequence, "command": command, "command_note": "在「管理员 PowerShell」里跑"}));
     };
     if let Some(w) = windir.as_ref() {
-        push("Windows 更新下载缓存", w.join("SoftwareDistribution/Download"), "系统更新下载完就留着不删的安装包", "下次更新会重新下载；不会影响已装的更新", true, r#"Stop-Service wuauserv,bits -Force -ErrorAction SilentlyContinue; Remove-Item "$env:windir\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue; Start-Service bits,wuauserv -ErrorAction SilentlyContinue"#);
+        push("Windows 更新下载缓存", w.join("SoftwareDistribution").join("Download"), "系统更新下载完就留着不删的安装包", "下次更新会重新下载；不会影响已装的更新", true, r#"Stop-Service wuauserv,bits -Force -ErrorAction SilentlyContinue; Remove-Item "$env:windir\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue; Start-Service bits,wuauserv -ErrorAction SilentlyContinue"#);
         if let Some(d) = drive.as_ref() {
-            push("以前的 Windows 安装", d.join("Windows.old"), "大版本升级后留下的旧系统备份", "删掉就再也退不回上一个 Windows 版本了；升级完用了半个月没事就可以删", true, r#"Remove-Item "$env:SystemDrive\Windows.old" -Recurse -Force"#);
-            push("休眠文件 hiberfil.sys", d.join("hiberfil.sys"), "休眠/快速启动用的内存镜像，大小通常等于内存的一半以上", "会失去休眠和快速启动（开机能慢几秒）；想恢复跑 powercfg /h on", true, "powercfg /h off");
+            let old = d.join("Windows.old");
+            if old.is_dir() {
+                push("以前的 Windows 安装", old, "大版本升级后留下的旧系统备份", "删掉就再也退不回上一个 Windows 版本了；升级完用了半个月没事就可以删", true, r#"Remove-Item "$env:SystemDrive\Windows.old" -Recurse -Force"#);
+            }
+            let hib = d.join("hiberfil.sys");
+            if hib.exists() {
+                push("休眠文件 hiberfil.sys", hib, "休眠/快速启动用的内存镜像，大小通常等于内存的一半以上", "会失去休眠和快速启动（开机能慢几秒）；想恢复跑 powercfg /h on", true, "powercfg /h off");
+            }
         }
     }
     push("系统还原点 / 卷影副本", PathBuf::from("%SystemDrive%\\System Volume Information"), "系统为还原点保存的历史快照，随时间越积越多", "删掉后无法用「系统还原」回滚到更早的时间点；保留最近一两个才划算", false, "vssadmin list shadowstorage");
@@ -414,7 +431,7 @@ pub fn offlimits_items() -> Vec<serde_json::Value> {
         ("Program Files / ProgramData", "%ProgramFiles%", "软件本体与它的公共数据。卸载必须走「应用和功能」，手删会留下无法修复的残留。"),
         ("System Volume Information / Recovery", "%SystemDrive%\\System Volume Information", "系统还原与恢复环境。系统目录，需要权限才能碰——那正是它保护自己的方式。"),
     ];
-    C.iter().map(|(label, path, consequence)| serde_json::json!({"path": *path, "label": *label, "action": "none", "zone": "c", "recommended": false, "size_bytes": 0, "reason": "", "consequence": *consequence})).collect()
+    C.iter().map(|(label, path, consequence)| serde_json::json!({"path": *path, "label": *label, "action": "explain", "zone": "c", "recommended": false, "size_bytes": 0, "reason": "", "consequence": *consequence})).collect()
 }
 
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
@@ -958,7 +975,7 @@ impl Engine {
         let mut items: Vec<serde_json::Value> = Vec::new();
         let mut files_considered: u64 = 0;
         let mut project_truncated = false;
-        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        let root = PathBuf::from(clean_path(&std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone())));
         let mut stack: Vec<std::path::PathBuf> = vec![root.clone()];
         let mut depth_of: std::collections::HashMap<std::path::PathBuf, u32> = Default::default();
         depth_of.insert(root.clone(), 0);
@@ -1016,7 +1033,7 @@ impl Engine {
         items.extend(scan_project_junk(&root));
         items.extend(enumerate_global_caches(&discover_caches(CACHES_MAIN)));
         items.extend(enumerate_global_caches(&discover_caches(CACHES_TAIL)));
-        if let Some(p) = std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("Microsoft/Windows/Explorer")) {
+        if let Some(p) = env_path("LOCALAPPDATA", "Microsoft/Windows/Explorer") {
             if let Some(it) = scan_thumbcache(&p) { items.push(it); }
         }
         items.push(recycle_bin_item());

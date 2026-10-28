@@ -412,15 +412,8 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     let resp = serve_once(&d, &req);
     assert_eq!(resp["ok"], true, "{resp}");
     let served = strip(resp["result"].clone());
-    // serve 与 facade 同值：真实大缓存量体积 300ms 截断、字节漂移，只比「非截断项」。
-    let strip_trunc = |v: &Value| -> Value {
-        let mut c = v.clone();
-        if let Some(arr) = c.get_mut("items").and_then(|i| i.as_array_mut()) {
-            arr.retain(|it| !it["truncated"].as_bool().unwrap_or(false));
-        }
-        c
-    };
-    assert_eq!(strip_trunc(&served), strip_trunc(&facade), "非截断项 serve 与 facade 必须同值");
+    // 全量 dir_stat 无截断，serve 与 facade 逐值相等。
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
 
     // 顶层键固定
     let mut top: Vec<&str> = served.as_object().unwrap().keys().map(|s| s.as_str()).collect();
@@ -441,7 +434,7 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     for it in &project {
         let mut ks: Vec<&str> = it.as_object().unwrap().keys().map(|x| x.as_str()).collect();
         ks.sort();
-        assert_eq!(ks, ["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"], "{it}");
+        assert_eq!(ks, ["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "zone"], "{it}");
         assert_eq!(it["action"], "delete");
         assert_eq!(it["zone"], "a");
     }
@@ -483,7 +476,6 @@ fn global_caches_enumerate_hermetic_fields_and_sizes() {
         assert_eq!(it["label"].as_str().unwrap(), spec.label, "{it}");
         assert!(it["size_bytes"].as_u64().unwrap() > 0, "{it}");
         assert_eq!(it["recommended"].as_bool().unwrap(), spec.recommended, "{it}");
-        assert!(!it["truncated"].as_bool().unwrap(), "{it}");
         assert_eq!(it["command"].is_string(), spec.command.is_some(), "{it}");
         assert_eq!(it["command_note"].is_string(), spec.command_note.is_some(), "{it}");
     }
@@ -491,7 +483,7 @@ fn global_caches_enumerate_hermetic_fields_and_sizes() {
     let pip = items.iter().find(|i| i["label"] == "pip 下载缓存").expect("pip item");
     let mut ks: Vec<&str> = pip.as_object().unwrap().keys().map(|s| s.as_str()).collect();
     ks.sort();
-    assert_eq!(ks, ["action", "command", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"]);
+    assert_eq!(ks, ["action", "command", "consequence", "label", "path", "reason", "recommended", "size_bytes", "zone"]);
     let _ = std::fs::remove_dir_all(&d);
 }
 

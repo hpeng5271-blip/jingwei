@@ -155,28 +155,22 @@ fn count_sources(dir: &Path, cap: usize) -> (usize, bool) {
 }
 
 
-/// 有上限地量一个目录的体积（20k 文件或 300ms 就停），返回 `(bytes, 是否被截断)`。
-fn measure_dir(dir: &std::path::Path, cap_files: u64) -> (u64, bool) {
-    let t0 = std::time::Instant::now();
+/// 全量递归量目录体积（无 20k/300ms 上限，与旧 clean.rs dir_stat 一致）。
+fn dir_stat(dir: &std::path::Path) -> u64 {
     let mut bytes = 0u64;
-    let mut files = 0u64;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        if files >= cap_files || t0.elapsed().as_millis() > 300 {
-            return (bytes, true);
-        }
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
                 stack.push(e.path());
             } else if ft.is_file() {
-                files += 1;
                 bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
             }
         }
     }
-    (bytes, false)
+    bytes
 }
 
 /// 人看的体积（与旧壳同口径：一位小数 + 单位）。
@@ -242,11 +236,11 @@ fn discover_caches(specs: &[CacheSpec]) -> Vec<(&CacheSpec, PathBuf)> {
 pub fn enumerate_global_caches(roots: &[(&CacheSpec, PathBuf)]) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for (spec, path) in roots {
-        let (bytes, truncated) = measure_dir(path, 20_000);
+        let bytes = dir_stat(path);
         if bytes == 0 {
             continue;
         }
-        let mut item = serde_json::json!({"path": path.to_string_lossy().to_string(), "label": spec.label, "action": "delete", "zone": "a", "recommended": spec.recommended, "size_bytes": bytes, "reason": spec.reason, "consequence": spec.consequence, "truncated": truncated});
+        let mut item = serde_json::json!({"path": path.to_string_lossy().to_string(), "label": spec.label, "action": "delete", "zone": "a", "recommended": spec.recommended, "size_bytes": bytes, "reason": spec.reason, "consequence": spec.consequence});
         if let Some(c) = spec.command { item["command"] = serde_json::json!(c); }
         if let Some(c) = spec.command_note { item["command_note"] = serde_json::json!(c); }
         out.push(item);
@@ -267,12 +261,12 @@ pub fn scan_thumbcache(dir: &Path) -> Option<serde_json::Value> {
     if bytes == 0 {
         return None;
     }
-    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "缩略图 / 图标缓存", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "资源管理器为图片/视频/图标生成的预览缓存", "consequence": "删除后资源管理器会自动重建；只是某些文件夹首次打开时图标要重算，不影响文件本身", "truncated": false}))
+    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "缩略图 / 图标缓存", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "资源管理器为图片/视频/图标生成的预览缓存", "consequence": "删除后资源管理器会自动重建；只是某些文件夹首次打开时图标要重算，不影响文件本身"}))
 }
 
 /// 回收站：系统托管、工具不直接删，给命令（固定项，action=command，不进 zoneA 字节合计）。
 pub fn recycle_bin_item() -> serde_json::Value {
-    serde_json::json!({"path": "所有驱动器", "label": "回收站", "action": "command", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "已经删过一次、但还占着盘的东西", "consequence": "清空后无法还原。确认里面没有你要找回的文件再清", "command": "Clear-RecycleBin -Force", "command_note": "在 PowerShell 里跑", "truncated": false})
+    serde_json::json!({"path": "所有驱动器", "label": "回收站", "action": "command", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "已经删过一次、但还占着盘的东西", "consequence": "清空后无法还原。确认里面没有你要找回的文件再清", "command": "Clear-RecycleBin -Force", "command_note": "在 PowerShell 里跑"})
 }
 
 /// 临时文件（hermetic）：目录里 7 天以上没动过的条目；够老才列，不是全部 TEMP。
@@ -281,7 +275,6 @@ pub fn scan_temp(dir: &Path) -> Option<serde_json::Value> {
     let now = std::time::SystemTime::now();
     let cutoff = std::time::Duration::from_secs(7 * 24 * 3600);
     let mut bytes = 0u64;
-    let mut truncated = false;
     for e in rd.flatten() {
         let p = e.path();
         let Ok(m) = e.metadata() else { continue };
@@ -289,14 +282,12 @@ pub fn scan_temp(dir: &Path) -> Option<serde_json::Value> {
         if now.duration_since(t).unwrap_or_default() < cutoff {
             continue;
         }
-        let (b, tr) = if p.is_dir() { measure_dir(&p, 20_000) } else { (m.len(), false) };
-        bytes += b;
-        truncated |= tr;
+        bytes += if p.is_dir() { dir_stat(&p) } else { m.len() };
     }
     if bytes == 0 {
         return None;
     }
-    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "临时文件（7 天以上没动过）", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "程序用完就丢的中间文件；7 天没碰过的基本没人要了", "consequence": "正在运行的程序占用的会被自动跳过；关掉再清更干净", "truncated": truncated}))
+    Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "临时文件（7 天以上没动过）", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "程序用完就丢的中间文件；7 天没碰过的基本没人要了", "consequence": "正在运行的程序占用的会被自动跳过；关掉再清更干净"}))
 }
 
 /// 项目垃圾（hermetic，对齐旧 clean.rs 项目垃圾）：junk 后缀文件 + 日志≥1MB + 空目录 + 未用 venv。
@@ -343,14 +334,14 @@ pub fn scan_project_junk(root: &Path) -> Vec<serde_json::Value> {
         }
     }
     for (label, (bytes, files)) in groups {
-        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("{label}（{files} 个）"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "编辑器和补丁工具留下的中间产物，程序运行时不会去读它", "consequence": "不影响运行。万一是你要的备份，回收站里还能捞回来", "truncated": false}));
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("{label}（{files} 个）"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "编辑器和补丁工具留下的中间产物，程序运行时不会去读它", "consequence": "不影响运行。万一是你要的备份，回收站里还能捞回来"}));
     }
     if !logs.is_empty() {
         let bytes: u64 = logs.iter().sum();
-        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("日志文件（{} 个，单个 ≥ 1 MB）", logs.len()), "action": "delete", "zone": "a", "recommended": bytes >= 5 * 1024 * 1024, "size_bytes": bytes, "reason": "运行日志会一直追加，放久了很占地方；它只对「排查正在发生的问题」有用", "consequence": "删了不影响程序。但如果此刻正在查一个 bug，先别删——那是线索", "truncated": false}));
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("日志文件（{} 个，单个 ≥ 1 MB）", logs.len()), "action": "delete", "zone": "a", "recommended": bytes >= 5 * 1024 * 1024, "size_bytes": bytes, "reason": "运行日志会一直追加，放久了很占地方；它只对「排查正在发生的问题」有用", "consequence": "删了不影响程序。但如果此刻正在查一个 bug，先别删——那是线索"}));
     }
     if !empties.is_empty() {
-        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("空目录（{} 个）", empties.len()), "action": "delete", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "里面一个文件都没有。多半是删文件时留下的壳，或者某次失败的复制", "consequence": "有些程序要求目录先存在（日志目录、上传目录），删了它可能自己重建、也可能报错", "truncated": false}));
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("空目录（{} 个）", empties.len()), "action": "delete", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "里面一个文件都没有。多半是删文件时留下的壳，或者某次失败的复制", "consequence": "有些程序要求目录先存在（日志目录、上传目录），删了它可能自己重建、也可能报错"}));
     }
     out.extend(scan_unused_venvs(root));
     out
@@ -376,8 +367,8 @@ pub fn scan_unused_venvs(root: &Path) -> Vec<serde_json::Value> {
             if b.contains(&lower) { continue; }
             ("项目契约绑定的是另一个虚拟环境，这一个没被任何配置指向", "删掉不影响现在能跑的项目；以后要用它得重新建、重新装依赖")
         };
-        let (bytes, truncated) = measure_dir(&p, 20_000);
-        out.push(serde_json::json!({"path": p.to_string_lossy().to_string(), "label": format!("没在用的虚拟环境：{name}"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": reason, "consequence": consequence, "truncated": truncated}));
+        let bytes = dir_stat(&p);
+        out.push(serde_json::json!({"path": p.to_string_lossy().to_string(), "label": format!("没在用的虚拟环境：{name}"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": reason, "consequence": consequence}));
     }
     out
 }
@@ -388,14 +379,14 @@ pub fn admin_items() -> Vec<serde_json::Value> {
     let drive = windir.as_ref().and_then(|w| w.parent().map(PathBuf::from));
     let mut items = Vec::new();
     let mut push = |label: &str, path: PathBuf, reason: &str, consequence: &str, recommended: bool, command: &str| {
-        let (size, truncated) = if path.is_dir() {
-            measure_dir(&path, 20_000)
+        let size = if path.is_dir() {
+            dir_stat(&path)
         } else if path.exists() {
-            (std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0), false)
+            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
         } else {
-            (0, false)
+            0
         };
-        items.push(serde_json::json!({"path": path.to_string_lossy().to_string(), "label": label, "action": "command", "zone": "b", "recommended": recommended, "size_bytes": size, "reason": reason, "consequence": consequence, "command": command, "command_note": "在「管理员 PowerShell」里跑", "truncated": truncated}));
+        items.push(serde_json::json!({"path": path.to_string_lossy().to_string(), "label": label, "action": "command", "zone": "b", "recommended": recommended, "size_bytes": size, "reason": reason, "consequence": consequence, "command": command, "command_note": "在「管理员 PowerShell」里跑"}));
     };
     if let Some(w) = windir.as_ref() {
         push("Windows 更新下载缓存", w.join("SoftwareDistribution/Download"), "系统更新下载完就留着不删的安装包", "下次更新会重新下载；不会影响已装的更新", true, r#"Stop-Service wuauserv,bits -Force -ErrorAction SilentlyContinue; Remove-Item "$env:windir\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue; Start-Service bits,wuauserv -ErrorAction SilentlyContinue"#);
@@ -423,7 +414,7 @@ pub fn offlimits_items() -> Vec<serde_json::Value> {
         ("Program Files / ProgramData", "%ProgramFiles%", "软件本体与它的公共数据。卸载必须走「应用和功能」，手删会留下无法修复的残留。"),
         ("System Volume Information / Recovery", "%SystemDrive%\\System Volume Information", "系统还原与恢复环境。系统目录，需要权限才能碰——那正是它保护自己的方式。"),
     ];
-    C.iter().map(|(label, path, consequence)| serde_json::json!({"path": *path, "label": *label, "action": "none", "zone": "c", "recommended": false, "size_bytes": 0, "reason": "", "consequence": *consequence, "truncated": false})).collect()
+    C.iter().map(|(label, path, consequence)| serde_json::json!({"path": *path, "label": *label, "action": "none", "zone": "c", "recommended": false, "size_bytes": 0, "reason": "", "consequence": *consequence})).collect()
 }
 
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
@@ -992,7 +983,7 @@ impl Engine {
                         project_truncated = true;
                         continue;
                     }
-                    let (bytes, truncated) = measure_dir(&e.path(), 20_000);
+                    let bytes = dir_stat(&e.path());
                     files_considered += 1;
                     let (reason, consequence, recommended) = if lower == "__pycache__" {
                         ("Python 导入时自动生成的字节码；下次导入会重建", "只是首次 import 慢一点点；不影响任何功能", true)
@@ -1012,7 +1003,6 @@ impl Engine {
                         "size_bytes": bytes,
                         "reason": reason,
                         "consequence": consequence,
-                        "truncated": truncated,
                     }));
                     continue;
                 }
@@ -1037,13 +1027,12 @@ impl Engine {
         items.extend(admin_items());
         items.extend(offlimits_items());
 
-        // 顶层口径：只算 zone A + action=delete；被截断项不进字节合计（不留假精确）。
+        // 顶层口径：只算 zone A + action=delete。
         let za = |i: &&serde_json::Value| i["zone"] == "a" && i["action"] == "delete";
-        let exact = |i: &&serde_json::Value| !i["truncated"].as_bool().unwrap_or(false);
         let rec = |i: &&serde_json::Value| i["recommended"] == true;
-        let zone_bytes: u64 = items.iter().filter(|i| za(i) && exact(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        let zone_bytes: u64 = items.iter().filter(|i| za(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
         let zone_count = items.iter().filter(|i| za(i)).count();
-        let rec_bytes: u64 = items.iter().filter(|i| za(i) && exact(i) && rec(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        let rec_bytes: u64 = items.iter().filter(|i| za(i) && rec(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
         let rec_count = items.iter().filter(|i| za(i) && rec(i)).count();
 
         Ok(serde_json::json!({

@@ -4882,6 +4882,7 @@ fn ra_session<R>(root: &std::path::Path, f: impl FnOnce(&mut RaSession) -> R) ->
             if std::env::var("CARGO_HOME").is_err() { cmd.env("CARGO_HOME", std::path::Path::new(&up).join(".cargo")); }
         }
         cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+        engine::set_lsp_warming(true);
         let mut child = cmd.spawn().map_err(|e| format!("server_down: {e}"))?;
         let pid = child.id();
         let stdin = child.stdin.take().ok_or("server_down: no stdin")?;
@@ -4917,6 +4918,7 @@ fn ra_session<R>(root: &std::path::Path, f: impl FnOnce(&mut RaSession) -> R) ->
             return Err("server_down".into());
         };
         s.caps = res["result"].clone();
+        engine::set_lsp_warming(false);
         s.send(&serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
         *guard = Some(s);
     }

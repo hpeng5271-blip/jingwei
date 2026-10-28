@@ -313,6 +313,10 @@ if is_commit_like(input) {
     let state = match &ans.outcome {
         datacore::compose::Outcome::Held => "held".to_string(),
         datacore::compose::Outcome::Refuted => "refuted".to_string(),
+        // RA 索引中（warming）：不给假的 no_data，标 lsp_warming_up 让 UI 知道"还在算"
+        datacore::compose::Outcome::Uncertain(_) if crate::lsp_warming() => {
+            "uncertain(lsp_warming_up)".to_string()
+        }
         datacore::compose::Outcome::Uncertain(r) => format!("uncertain({r})"),
     };
 

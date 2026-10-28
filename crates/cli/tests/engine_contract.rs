@@ -166,6 +166,23 @@ fn card_scope_three_zones() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// R4 · LSP warming：RA 索引中 → uncertain(lsp_warming_up)（不给假 no_data）；就绪后恢复。
+#[test]
+fn card_uncertain_lsp_warming_state() {
+    let d = fixture("lspwarm");
+    parse_fixture(&d);
+    let e = engine::Engine::open(&d).expect("open");
+
+    engine::set_lsp_warming(true);
+    let (_c, v) = e.card("file:src/a.rs", false, None).unwrap();
+    assert_eq!(v["state"], "uncertain(lsp_warming_up)", "{v}");
+
+    engine::set_lsp_warming(false);
+    let (_c, v2) = e.card("file:src/a.rs", false, None).unwrap();
+    assert_ne!(v2["state"], "uncertain(lsp_warming_up)", "{v2}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 fn git(dir: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .arg("-C")

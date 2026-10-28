@@ -3,11 +3,23 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use datacore::model::PARSE_RULES_VERSION;
 use datacore::store::Store;
 
 pub mod view;
+
+/// LSP 会话是否仍在 warming（RA 索引中）。serve 起 RA 时置 true，initialize 完成后置 false。
+static LSP_WARMING: AtomicBool = AtomicBool::new(false);
+
+pub fn set_lsp_warming(w: bool) {
+    LSP_WARMING.store(w, Ordering::SeqCst);
+}
+
+pub fn lsp_warming() -> bool {
+    LSP_WARMING.load(Ordering::SeqCst)
+}
 
 /// 门面错误：只暴露"没有库"与"库打不开"两类，调用方据此给用户可操作提示。
 #[derive(Debug)]

@@ -299,6 +299,133 @@ pub fn scan_temp(dir: &Path) -> Option<serde_json::Value> {
     Some(serde_json::json!({"path": dir.to_string_lossy().to_string(), "label": "临时文件（7 天以上没动过）", "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "程序用完就丢的中间文件；7 天没碰过的基本没人要了", "consequence": "正在运行的程序占用的会被自动跳过；关掉再清更干净", "truncated": truncated}))
 }
 
+/// 项目垃圾（hermetic，对齐旧 clean.rs 项目垃圾）：junk 后缀文件 + 日志≥1MB + 空目录 + 未用 venv。
+pub fn scan_project_junk(root: &Path) -> Vec<serde_json::Value> {
+    const JUNK: &[(&str, &str)] = &[
+        (".bak", "*.bak · 备份文件"), (".old", "*.old · 旧版本副本"), (".orig", "*.orig · 打补丁留下的原件"),
+        (".rej", "*.rej · 没打上的补丁片段"), (".tmp", "*.tmp · 临时文件"), (".temp", "*.temp · 临时文件"),
+        (".swp", "*.swp · 编辑器崩溃残留"), (".swo", "*.swo · 编辑器崩溃残留"), (".save", "*.save · 编辑器崩溃残留"),
+        ("~", "*~ · 编辑器自动备份"),
+    ];
+    let mut out = Vec::new();
+    let mut groups: std::collections::BTreeMap<&'static str, (u64, usize)> = Default::default();
+    let mut logs: Vec<u64> = Vec::new();
+    let mut empties: Vec<String> = Vec::new();
+    let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
+    let mut depth_of: std::collections::HashMap<std::path::PathBuf, u32> = Default::default();
+    depth_of.insert(root.to_path_buf(), 0);
+    while let Some(dir) = stack.pop() {
+        let d = *depth_of.get(&dir).unwrap_or(&0);
+        if d >= 6 { continue; }
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(ft) = e.file_type() else { continue };
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            if ft.is_dir() {
+                let sk = matches!(n.as_str(), "__pycache__" | ".pytest_cache" | ".mypy_cache" | ".ruff_cache" | ".tox" | ".ipynb_checkpoints" | "htmlcov" | "build" | "dist" | ".git" | "node_modules" | "target" | ".venv" | "venv" | "env" | ".idea" | ".vs" | ".jingwei" | ".drydock" | ".pylaunch") || n.ends_with(".egg-info");
+                if sk { continue; }
+                if p != root && std::fs::read_dir(&p).map(|mut r| r.next().is_none()).unwrap_or(false) {
+                    empties.push(p.to_string_lossy().to_string());
+                }
+                depth_of.insert(p.clone(), d + 1);
+                stack.push(p);
+            } else if ft.is_file() {
+                let bytes = e.metadata().map(|m| m.len()).unwrap_or(0);
+                if let Some((_, label)) = JUNK.iter().find(|(s, _)| n.ends_with(s)) {
+                    let g = groups.entry(label).or_insert((0, 0)); g.0 += bytes; g.1 += 1;
+                } else if n.contains(" - 副本") || n.contains(" - copy") {
+                    let g = groups.entry("某某 - 副本 · 手抄的复制品").or_insert((0, 0)); g.0 += bytes; g.1 += 1;
+                } else if n.ends_with(".log") && bytes >= 1024 * 1024 {
+                    logs.push(bytes);
+                }
+            }
+        }
+    }
+    for (label, (bytes, files)) in groups {
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("{label}（{files} 个）"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": "编辑器和补丁工具留下的中间产物，程序运行时不会去读它", "consequence": "不影响运行。万一是你要的备份，回收站里还能捞回来", "truncated": false}));
+    }
+    if !logs.is_empty() {
+        let bytes: u64 = logs.iter().sum();
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("日志文件（{} 个，单个 ≥ 1 MB）", logs.len()), "action": "delete", "zone": "a", "recommended": bytes >= 5 * 1024 * 1024, "size_bytes": bytes, "reason": "运行日志会一直追加，放久了很占地方；它只对「排查正在发生的问题」有用", "consequence": "删了不影响程序。但如果此刻正在查一个 bug，先别删——那是线索", "truncated": false}));
+    }
+    if !empties.is_empty() {
+        out.push(serde_json::json!({"path": root.to_string_lossy().to_string(), "label": format!("空目录（{} 个）", empties.len()), "action": "delete", "zone": "a", "recommended": false, "size_bytes": 0, "reason": "里面一个文件都没有。多半是删文件时留下的壳，或者某次失败的复制", "consequence": "有些程序要求目录先存在（日志目录、上传目录），删了它可能自己重建、也可能报错", "truncated": false}));
+    }
+    out.extend(scan_unused_venvs(root));
+    out
+}
+
+/// 未用 venv：名字里写着备份/副本，或契约绑的是另一个解释器（hermetic，显式 root）。
+pub fn scan_unused_venvs(root: &Path) -> Vec<serde_json::Value> {
+    let Ok(rd) = std::fs::read_dir(root) else { return Vec::new() };
+    let bound = std::fs::read_to_string(root.join("env.contract.json")).ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["runtime"]["python_exe"].as_str().map(|s| s.to_lowercase()));
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.join("pyvenv.cfg").is_file() { continue; }
+        let name = e.file_name().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+        let is_copy = lower.contains(".bak") || lower.contains("-bak") || lower.contains("backup") || lower.contains("副本") || lower.contains("-copy");
+        let (reason, consequence) = if is_copy {
+            ("名字里就写着备份/副本：虚拟环境里的路径是写死的，复制出来的那份多数时候根本跑不起来", "删了它，你原来那个环境一点不受影响。真要留备份，留 requirements.txt 就够了")
+        } else {
+            let Some(b) = &bound else { continue };
+            if b.contains(&lower) { continue; }
+            ("项目契约绑定的是另一个虚拟环境，这一个没被任何配置指向", "删掉不影响现在能跑的项目；以后要用它得重新建、重新装依赖")
+        };
+        let (bytes, truncated) = measure_dir(&p, 20_000);
+        out.push(serde_json::json!({"path": p.to_string_lossy().to_string(), "label": format!("没在用的虚拟环境：{name}"), "action": "delete", "zone": "a", "recommended": true, "size_bytes": bytes, "reason": reason, "consequence": consequence, "truncated": truncated}));
+    }
+    out
+}
+
+/// zone B 管理员项（给命令不执行，不进 zoneA 合计）：7 条固定。真目录/文件才量体积，字面量路径 0。
+pub fn admin_items() -> Vec<serde_json::Value> {
+    let windir = std::env::var_os("SystemRoot").map(PathBuf::from);
+    let drive = windir.as_ref().and_then(|w| w.parent().map(PathBuf::from));
+    let mut items = Vec::new();
+    let mut push = |label: &str, path: PathBuf, reason: &str, consequence: &str, recommended: bool, command: &str| {
+        let (size, truncated) = if path.is_dir() {
+            measure_dir(&path, 20_000)
+        } else if path.exists() {
+            (std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0), false)
+        } else {
+            (0, false)
+        };
+        items.push(serde_json::json!({"path": path.to_string_lossy().to_string(), "label": label, "action": "command", "zone": "b", "recommended": recommended, "size_bytes": size, "reason": reason, "consequence": consequence, "command": command, "command_note": "在「管理员 PowerShell」里跑", "truncated": truncated}));
+    };
+    if let Some(w) = windir.as_ref() {
+        push("Windows 更新下载缓存", w.join("SoftwareDistribution/Download"), "系统更新下载完就留着不删的安装包", "下次更新会重新下载；不会影响已装的更新", true, r#"Stop-Service wuauserv,bits -Force -ErrorAction SilentlyContinue; Remove-Item "$env:windir\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue; Start-Service bits,wuauserv -ErrorAction SilentlyContinue"#);
+        if let Some(d) = drive.as_ref() {
+            push("以前的 Windows 安装", d.join("Windows.old"), "大版本升级后留下的旧系统备份", "删掉就再也退不回上一个 Windows 版本了；升级完用了半个月没事就可以删", true, r#"Remove-Item "$env:SystemDrive\Windows.old" -Recurse -Force"#);
+            push("休眠文件 hiberfil.sys", d.join("hiberfil.sys"), "休眠/快速启动用的内存镜像，大小通常等于内存的一半以上", "会失去休眠和快速启动（开机能慢几秒）；想恢复跑 powercfg /h on", true, "powercfg /h off");
+        }
+    }
+    push("系统还原点 / 卷影副本", PathBuf::from("%SystemDrive%\\System Volume Information"), "系统为还原点保存的历史快照，随时间越积越多", "删掉后无法用「系统还原」回滚到更早的时间点；保留最近一两个才划算", false, "vssadmin list shadowstorage");
+    push("组件存储精简（WinSxS 的合法清理方式）", PathBuf::from("%windir%\\WinSxS"), "Windows 官方提供的组件清理通道；它会顺手清掉被取代的旧组件", "加了 /ResetBase 之后就装不回已经装过的旧更新了，别的没有影响", true, "Dism /Online /Cleanup-Image /AnalyzeComponentStore");
+    push("第三方驱动包（旧版本）", PathBuf::from("%windir%\\System32\\DriverStore\\FileRepository"), "装驱动时留下的旧版本，设备管理里看不见但占地方", "删错会让某个硬件失效；只删标记为「旧版本」的，并且删之前记下名字", false, "pnputil /enum-drivers");
+    push("磁盘清理向导", PathBuf::from("cleanmgr"), "Windows 自带的清理入口，比手工删安全得多", "按你勾选的项清理；不确定的项别勾", true, "cleanmgr /d C:");
+    items
+}
+
+/// zone C 别碰 8 条（只解释不操作）：action=none，不进任何合计。
+pub fn offlimits_items() -> Vec<serde_json::Value> {
+    const C: &[(&str, &str, &str)] = &[
+        ("WinSxS（组件存储）", "%windir%\\WinSxS", "里面绝大多数是硬链接，删了不省空间；微软官方原文：手工删除可能严重损坏系统以至无法启动。要清只能用 DISM。"),
+        ("pagefile.sys（虚拟内存）", "%SystemDrive%\\pagefile.sys", "删掉会让程序在内存吃紧时直接崩。确实要小一点，去 系统属性 → 高级 → 性能 → 虚拟内存 调。"),
+        ("Windows\\Installer", "%windir%\\Installer", "MSI 安装包缓存。删了以后很多软件无法修复、无法卸载、无法更新——这是网上最常见的「清理教程」失败案例。"),
+        ("注册表", "HKEY_LOCAL_MACHINE", "没有任何可靠的「清理注册表」工具。所谓优化注册表，收益接近零，风险是系统起不来。"),
+        ("共享依赖仓库 .m2 / .nuget", "%USERPROFILE%\\.m2、%USERPROFILE%\\.nuget\\packages", "Java/.NET 的全局依赖仓库。删了项目还能重新下载，但公司内网或离线环境会直接构建失败。当作只读区对待。"),
+        ("%APPDATA%\\Roaming", "%APPDATA%", "程序的数据和配置（浏览器书签、聊天记录、编辑器设置）。占地方但只属于程序自己，清它等于重置那些软件。"),
+        ("Program Files / ProgramData", "%ProgramFiles%", "软件本体与它的公共数据。卸载必须走「应用和功能」，手删会留下无法修复的残留。"),
+        ("System Volume Information / Recovery", "%SystemDrive%\\System Volume Information", "系统还原与恢复环境。系统目录，需要权限才能碰——那正是它保护自己的方式。"),
+    ];
+    C.iter().map(|(label, path, consequence)| serde_json::json!({"path": *path, "label": *label, "action": "none", "zone": "c", "recommended": false, "size_bytes": 0, "reason": "", "consequence": *consequence, "truncated": false})).collect()
+}
+
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
 fn parse_note(text: &str) -> (String, String, String, String, Vec<String>, String) {
     let mut kind = String::new();
@@ -843,7 +970,7 @@ impl Engine {
         let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
         let mut stack: Vec<std::path::PathBuf> = vec![root.clone()];
         let mut depth_of: std::collections::HashMap<std::path::PathBuf, u32> = Default::default();
-        depth_of.insert(root, 0);
+        depth_of.insert(root.clone(), 0);
         while let Some(dir) = stack.pop() {
             let d = *depth_of.get(&dir).unwrap_or(&0);
             if d >= 6 {
@@ -896,6 +1023,7 @@ impl Engine {
                 stack.push(e.path());
             }
         }
+        items.extend(scan_project_junk(&root));
         items.extend(enumerate_global_caches(&discover_caches(CACHES_MAIN)));
         items.extend(enumerate_global_caches(&discover_caches(CACHES_TAIL)));
         if let Some(p) = std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("Microsoft/Windows/Explorer")) {

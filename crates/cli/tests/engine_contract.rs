@@ -533,6 +533,28 @@ fn clean_scan_special_items_recycle_thumb_temp() {
     let _ = std::fs::remove_dir_all(&t);
 }
 
+/// R2 · 项目垃圾（hermetic）：junk 后缀 / 日志≥1MB / 空目录 / 未用 venv。
+#[test]
+fn clean_scan_project_junk_enumerates_files_logs_empty_venv() {
+    let d = fixture("junk");
+    std::fs::write(d.join("x.bak"), vec![0u8; 10]).unwrap();
+    std::fs::write(d.join("y.tmp"), vec![0u8; 20]).unwrap();
+    std::fs::write(d.join("big.log"), vec![0u8; 1024 * 1024 + 1]).unwrap();
+    std::fs::create_dir_all(d.join("empty_dir")).unwrap();
+    std::fs::create_dir_all(d.join("env-bak")).unwrap();
+    std::fs::write(d.join("env-bak/pyvenv.cfg"), "home = x\n").unwrap();
+    parse_fixture(&d);
+
+    let items = engine::scan_project_junk(&d);
+    let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
+    assert!(labels.iter().any(|l| l.contains("*.bak · 备份文件")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.contains("*.tmp · 临时文件")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.contains("日志文件")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.contains("空目录")), "{labels:?}");
+    assert!(labels.iter().any(|l| l.contains("没在用的虚拟环境：env-bak")), "{labels:?}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R2 · machine 硬件换芯：走外部 PowerShell CIM，成功给 hw，失败给 fails（不许两头空）。
 #[test]
 fn machine_hw_reports_either_data_or_reason() {

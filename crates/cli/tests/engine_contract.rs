@@ -390,7 +390,7 @@ fn serve_scan_matches_facade() {
 
 
 
-/// R2 · clean 换芯（数据面）：只清点项目内可重新生成的产物，字段与旧页 zone A 对齐。
+/// R2 · clean 换芯（数据面）：项目产物字段对齐 + 顶层信封口径（zoneA/recommended*，只算 zone A delete）。
 #[test]
 fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     let d = fixture("cleanscan");
@@ -406,30 +406,79 @@ fn serve_clean_scan_matches_facade_and_flags_regenerable() {
     let resp = serve_once(&d, &req);
     assert_eq!(resp["ok"], true, "{resp}");
     let served = strip(resp["result"].clone());
-    assert_eq!(served, facade, "serve 与 facade 必须同值");
+    // serve 与 facade 同值：真实大缓存量体积 300ms 截断、字节漂移，只比「非截断项」（截断项已排除出字节合计）。
+    let strip_trunc = |v: &Value| -> Value {
+        let mut c = v.clone();
+        if let Some(arr) = c.get_mut("items").and_then(|i| i.as_array_mut()) {
+            arr.retain(|it| !it["truncated"].as_bool().unwrap_or(false));
+        }
+        c
+    };
+    assert_eq!(strip_trunc(&served), strip_trunc(&facade), "非截断项 serve 与 facade 必须同值");
 
+    // 顶层键固定（zoneA/recommendedBytes/recommendedCount 是旧页信封口径）
+    let mut top: Vec<&str> = served.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+    top.sort();
+    assert_eq!(top, ["files_considered", "hasProject", "human", "humanRecommended", "items", "next_cursor", "recommendedBytes", "recommendedCount", "scope", "total_bytes", "truncated", "zoneA"]);
+
+    // 项目产物（path 是相对名）字段与旧页 zone A 对齐；全局缓存走枚举层，另测。
     let items = served["items"].as_array().expect("items");
-    let paths: Vec<&str> = items.iter().filter_map(|i| i["path"].as_str()).collect();
+    let names = ["target", "node_modules", "dist", "__pycache__"];
+    let project: Vec<&Value> = items
+        .iter()
+        .filter(|i| i["path"].as_str().map_or(false, |p| names.contains(&p)))
+        .collect();
+    let paths: Vec<&str> = project.iter().filter_map(|i| i["path"].as_str()).collect();
     assert!(paths.contains(&"target"), "{paths:?}");
     assert!(paths.contains(&"node_modules"), "{paths:?}");
-    // 字段与旧页 zone A 对齐（少一个，页面就会显示 undefined）
-    for it in items {
+    for it in &project {
         let mut ks: Vec<&str> = it.as_object().unwrap().keys().map(|x| x.as_str()).collect();
         ks.sort();
-        assert_eq!(
-            ks,
-            vec!["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"],
-            "{it}"
-        );
+        assert_eq!(ks, ["action", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"], "{it}");
         assert_eq!(it["action"], "delete");
         assert_eq!(it["zone"], "a");
         assert_eq!(it["recommended"], true);
     }
-    // target 下 2048 字节要量出来
-    let t = items.iter().find(|i| i["path"] == "target").expect("target item");
+    let t = project.iter().find(|i| i["path"] == "target").expect("target item");
     assert!(t["size_bytes"].as_u64().unwrap_or(0) >= 2048, "{t}");
-    assert!(served["human"].as_str().unwrap().contains("KB"), "{}", served["human"]);
+    // 顶层口径：只算 zone A + delete；target 2048B 非截断必进
+    assert!(served["zoneA"]["bytes"].as_u64().unwrap() >= 2048);
+    assert!(served["zoneA"]["count"].as_u64().unwrap() >= 2);
+    assert!(served["recommendedBytes"].as_u64().unwrap() >= 2048);
+    assert!(served["recommendedCount"].as_u64().unwrap() >= 1);
     assert_eq!(served["scope"], "project");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// R2 · 全局缓存枚举（hermetic）：显式路径，不碰真实 %LOCALAPPDATA% 等；字段含 command/command_note。
+#[test]
+fn global_caches_enumerate_hermetic_fields_and_sizes() {
+    let d = std::env::temp_dir().join(format!("jw-caches-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    let mut roots: Vec<(&engine::CacheSpec, std::path::PathBuf)> = Vec::new();
+    for (i, spec) in engine::CACHES_MAIN.iter().enumerate() {
+        let p = d.join(format!("c{i}"));
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(p.join("f.bin"), vec![0u8; 100 + i]).unwrap();
+        roots.push((spec, p));
+    }
+    let items = engine::enumerate_global_caches(&roots);
+    assert_eq!(items.len(), engine::CACHES_MAIN.len(), "{items:?}");
+    for (it, spec) in items.iter().zip(engine::CACHES_MAIN.iter()) {
+        assert_eq!(it["zone"], "a", "{it}");
+        assert_eq!(it["action"], "delete", "{it}");
+        assert_eq!(it["label"].as_str().unwrap(), spec.label, "{it}");
+        assert!(it["size_bytes"].as_u64().unwrap() > 0, "{it}");
+        assert_eq!(it["recommended"].as_bool().unwrap(), spec.recommended, "{it}");
+        assert!(!it["truncated"].as_bool().unwrap(), "{it}");
+        assert_eq!(it["command"].is_string(), spec.command.is_some(), "{it}");
+        assert_eq!(it["command_note"].is_string(), spec.command_note.is_some(), "{it}");
+    }
+    // 带 command 的项键集固定 10 个（command 在、command_note 无则缺键）
+    let pip = items.iter().find(|i| i["label"] == "pip 下载缓存").expect("pip item");
+    let mut ks: Vec<&str> = pip.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+    ks.sort();
+    assert_eq!(ks, ["action", "command", "consequence", "label", "path", "reason", "recommended", "size_bytes", "truncated", "zone"]);
     let _ = std::fs::remove_dir_all(&d);
 }
 

@@ -194,6 +194,54 @@ fn human_bytes(b: u64) -> String {
     }
 }
 
+/// 全局缓存目录规格：`var`/`rel` 供发现层拼路径，其余供枚举层填 Item。
+#[derive(Clone, Copy)]
+pub struct CacheSpec {
+    pub var: &'static str, pub rel: &'static str,
+    pub label: &'static str, pub reason: &'static str, pub consequence: &'static str,
+    pub recommended: bool, pub command: Option<&'static str>, pub command_note: Option<&'static str>,
+}
+
+/// 全局缓存主体（刀1：Python/Node/Go/Rust/JVM，11 条）；尾 11 条 + zone B/C 后续刀补。
+pub const CACHES_MAIN: &[CacheSpec] = &[
+    CacheSpec { var: "LOCALAPPDATA", rel: "pip/cache", label: "pip 下载缓存", reason: "pip 下载过的 wheel/源码缓存", consequence: "下次装同名包要重新下载（有网就行）", recommended: true, command: Some("python -m pip cache purge"), command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "uv/cache", label: "uv 包缓存", reason: "uv 的解析结果与包归档缓存", consequence: "已装的虚拟环境照常能用；新建环境要重新下载", recommended: true, command: Some("uv cache clean"), command_note: None },
+    CacheSpec { var: "USERPROFILE", rel: ".conda/pkgs", label: "conda 包缓存", reason: "conda 解压过的包副本；已建环境不依赖它", consequence: "以后 conda install 会重新下载", recommended: true, command: Some("conda clean --all --dry-run"), command_note: Some("先看它列出什么。确认没问题，再去掉 --dry-run 真删") },
+    CacheSpec { var: "LOCALAPPDATA", rel: "Python/_cache", label: "运行时下载缓存（安装管理器）", reason: "Python 安装管理器下载过的运行时归档；装好的版本不依赖它", consequence: "装好的运行时不依赖它；下次 python install 新版本要重新下载", recommended: false, command: Some("py --list"), command_note: Some("先看这台机器装了哪些版本，再决定删不删缓存") },
+    CacheSpec { var: "LOCALAPPDATA", rel: "npm-cache", label: "npm 缓存", reason: "npm 下载过的 tarball", consequence: "npm install 重新下载；node_modules 不受影响", recommended: true, command: Some("npm cache clean --force"), command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "Yarn/Cache", label: "Yarn 缓存", reason: "Yarn 的包缓存", consequence: "重新 yarn install 时会再下载", recommended: true, command: Some("yarn cache clean"), command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "pnpm-store", label: "pnpm store", reason: "pnpm 的内容寻址仓库", consequence: "现有项目的 node_modules 是硬链接，删了可能让它们失效；要清用 pnpm store prune", recommended: false, command: Some("pnpm store prune"), command_note: None },
+    CacheSpec { var: "LOCALAPPDATA", rel: "go-build", label: "go build 缓存", reason: "编译中间产物缓存", consequence: "下次 go build/go test 慢一些", recommended: true, command: Some("go clean -cache"), command_note: None },
+    CacheSpec { var: "USERPROFILE", rel: "go/pkg/mod", label: "go 模块缓存", reason: "go mod 下载的依赖源码", consequence: "断网时没法再 build；有网就自动重下", recommended: false, command: Some("go clean -modcache"), command_note: None },
+    CacheSpec { var: "USERPROFILE", rel: ".cargo/registry", label: "cargo registry", reason: "crates.io 下载的包与索引", consequence: "下次 cargo build 要把依赖全下一遍（这块经常几个 GB）", recommended: false, command: None, command_note: None },
+    CacheSpec { var: "USERPROFILE", rel: ".gradle/caches", label: "Gradle 依赖缓存", reason: "Gradle 下载的依赖与 daemon 缓存", consequence: "下次构建需重新下载；已 checkout 的项目要重跑配置", recommended: false, command: None, command_note: None },
+];
+
+/// 发现层（薄，不单测）：env 查找 → 已解析路径，目录不存在就跳过。
+fn discover_caches(specs: &[CacheSpec]) -> Vec<(&CacheSpec, PathBuf)> {
+    specs
+        .iter()
+        .filter_map(|s| std::env::var_os(s.var).map(|b| (s, PathBuf::from(b).join(s.rel))))
+        .filter(|(_, p)| p.is_dir())
+        .collect()
+}
+
+/// 枚举层（hermetic，可单测）：显式路径逐项量体积；空目录跳过，超上限（20k 文件/300ms）显式标 `truncated`。
+pub fn enumerate_global_caches(roots: &[(&CacheSpec, PathBuf)]) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for (spec, path) in roots {
+        let (bytes, truncated) = measure_dir(path, 20_000);
+        if bytes == 0 {
+            continue;
+        }
+        let mut item = serde_json::json!({"path": path.to_string_lossy().to_string(), "label": spec.label, "action": "delete", "zone": "a", "recommended": spec.recommended, "size_bytes": bytes, "reason": spec.reason, "consequence": spec.consequence, "truncated": truncated});
+        if let Some(c) = spec.command { item["command"] = serde_json::json!(c); }
+        if let Some(c) = spec.command_note { item["command_note"] = serde_json::json!(c); }
+        out.push(item);
+    }
+    out
+}
+
 /// 解析一篇笔记（与旧壳 `notes::parse` 同规则；只认 frontmatter 的 5 个键）。
 fn parse_note(text: &str) -> (String, String, String, String, Vec<String>, String) {
     let mut kind = String::new();
@@ -724,10 +772,10 @@ impl Engine {
         })
     }
 
-    /// 清理清点（R2 · clean 换芯，**只清点不删**）：项目里可重新生成的产物目录。
+    /// 清理清点（R2 · clean 换芯，**只清点不删**）：项目可重新生成产物 + 全局缓存主体（刀1）。
     ///
-    /// 这一刀只做"项目内 zones"，全局缓存（回收站/崩溃转储等）仍由旧源负责——
-    /// 清理页是**会删东西**的页，半换源会把总量算错，宁可分两次（理由写进 HANDOFF）。
+    /// 顶层口径与旧页信封一致：`zoneA`/`recommendedBytes`/`recommendedCount` 只算
+    /// zone A + action=delete；被截断的项不进字节合计（不留假精确）。
     pub fn clean_scan(&self) -> Result<serde_json::Value, EngineError> {
         const NAMES: [(&str, &str, &str); 4] = [
             ("target", "Rust 构建产物", "下次 cargo build 会重新编出来"),
@@ -780,7 +828,17 @@ impl Engine {
                 stack.push(e.path());
             }
         }
-        let total: u64 = items.iter().map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        items.extend(enumerate_global_caches(&discover_caches(CACHES_MAIN)));
+
+        // 顶层口径：只算 zone A + action=delete；被截断项不进字节合计（不留假精确）。
+        let za = |i: &&serde_json::Value| i["zone"] == "a" && i["action"] == "delete";
+        let exact = |i: &&serde_json::Value| !i["truncated"].as_bool().unwrap_or(false);
+        let rec = |i: &&serde_json::Value| i["recommended"] == true;
+        let zone_bytes: u64 = items.iter().filter(|i| za(i) && exact(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        let zone_count = items.iter().filter(|i| za(i)).count();
+        let rec_bytes: u64 = items.iter().filter(|i| za(i) && exact(i) && rec(i)).map(|i| i["size_bytes"].as_u64().unwrap_or(0)).sum();
+        let rec_count = items.iter().filter(|i| za(i) && rec(i)).count();
+
         Ok(serde_json::json!({
             "scope": "project",
             "files_considered": files_considered,
@@ -788,9 +846,12 @@ impl Engine {
             "next_cursor": serde_json::Value::Null,
             "hasProject": true,
             "items": items,
-            "total_bytes": total,
-            "human": human_bytes(total),
-            "humanRecommended": human_bytes(total),
+            "zoneA": { "bytes": zone_bytes, "count": zone_count },
+            "recommendedBytes": rec_bytes,
+            "recommendedCount": rec_count,
+            "total_bytes": zone_bytes,
+            "human": human_bytes(zone_bytes),
+            "humanRecommended": human_bytes(rec_bytes),
         }))
     }
 

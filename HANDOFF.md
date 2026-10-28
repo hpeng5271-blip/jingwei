@@ -708,3 +708,17 @@ D:\jingwei-archive-20261024\research-20261024\
 - 坑（已修）：PowerShell 5.1 读**无 BOM 的 UTF-8 .ps1** 会把中文读坏 → 所有 `.ps1` 统一存 UTF-8 **带 BOM**；`review.ps1` 的 `-Files` 支持逗号串，`--debug` 放在子命令之后。
 - 调研：`.pro/exp/out/research-20261028.md`（三表、8 来源、6 行如实标「未核实」）。
 - git：本地 commit `1f9a39f`、`72d7e3d`；push 走代理 `127.0.0.1:23333` 成功（直连 443 失败，已按 best-effort 处理，不再重试）。
+
+### 收尾 · clean 数据面（2026-10-28 12:09，commit 781f1e0）
+
+- **做了什么**：`Engine::clean_scan` 只清点项目内可重生成产物（`target`/`node_modules`/`dist`/`__pycache__`），字段与旧页 zone A 对齐（`path/label/action/zone/recommended/size_bytes/reason/consequence/truncated`）+ §4.4 scope 三件套；体积有上限（20k 文件 / 300ms 截断显式标 `truncated`）。serve 加 `clean_scan`，壳加 `engine_clean_scan`。
+- **没做什么（缺口，必须写清）**：**UI 未切**。clean 页是"会删东西"的页，旧页 13 条里含全局缓存（回收站/崩溃转储/缩略图等 zone b/c），新源只覆盖项目产物；半换源会把"可清理总量"算错，所以这一刀只落数据面，UI 切换与全局缓存移植放下一刀。
+- **判据**：contract **18 tests**（新增 clean 1 条：target 2048B 量出来、字段 9 个齐、`human` 含 KB）；`review-R2-clean.md` = 2 文件 0 error / 0 warning；commit `781f1e0` 已推（23333）。
+- **下一步（接手先做这个）**：① 移植全局缓存清单（对齐旧页 13 条 + `human/humanRecommended/zoneA.count`）；② 一次切 UI（`scanClean`→engine，失败回落旧源并显式 `S.cleanError`）；③ parity 加 `clean.items=13`；④ 截图对账后本页才算绿。
+
+### 收尾 · 全局状态（2026-10-28 12:09）
+
+- git：**12 commit**，最新 `781f1e0`，远端已同步（push 走 `127.0.0.1:23333`；直连 443 不通）。
+- 测试：`cargo test --workspace --all-targets` 最近一次 **275 passed / 0 failed**；`jw lsp-check` 自审 45 文件 **0 errors / 116 warnings**（116 条 backlog，未清）；`cargo build -p jw` warnings **109**（与基线持平）。
+- R2 进度：scan / inspect / run / editor / note / machine 六页已换（inspect 只换 5 组，`findings/hygiene/guide` 仍旧源且 `unavailable` 显式标注）；clean 只到数据面。
+- 已知缺口：① clean UI 与全局 13 项；② inspect 三组（需先移植 rules/guide）；③ 强制杀 GUI 会留 `jw` 孤儿（T7 Job Object）；④ graph 入口还在（R2 要求删）。

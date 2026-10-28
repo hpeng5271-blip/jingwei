@@ -669,6 +669,57 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
         Ok(env_probe_value())
     }
 
+    /// 可编辑文件清单（R2 · editor 换芯）：扁平相对路径（`/` 分隔），由 UI 自己树化。
+    ///
+    /// 与 `files()` 的区别：那个是"某一层目录"，这个是"整棵源码树里能编辑的文件"。
+    /// 走 `NOT_SOURCE_DIRS` 跳过表，别把 target/node_modules 也扫进来。
+    pub fn source_files(&self, limit: usize) -> Result<serde_json::Value, EngineError> {
+        let limit = limit.clamp(1, 2000);
+        let mut files: Vec<String> = Vec::new();
+        let mut walked: u64 = 0;
+        let mut stack: Vec<std::path::PathBuf> = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            if files.len() >= limit {
+                break;
+            }
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                if files.len() >= limit {
+                    break;
+                }
+                let name = e.file_name().to_string_lossy().to_string();
+                let Ok(ft) = e.file_type() else { continue };
+                if ft.is_dir() {
+                    if name.starts_with('.') || is_not_source_dir(&name) {
+                        continue;
+                    }
+                    stack.push(e.path());
+                    continue;
+                }
+                if !ft.is_file() {
+                    continue;
+                }
+                walked += 1;
+                let rel = e
+                    .path()
+                    .strip_prefix(&self.root)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| name.clone());
+                files.push(rel);
+            }
+        }
+        files.sort();
+        let truncated = files.len() >= limit;
+        Ok(serde_json::json!({
+            "source": "fs",
+            "scope": "module",
+            "files_considered": walked,
+            "truncated": truncated,
+            "next_cursor": if truncated { serde_json::json!(limit as u64) } else { serde_json::Value::Null },
+            "files": files,
+        }))
+    }
+
     /// 四步计划（R2 · run 换芯）：装依赖 → 构建 → 测试 → 运行。
     ///
     /// **只给计划，不执行**：执行仍走壳里的 launch（下一刀再接）。缺命令的步给 `available:false`

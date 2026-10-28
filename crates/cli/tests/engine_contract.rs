@@ -386,6 +386,40 @@ fn serve_scan_matches_facade() {
 
 
 
+
+/// R2 · editor 换芯：文件清单要扁平、带 `/`、跳过 target/node_modules，且带 scope 三件套。
+#[test]
+fn serve_source_files_matches_facade_and_skips_noise() {
+    let d = fixture("srcfiles");
+    std::fs::create_dir_all(d.join("src/nested")).unwrap();
+    std::fs::write(d.join("src/nested/c.rs"), "pub fn c() {}\n").unwrap();
+    std::fs::create_dir_all(d.join("target/debug")).unwrap();
+    std::fs::write(d.join("target/debug/junk.rs"), "x\n").unwrap();
+    std::fs::create_dir_all(d.join("node_modules/x")).unwrap();
+    std::fs::write(d.join("node_modules/x/i.js"), "x\n").unwrap();
+    parse_fixture(&d);
+
+    let e = engine::Engine::open(&d).expect("open");
+    let facade = e.source_files(2000).expect("source_files");
+    let req = serde_json::json!({"id": 1, "method": "source_files", "limit": 2000});
+    let resp = serve_once(&d, &req);
+    assert_eq!(resp["ok"], true, "{resp}");
+    let served = strip(resp["result"].clone());
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
+
+    let files: Vec<&str> = served["files"].as_array().expect("files").iter().filter_map(|x| x.as_str()).collect();
+    assert!(files.contains(&"src/a.rs"), "{files:?}");
+    assert!(files.contains(&"src/nested/c.rs"), "递归收子目录：{files:?}");
+    assert!(!files.iter().any(|f| f.starts_with("target/")), "target 不该进来：{files:?}");
+    assert!(!files.iter().any(|f| f.contains("node_modules")), "node_modules 不该进来：{files:?}");
+    assert!(files.iter().all(|f| !f.contains('\\')), "路径统一用 /：{files:?}");
+
+    assert_eq!(served["scope"], "module");
+    assert_eq!(served["truncated"], false);
+    assert!(served["files_considered"].as_u64().unwrap_or(0) > 0);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// R2 · run 换芯：四步计划必须显式给"有没有这一步/为什么没有"。
 #[test]
 fn serve_run_plan_matches_facade_and_marks_missing_steps() {

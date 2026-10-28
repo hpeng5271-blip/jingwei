@@ -443,11 +443,14 @@ pub fn check(root: &Path, files: &[PathBuf], timeout: Duration) -> Result<CheckR
         .iter()
         .map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()))
         .collect();
+    // 只认**规范化后完全相等**的路径：之前还留了个 `ends_with(文件名)` 的兜底，
+    // 结果别的 crate 的 `main.rs` 也被算进来（审查报告里混进 control/main.rs 的警告）。
     report.diagnostics.retain(|d| {
-        let dp = PathBuf::from(&d.file);
-        wanted_abs
-            .iter()
-            .any(|w| std::fs::canonicalize(w).map(|c| c == dp).unwrap_or(false) || dp.ends_with(w.file_name().unwrap_or_default()))
+        let dp = std::fs::canonicalize(&d.file).unwrap_or_else(|_| PathBuf::from(&d.file));
+        wanted_abs.iter().any(|w| {
+            let wc = std::fs::canonicalize(w).unwrap_or_else(|_| w.clone());
+            wc == dp
+        })
     });
     // RA 会把同一条诊断拆成多条（message 多行、附带 `#[warn(...)]` 代码片段），
     // 原始计数会虚高一个数量级。这里按「文件:行:列:级别」去重，只留第一条，message 取首行。

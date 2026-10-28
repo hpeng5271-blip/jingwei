@@ -363,6 +363,7 @@ fn serve_scan_matches_facade() {
         assert_eq!(
             keys,
             vec![
+                "age_days",
                 "files",
                 "files_truncated",
                 "has_contract",
@@ -372,10 +373,63 @@ fn serve_scan_matches_facade() {
                 "kinds",
                 "markers",
                 "name",
-                "path"
+                "path",
+                "touched"
             ]
         );
+        // 卡片「最近改动 N 天前」靠这两个字段；缺了就会显示 undefined
+        assert!(it["touched"].as_u64().unwrap_or(0) > 0, "touched 要有值：{it}");
         assert!(it.get("contract").is_none(), "不许出现 T6 假字段: {it}");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+
+/// R2 · inspect 换芯第一刀：5 组已迁字段 + scope 三件套；未迁的三组必须**显式列出**。
+#[test]
+fn serve_inspect_matches_facade_and_keeps_keys() {
+    let d = fixture("inspect");
+    // 给 fixture 一份契约：run/install/test 三个字段才有值可比
+    std::fs::write(
+        d.join("env.contract.json"),
+        r#"{"name":"fx","commands":{"run":"cargo run","install":"cargo fetch","test":"cargo test"}}"#,
+    )
+    .unwrap();
+    parse_fixture(&d);
+
+    let e = engine::Engine::open(&d).expect("open");
+    let facade = e.inspect().expect("inspect");
+    let req = serde_json::json!({"id": 1, "method": "inspect"});
+    let resp = serve_once(&d, &req);
+    assert_eq!(resp["ok"], true, "{resp}");
+    let served = strip(resp["result"].clone());
+    assert_eq!(served, facade, "serve 与 facade 必须同值");
+
+    // 5 组已迁：路径 / 类型 / 最近改动 / 怎么跑 / 契约
+    assert_eq!(served["root"].as_str().unwrap().is_empty(), false);
+    assert_eq!(served["run_command"], "cargo run");
+    assert_eq!(served["install_command"], "cargo fetch");
+    assert_eq!(served["test_command"], "cargo test");
+    assert_eq!(served["contract_name"], "fx");
+    assert!(served["recent"]["days"].as_u64().is_some(), "最近改动要给天数：{}", served["recent"]);
+    assert_eq!(served["has_test"], true);
+
+    // §4.4 三件套
+    assert_eq!(served["scope"], "project");
+    assert!(served["files_considered"].as_u64().is_some());
+    assert_eq!(served["truncated"], false);
+    assert!(served["next_cursor"].is_null());
+
+    // 未迁的三组必须明说，不许静默缺席
+    let un: Vec<&str> = served["unavailable"]
+        .as_array()
+        .expect("unavailable")
+        .iter()
+        .filter_map(|x| x.as_str())
+        .collect();
+    assert_eq!(un, vec!["findings", "hygiene", "guide"]);
+    for k in ["findings", "hygiene", "guide"] {
+        assert!(served.get(k).is_none(), "还没迁的字段不该出现假值：{k}");
     }
     let _ = std::fs::remove_dir_all(&d);
 }

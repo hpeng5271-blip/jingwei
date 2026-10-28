@@ -3684,6 +3684,10 @@ fn cmd_serve(root: &PathBuf, no_subscribe: bool) -> anyhow::Result<ExitCode> {
                 }
                 Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),
             },
+            "inspect" => match engine::Engine::open(&root).and_then(|e| e.inspect()) {
+                Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),
+                Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),
+            },
             "projects" => match engine::Engine::open(&root).and_then(|e| e.projects()) {
                 Ok(v) => serde_json::json!({"v": 1, "id": id, "ok": true, "result": v}),
                 Err(e) => serde_json::json!({"v": 1, "id": id, "ok": false, "error": e.to_string()}),

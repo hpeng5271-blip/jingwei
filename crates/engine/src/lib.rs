@@ -155,6 +155,11 @@ fn count_sources(dir: &Path, cap: usize) -> (usize, bool) {
 }
 
 
+/// `Some(_)` → true（has_test / has_install 这类"有没有"的判据）。
+fn v_has(v: &Option<String>) -> bool {
+    v.is_some()
+}
+
 /// 旧 NOT_SOURCE_DIRS（util/scan.rs，15 项）+ `.` 开头（调用方另判）。
 fn is_not_source_dir(name: &str) -> bool {
     let n = name.to_lowercase();
@@ -294,9 +299,26 @@ pub fn scan_dir(parent_path: &Path, depth: u32, limit: usize) -> Result<serde_js
         let (markers, kind, has_git, has_contract, has_index) = probe_project(p);
         let (files, files_truncated) = count_sources(p, 2000);
         let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        // 卡片上的「最近改动 N 天前」：scan 必须给 touched/age_days，
+        // 否则前端只能显示 "undefined 天前"（换芯时踩过）。
+        let touched = std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|mt| mt.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let now_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(touched);
+        let age_days = if touched == 0 { serde_json::Value::Null } else {
+            serde_json::json!(now_s.saturating_sub(touched) / 86_400)
+        };
         items.push(serde_json::json!({
             "name": name,
             "path": p.to_string_lossy(),
+            "touched": touched,
+            "age_days": age_days,
             "markers": markers,
             "kind": kind,
             "kinds": root_kinds(p),
@@ -645,6 +667,111 @@ pub fn scan(&self, parent: &str, depth: u32, limit: usize) -> Result<serde_json:
     /// 工具链探测（serve `env_probe` 同构）：只读，跑一次版本命令定性。
     pub fn env_probe(&self) -> Result<serde_json::Value, EngineError> {
         Ok(env_probe_value())
+    }
+
+    /// 项目详情（R2 · inspect 换芯第一刀）：**只迁这 5 组**，`unavailable` 明说还没迁的部分。
+    ///
+    /// 已迁：路径 / 类型 / 最近改动 / 怎么跑 / 契约（+ §4.4 scope 三件套）。
+    /// 未迁：待处理(findings) / 卫生(hygiene) / 理由句(guide)——它们依赖 rules/guide 两套移植，
+    /// 先留旧源，UI 侧按字段兜底，**不许静默变空**。
+    pub fn inspect(&self) -> Result<serde_json::Value, EngineError> {
+        let root = self.root.clone();
+        let exists = root.is_dir();
+        let kinds = if exists { root_kinds(&root) } else { Vec::new() };
+        let (markers, kind, has_git, has_contract, has_index) = if exists {
+            probe_project(&root)
+        } else {
+            (Vec::new(), String::new(), false, false, false)
+        };
+
+        // 最近改动：根目录一层文件的最大 mtime（"今天/昨天"这种量级够用；精确到天）
+        let mut newest: Option<u64> = None;
+        if exists {
+            if let Ok(rd) = std::fs::read_dir(&root) {
+                for e in rd.flatten() {
+                    let Ok(ft) = e.file_type() else { continue };
+                    if !ft.is_file() {
+                        continue;
+                    }
+                    if let Ok(md) = e.metadata() {
+                        if let Ok(mt) = md.modified() {
+                            if let Ok(d) = mt.duration_since(std::time::UNIX_EPOCH) {
+                                let s = d.as_secs();
+                                newest = Some(newest.map_or(s, |n| n.max(s)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let recent_days = newest.map(|s| now.saturating_sub(s) / 86_400);
+
+        // 契约：直接读 env.contract.json（与旧壳同一份文件；读不了就如实给 error）
+        let cpath = root.join("env.contract.json");
+        let (cname, cerror, run_cmd, install, build, test) = if cpath.is_file() {
+            match std::fs::read_to_string(&cpath)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            {
+                Some(v) => {
+                    let cmd = |k: &str| v["commands"][k].as_str().map(|s| s.to_string());
+                    (
+                        v["name"].as_str().map(|s| s.to_string()),
+                        None,
+                        cmd("run"),
+                        cmd("install"),
+                        cmd("build"),
+                        cmd("test"),
+                    )
+                }
+                None => (
+                    None,
+                    Some("env.contract.json 解析失败".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            }
+        } else {
+            (None, None, None, None, None, None)
+        };
+
+        // files_considered：库里登记的源文件数（没有库也没关系，0 是事实不是猜）
+        let files_considered = self.store.timeline_file_stats().map(|(_, cur, _)| cur).unwrap_or(0) as u64;
+
+        // 展示用根：canonicalize 一下，避免同一个项目因为 "." / 相对路径在卡片上显示成两样
+        let display_root = clean_path(&std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone()));
+        Ok(serde_json::json!({
+            "root": display_root,
+            "exists": exists,
+            "kind": kind,
+            "kinds": kinds,
+            "markers": markers,
+            "has_git": has_git,
+            "has_contract": has_contract,
+            "has_index": has_index,
+            // §4.4 scope 三件套（inspect 是单项目范围）
+            "scope": "project",
+            "files_considered": files_considered,
+            "truncated": false,
+            "next_cursor": serde_json::Value::Null,
+            "recent": { "days": recent_days, "at": newest },
+            "run_command": run_cmd,
+            "install_command": install,
+            "build_command": build,
+            "test_command": test,
+            "has_test": v_has(&test),
+            "has_install": v_has(&install),
+            "contract_name": cname,
+            "contract_error": cerror,
+            // 明确"这部分还没迁"，UI 拿不到时必须回落到旧源，不许静默变空
+            "unavailable": ["findings", "hygiene", "guide"],
+        }))
     }
 
     pub fn projects(&self) -> Result<serde_json::Value, EngineError> {
